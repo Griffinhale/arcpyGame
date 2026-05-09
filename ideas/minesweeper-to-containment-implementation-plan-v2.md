@@ -597,19 +597,19 @@ Rules:
 
 ## 7.2 Selection contract
 
-For selection-based actions:
+For selection-based actions, use the Pro 3.6 spike result as the default contract:
 
-1. Receive a `GPFeatureLayer`.
-2. Read selected OIDs/FIDs from `Describe(layer).FIDSet`.
-3. Normalize both classic and `arcpy.da.Describe` forms:
+1. Receive a selected `GPFeatureLayer`.
+2. Primary path: open `arcpy.da.SearchCursor(layer, ...)` or `arcpy.da.UpdateCursor(layer, ...)` directly over the layer; the spike confirmed these cursors respect map-layer selection.
+3. Read stable `cell_id`s from those selected rows before calling rule logic.
+4. Validate selection count and selected-cell legality.
+5. Pass only `cell_id`s into game rules.
+6. Diagnostics path: log selected count plus classic `Describe(layer).FIDSet` / `arcpy.da.Describe(layer)['FIDSet']` values for debugging.
+7. Fallback path: normalize FIDSet forms and query by explicit OID only if cursor-over-layer behavior is unavailable or a diagnostic action needs it:
    - `None`
    - empty string
    - semicolon-delimited string
    - list/tuple of IDs
-4. Query selected rows by OID.
-5. Resolve to stable `cell_id`.
-6. Validate selection count and selected-cell legality.
-7. Pass only `cell_id`s into game rules.
 
 Validation cases:
 
