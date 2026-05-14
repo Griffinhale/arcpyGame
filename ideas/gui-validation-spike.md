@@ -2,7 +2,7 @@
 
 Date: 2026-05-14
 
-Purpose: validate whether an ArcGIS Pro geoprocessing tool can safely hand off to a short-lived Python GUI and still support the planned game mechanics for Survey Sweeper, Containment Commander, and Bufferlands-style powers.
+Purpose: validate whether an ArcGIS Pro geoprocessing tool can safely hand off to a short-lived Python GUI and still support the planned game mechanics for Survey Sweeper, Containment Commander, Bufferlands-style powers, and reopened novelty concepts.
 
 Implemented toolbox:
 
@@ -23,6 +23,7 @@ Scenario-specific GUI commands:
 - Survey Sweeper: `Reveal / Scout`, `Flag / Mark`, `Show Score`
 - Containment Commander: `Scout`, `Treat / Clear`, `Place Barrier`, `Resolve Turn`, `Show Score`
 - Bufferlands Stretch: `Buffer Defense`, `Spatial Join Harvest / Score`, `Suppress Hotspot`, `Show Score`
+- Novelty Reopen: `Play Buffer Card`, `Play Spatial Join Card`, `Place Guess Point`, `Annex Adjacent District`, `Show Dashboard`
 
 ### 2. Planned feature readiness
 
@@ -34,9 +35,24 @@ Checks include:
 - positive radius for Bufferlands buffer powers,
 - Support Layer presence for spatial-join scoring,
 - optional support-layer fields: `asset_value`, `critical_asset`,
+- optional drawn `Placement Feature` / Feature Set input,
 - first Containment barrier limit warning when more than two cells are selected.
 
-### 3. Live GUI-to-map update
+### 3. Novelty reopen control panel
+
+`Open Novelty Control Panel` opens a Tkinter modal for the broad GUI-era concept reopen.
+
+It validates the newly interesting, GUI-dependent ideas:
+
+- fixed card-like action loadout for Spatial Tactics / GP Card Battler,
+- selected-cell + radius readiness for Bufferlands-style cards,
+- Support Layer readiness for Spatial Join scoring cards,
+- drawn placement readiness for GeoGuessr-style guesses and future treatment/barrier placement,
+- dashboard viability for AP/turn/cooldown/last-command presentation.
+
+It records the chosen command to `UICommand` and includes `placement_feature` and `concept_reopen` metadata in `payload_json`. It does not apply final game rules.
+
+### 4. Live GUI-to-map update
 
 `Live Preview Update` opens a Tkinter modal with preview buttons.
 
@@ -48,7 +64,7 @@ Each preview button:
 
 Manual observation is required: while the modal remains open, inspect whether the map redraws immediately, only after dialog close, or not reliably.
 
-### 4. GUI new/load session flow
+### 5. GUI new/load session flow
 
 `New Game / Load Game GUI` opens a Tkinter modal for session control.
 
@@ -64,7 +80,7 @@ It writes/updates `GameSession` rows with:
 
 The spike does not reset board features. It validates durable session state and layer-reference safety before the final game controller owns board setup.
 
-### 5. Crash and recovery behavior
+### 6. Crash and recovery behavior
 
 Two actions intentionally fail:
 
@@ -79,7 +95,7 @@ Then run:
 
 It marks `created` or `applying` commands as `abandoned`, increments `attempt_count`, and records recovery metadata.
 
-### 6. Idempotent command apply
+### 7. Idempotent command apply
 
 `Apply Last Command Idempotency` applies a generated command id to selected cells in `last_command_id`, then applies the same command id again.
 
@@ -89,7 +105,7 @@ Expected result:
 - second apply skips cells already carrying that command id,
 - `UICommand.payload_json` records applied/skipped counts.
 
-### 7. Containment dry-run
+### 8. Containment dry-run
 
 `Dry Run Containment Mechanics` validates planned selected-cell Containment features:
 
@@ -101,7 +117,7 @@ Expected result:
 
 It records selection count, board count, and per-feature ready/blocked status.
 
-### 8. Bufferlands dry-run
+### 9. Bufferlands dry-run
 
 `Dry Run Bufferlands Mechanics` validates the planned Bufferlands-style geoprocessing powers.
 
@@ -118,7 +134,7 @@ It records:
 - spatial join count,
 - any errors or skipped checks.
 
-### 9. Lock/edit-state behavior
+### 10. Lock/edit-state behavior
 
 `Test Lock / Edit State` checks:
 
@@ -128,7 +144,7 @@ It records:
 
 Run this with normal selection, with the attribute table open, and during any pending-edit situations worth testing.
 
-### 10. Close/reopen persistence
+### 11. Close/reopen persistence
 
 `Close Reopen Persistence Check` validates whether command/session state survives project close/reopen.
 
@@ -197,6 +213,19 @@ Created only by specific validation actions:
 
 These are not final gameplay fields.
 
+### `Placement Feature`
+
+Optional `GPFeatureRecordSetLayer` input used by the novelty reopen checks.
+
+The spike logs:
+
+- whether a placement feature was supplied,
+- feature count,
+- shape type,
+- field names if available.
+
+Manual observation is still required to judge whether drawing/editing the Feature Set feels usable enough for GeoGuessr, Buffer Defense placement, or treatment/barrier placement.
+
 ## Recommended Manual Smoke Sequence
 
 Use an existing board layer from the original feasibility spike or a small polygon layer with selected features.
@@ -205,15 +234,17 @@ Use an existing board layer from the original feasibility spike or a small polyg
 2. Run `Ping GUI Environment`.
 3. Select one or more board cells and run `Open Command Dialog`.
 4. Run `Validate Scenario Inputs` for all scenario modes.
-5. Run `Live Preview Update`; click preview buttons and inspect map redraw timing.
-6. Run `New Game / Load Game GUI`; create a session, then load it.
-7. Run both crash simulation actions; then run `Recover Pending Commands`.
-8. Run `Apply Last Command Idempotency` on selected board cells.
-9. Run `Dry Run Containment Mechanics`.
-10. Run `Dry Run Bufferlands Mechanics` with a positive radius and, if available, an Assets/RiskSources support layer.
-11. Run `Test Lock / Edit State` with the attribute table open.
-12. Save, close, reopen, and run `Close Reopen Persistence Check`.
-13. Run `Describe Last UI Command` after any action to inspect the newest command row.
+5. Set `Scenario Mode = Novelty Reopen`, provide selected board cells, a positive radius, and an optional Support Layer; run `Open Novelty Control Panel`.
+6. If ArcGIS Pro allows it, draw or provide a `Placement Feature` and choose `Place Guess Point` from the novelty panel.
+7. Run `Live Preview Update`; click preview buttons and inspect map redraw timing.
+8. Run `New Game / Load Game GUI`; create a session, then load it.
+9. Run both crash simulation actions; then run `Recover Pending Commands`.
+10. Run `Apply Last Command Idempotency` on selected board cells.
+11. Run `Dry Run Containment Mechanics`.
+12. Run `Dry Run Bufferlands Mechanics` with a positive radius and, if available, an Assets/RiskSources support layer.
+13. Run `Test Lock / Edit State` with the attribute table open.
+14. Save, close, reopen, and run `Close Reopen Persistence Check`.
+15. Run `Describe Last UI Command` after any action to inspect the newest command row.
 
 ## Interpretation
 
@@ -223,3 +254,4 @@ The key architecture decision is live update behavior:
 - If redraw only appears after dialog close, treat the GUI as a command chooser and keep the final game loop as short GP executions.
 - If crashes leave durable `created` or `applying` rows recoverable, command-table recovery is viable for the final controller.
 - If Bufferlands dry-runs are slow or flaky, keep Bufferlands powers as demo/stretch actions instead of core win/loss mechanics.
+- If `Open Novelty Control Panel` feels clear and `Placement Feature` logging works, the strongest reopened direction is the hybrid Spatial Tactics / Containment board described in `ideas/gui-era-concept-reopen.md`.
