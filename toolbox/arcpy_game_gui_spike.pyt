@@ -46,12 +46,14 @@ P_SUPPORT_LAYER = 2
 P_MODE = 3
 P_ACTION = 4
 P_RADIUS = 5
-P_OUTPUT = 6
+P_PLACEMENT = 6
+P_OUTPUT = 7
 
 ACTIONS = [
     "Ping GUI Environment",
     "Open Command Dialog",
     "Validate Scenario Inputs",
+    "Open Novelty Control Panel",
     "Live Preview Update",
     "New Game / Load Game GUI",
     "Simulate Crash After Command Insert",
@@ -69,6 +71,7 @@ SCENARIO_MODES = [
     "Survey Sweeper",
     "Containment Commander",
     "Bufferlands Stretch",
+    "Novelty Reopen",
 ]
 
 SURVEY_COMMANDS = [
@@ -92,6 +95,14 @@ BUFFERLANDS_COMMANDS = [
     "Show Score",
 ]
 
+NOVELTY_REOPEN_COMMANDS = [
+    "Play Buffer Card",
+    "Play Spatial Join Card",
+    "Place Guess Point",
+    "Annex Adjacent District",
+    "Show Dashboard",
+]
+
 TARGETED_COMMANDS = {
     "Reveal / Scout",
     "Flag / Mark",
@@ -100,20 +111,29 @@ TARGETED_COMMANDS = {
     "Place Barrier",
     "Buffer Defense",
     "Suppress Hotspot",
+    "Play Buffer Card",
+    "Annex Adjacent District",
 }
 
 RADIUS_COMMANDS = {
     "Buffer Defense",
     "Suppress Hotspot",
+    "Play Buffer Card",
 }
 
 SUPPORT_LAYER_COMMANDS = {
     "Spatial Join Harvest / Score",
+    "Play Spatial Join Card",
 }
 
 BOARD_LAYER_COMMANDS = {
     "Resolve Turn",
     "Spatial Join Harvest / Score",
+    "Play Spatial Join Card",
+}
+
+PLACEMENT_COMMANDS = {
+    "Place Guess Point",
 }
 
 OPTIONAL_ASSET_FIELDS = {
@@ -376,6 +396,8 @@ def commands_for_mode(scenario_mode):
         return list(CONTAINMENT_COMMANDS)
     if scenario_mode == "Bufferlands Stretch":
         return list(BUFFERLANDS_COMMANDS)
+    if scenario_mode == "Novelty Reopen":
+        return list(NOVELTY_REOPEN_COMMANDS)
     return list(SURVEY_COMMANDS)
 
 
@@ -415,6 +437,40 @@ def collect_layer_summary(layer, layer_value_text, messages, tag):
     return context
 
 
+def collect_placement_context(placement_layer, placement_value_text, messages):
+    """Return enough drawn-placement context to validate Feature Set feasibility."""
+    context = {
+        "provided": bool(placement_layer or placement_value_text),
+        "value_text": _value_text(placement_value_text),
+        "count": None,
+        "shape_type": "",
+        "fields": [],
+    }
+    source = placement_layer or placement_value_text
+    if not source:
+        _log(messages, "PLACEMENT", "no placement feature supplied")
+        return context
+
+    try:
+        desc = arcpy.Describe(source)
+        context["shape_type"] = getattr(desc, "shapeType", "") or ""
+    except Exception as exc:
+        _log_warn(messages, "PLACEMENT", "Describe failed: {0}".format(exc))
+
+    try:
+        context["fields"] = [field.name for field in arcpy.ListFields(source)]
+    except Exception as exc:
+        _log_warn(messages, "PLACEMENT", "ListFields failed: {0}".format(exc))
+
+    try:
+        context["count"] = int(arcpy.management.GetCount(source)[0])
+        _log(messages, "PLACEMENT", "GetCount(placement) = {0}".format(context["count"]))
+    except Exception as exc:
+        _log_warn(messages, "PLACEMENT", "GetCount failed: {0}".format(exc))
+
+    return context
+
+
 def radius_context(radius_value):
     context = {
         "value": None,
@@ -432,11 +488,12 @@ def radius_context(radius_value):
     return context
 
 
-def validate_planned_command(command_name, selection_context, support_context, radius_info):
+def validate_planned_command(command_name, selection_context, support_context, radius_info, placement_context=None):
     """Validate the inputs needed by the future scenario feature, without executing it."""
     errors = []
     warnings = []
     checks = []
+    placement_context = placement_context or {}
 
     selected_count = len(selection_context.get("selected_oids") or [])
     game_layer_name = selection_context.get("target_layer") or ""
@@ -470,11 +527,21 @@ def validate_planned_command(command_name, selection_context, support_context, r
                     )
                 )
 
+    if command_name in PLACEMENT_COMMANDS:
+        checks.append("placement feature")
+        if not placement_context.get("provided"):
+            errors.append("provide a Placement Feature or drawn Feature Set")
+        elif placement_context.get("count") in (None, 0):
+            errors.append("draw or provide at least one placement feature")
+
     if command_name == "Place Barrier" and selected_count > 2:
         warnings.append("planned first Containment version expects up to 2 barrier cells")
 
     if command_name == "Suppress Hotspot":
         warnings.append("planned as optional stretch; this spike only records command readiness")
+
+    if command_name in NOVELTY_REOPEN_COMMANDS:
+        warnings.append("novelty reopen command records readiness only; no final game rule is applied")
 
     ready = not errors
     return {
@@ -701,6 +768,102 @@ def open_tk_command_dialog(context, scenario_mode, support_context, radius_info)
     return result
 
 
+def open_novelty_control_panel(context, support_context, placement_context, radius_info):
+    """Open a compact control panel for the GUI-era concept reopen."""
+    try:
+        import tkinter as tk
+        from tkinter import ttk
+    except Exception as exc:
+        raise RuntimeError("tkinter is not available in this ArcGIS Pro Python environment: {0}".format(exc))
+
+    selected_cells = context.get("target_cell_ids") or []
+    selected_oids = context.get("selected_oids") or []
+    support_name = support_context.get("layer_name") or "(none)"
+    placement_count = placement_context.get("count")
+    radius_value = radius_info.get("value")
+    radius_text = "(not set)" if radius_value is None else str(radius_value)
+    if selected_cells:
+        selected_text = "{0} cell(s): {1}".format(len(selected_cells), ", ".join(selected_cells[:8]))
+    elif selected_oids:
+        selected_text = "{0} selected OID(s)".format(len(selected_oids))
+    else:
+        selected_text = "No selected targets"
+    if placement_count is None:
+        placement_text = "not supplied" if not placement_context.get("provided") else "supplied, count unknown"
+    else:
+        placement_text = "{0} feature(s), {1}".format(placement_count, placement_context.get("shape_type") or "unknown shape")
+
+    result = {
+        "command_name": "Cancel",
+        "status": "cancelled",
+    }
+
+    root = tk.Tk()
+    root.title("ArcPy Game Novelty Reopen")
+    root.resizable(False, False)
+    try:
+        root.attributes("-topmost", True)
+    except Exception:
+        pass
+
+    frame = ttk.Frame(root, padding=12)
+    frame.grid(row=0, column=0, sticky="nsew")
+    ttk.Label(frame, text="Novelty Reopen Control Panel", font=("Segoe UI", 12, "bold")).grid(
+        row=0, column=0, columnspan=3, sticky="w", pady=(0, 8)
+    )
+
+    metrics = [
+        ("Targets", selected_text),
+        ("Support layer", support_name),
+        ("Placement", placement_text),
+        ("Amount / Radius", radius_text),
+        ("Dashboard", "AP=2, turn=spike, cooldowns=placeholder"),
+    ]
+    for row_idx, (name, value) in enumerate(metrics, start=1):
+        ttk.Label(frame, text=name + ":").grid(row=row_idx, column=0, sticky="nw", padx=8, pady=4)
+        ttk.Label(frame, text=value, wraplength=520).grid(row=row_idx, column=1, columnspan=2, sticky="w", padx=8, pady=4)
+
+    ttk.Separator(frame).grid(row=6, column=0, columnspan=3, sticky="ew", pady=(8, 8))
+    ttk.Label(frame, text="Reopened concept action").grid(row=7, column=0, sticky="w", padx=8)
+    ttk.Label(frame, text="Concept").grid(row=7, column=1, sticky="w", padx=8)
+    ttk.Label(frame, text="Required context").grid(row=7, column=2, sticky="w", padx=8)
+
+    def choose(command_name, status="created"):
+        result["command_name"] = command_name
+        result["status"] = status
+        try:
+            root.grab_release()
+        except Exception:
+            pass
+        root.destroy()
+
+    rows = [
+        ("Play Buffer Card", "Spatial Tactics / Bufferlands", "selected target + positive radius"),
+        ("Play Spatial Join Card", "Spatial Tactics scoring", "game layer + support layer"),
+        ("Place Guess Point", "GeoGuessr / placement flow", "drawn Placement Feature"),
+        ("Annex Adjacent District", "Census tactics", "selected target"),
+        ("Show Dashboard", "GUI viability", "none"),
+    ]
+    for offset, (command_name, concept, requirements) in enumerate(rows, start=8):
+        ttk.Button(
+            frame,
+            text=command_name,
+            command=lambda value=command_name: choose(value, "created"),
+        ).grid(row=offset, column=0, sticky="ew", padx=8, pady=3)
+        ttk.Label(frame, text=concept, wraplength=180).grid(row=offset, column=1, sticky="w", padx=8, pady=3)
+        ttk.Label(frame, text=requirements, wraplength=220).grid(row=offset, column=2, sticky="w", padx=8, pady=3)
+
+    buttons = ttk.Frame(frame)
+    buttons.grid(row=13, column=0, columnspan=3, sticky="e", pady=(12, 0))
+
+    ttk.Button(buttons, text="Cancel", command=lambda: choose("Cancel", "cancelled")).pack(side="left")
+    root.protocol("WM_DELETE_WINDOW", lambda: choose("Cancel", "cancelled"))
+    root.update_idletasks()
+    root.grab_set()
+    root.wait_window()
+    return result
+
+
 def insert_ui_command(table_path, command):
     fields = [
         "command_id",
@@ -792,6 +955,7 @@ def build_command_payload(
     radius_info,
     dialog_result,
     validation=None,
+    placement_context=None,
 ):
     command_name = dialog_result.get("command_name") or "Cancel"
     status = dialog_result.get("status") or "cancelled"
@@ -802,7 +966,7 @@ def build_command_payload(
         message = "GUI dialog cancelled; no gameplay command requested."
     else:
         if validation is None:
-            validation = validate_planned_command(command_name, context, support_context, radius_info)
+            validation = validate_planned_command(command_name, context, support_context, radius_info, placement_context)
         if validation.get("errors"):
             status = "error"
             message = "{0} blocked: {1}.".format(
@@ -842,6 +1006,7 @@ def build_command_payload(
         "selected_oid_count": len(selected_oids),
         "support_layer": support_context,
         "radius": radius_info,
+        "placement_feature": placement_context or {},
         "feature_validation": validation or {},
         "selected_rows_read": context.get("selected_rows_read") or 0,
         "cell_id_field_present": bool(context.get("cell_id_field_present")),
@@ -1239,6 +1404,14 @@ class GUICommandSpike(object):
         )
         p_radius.value = 150.0
 
+        p_placement = arcpy.Parameter(
+            displayName="Placement Feature (optional drawn input)",
+            name="placement_feature",
+            datatype="GPFeatureRecordSetLayer",
+            parameterType="Optional",
+            direction="Input",
+        )
+
         p_output = arcpy.Parameter(
             displayName="Output UI Command Table",
             name="output_ui_command_table",
@@ -1254,6 +1427,7 @@ class GUICommandSpike(object):
             p_mode,
             p_action,
             p_radius,
+            p_placement,
             p_output,
         ]
 
@@ -1268,13 +1442,18 @@ class GUICommandSpike(object):
         scenario_validation = action in (
             "Open Command Dialog",
             "Validate Scenario Inputs",
+            "Open Novelty Control Panel",
             "Dry Run Bufferlands Mechanics",
         )
         bufferlands_context = action == "Dry Run Bufferlands Mechanics" or (
             scenario_validation and mode == "Bufferlands Stretch"
         )
-        parameters[P_RADIUS].enabled = bufferlands_context
-        parameters[P_SUPPORT_LAYER].enabled = bufferlands_context
+        novelty_context = action == "Open Novelty Control Panel" or (
+            scenario_validation and mode == "Novelty Reopen"
+        )
+        parameters[P_RADIUS].enabled = bufferlands_context or novelty_context
+        parameters[P_SUPPORT_LAYER].enabled = bufferlands_context or novelty_context
+        parameters[P_PLACEMENT].enabled = novelty_context
         return
 
     def updateMessages(self, parameters):
@@ -1286,6 +1465,7 @@ class GUICommandSpike(object):
         scenario_validation = action in (
             "Open Command Dialog",
             "Validate Scenario Inputs",
+            "Open Novelty Control Panel",
             "Live Preview Update",
             "Apply Last Command Idempotency",
             "Dry Run Containment Mechanics",
@@ -1304,16 +1484,21 @@ class GUICommandSpike(object):
             support_param.setWarningMessage(
                 "Spatial Join Harvest / Score will be blocked without an Assets or RiskSources support layer."
             )
+        elif (action == "Open Novelty Control Panel" or mode == "Novelty Reopen") and not support_param.value:
+            support_param.setWarningMessage(
+                "Spatial Join card readiness will be blocked without a Support Layer."
+            )
         else:
             support_param.clearMessage()
 
-        if action == "Dry Run Bufferlands Mechanics" and radius_param.value is not None:
+        radius_context_needed = action == "Dry Run Bufferlands Mechanics" or action == "Open Novelty Control Panel" or mode == "Novelty Reopen"
+        if radius_context_needed and radius_param.value is not None:
             try:
                 radius = float(radius_param.value)
             except (TypeError, ValueError):
                 radius = None
             if radius is not None and radius <= 0:
-                radius_param.setErrorMessage("Amount / Radius must be greater than 0 for Bufferlands features.")
+                radius_param.setErrorMessage("Amount / Radius must be greater than 0 for buffer/card features.")
             else:
                 radius_param.clearMessage()
         else:
@@ -1328,6 +1513,7 @@ class GUICommandSpike(object):
             "Ping GUI Environment": self._action_ping_gui_environment,
             "Open Command Dialog": self._action_open_command_dialog,
             "Validate Scenario Inputs": self._action_validate_scenario_inputs,
+            "Open Novelty Control Panel": self._action_open_novelty_control_panel,
             "Live Preview Update": self._action_live_preview_update,
             "New Game / Load Game GUI": self._action_new_load_game_gui,
             "Simulate Crash After Command Insert": self._action_simulate_crash_after_command_insert,
@@ -1392,6 +1578,11 @@ class GUICommandSpike(object):
         context = collect_selection_context(layer, layer_text, messages)
         support_context = collect_layer_summary(support_layer, support_text, messages, "SUPPORT")
         radius_info = radius_context(parameters[P_RADIUS].value)
+        placement_context = collect_placement_context(
+            parameters[P_PLACEMENT].value,
+            parameters[P_PLACEMENT].valueAsText,
+            messages,
+        )
 
         dialog_result = open_tk_command_dialog(context, scenario_mode, support_context, radius_info)
         command = build_command_payload(
@@ -1401,6 +1592,7 @@ class GUICommandSpike(object):
             support_context,
             radius_info,
             dialog_result,
+            placement_context=placement_context,
         )
         insert_ui_command(table_path, command)
 
@@ -1425,9 +1617,14 @@ class GUICommandSpike(object):
         context = collect_selection_context(layer, layer_text, messages)
         support_context = collect_layer_summary(support_layer, support_text, messages, "SUPPORT")
         radius_info = radius_context(parameters[P_RADIUS].value)
+        placement_context = collect_placement_context(
+            parameters[P_PLACEMENT].value,
+            parameters[P_PLACEMENT].valueAsText,
+            messages,
+        )
 
         validations = [
-            validate_planned_command(command, context, support_context, radius_info)
+            validate_planned_command(command, context, support_context, radius_info, placement_context)
             for command in commands_for_mode(scenario_mode)
         ]
         ready = [item for item in validations if item["ready"]]
@@ -1468,6 +1665,7 @@ class GUICommandSpike(object):
             radius_info,
             dialog_result,
             validation=validation_summary,
+            placement_context=placement_context,
         )
         command["message"] = (
             "Validated {total} planned {mode} feature(s): {ready} ready, {blocked} blocked.".format(
@@ -1484,6 +1682,60 @@ class GUICommandSpike(object):
         insert_ui_command(table_path, command)
 
         _log(messages, "UI", command["message"])
+        _log(messages, "UI", "command_id = {0}".format(command["command_id"]))
+        arcpy.SetParameterAsText(P_OUTPUT, table_path)
+        _log(messages, "OUTPUT", "Output UI Command Table = {0}".format(table_path))
+
+    def _action_open_novelty_control_panel(self, parameters, messages):
+        gdb_path = resolve_workspace(parameters[P_WORKSPACE].value, messages)
+        table_path = ensure_ui_command_table(gdb_path, messages)
+
+        layer = parameters[P_LAYER].value
+        layer_text = parameters[P_LAYER].valueAsText
+        support_layer = parameters[P_SUPPORT_LAYER].value
+        support_text = parameters[P_SUPPORT_LAYER].valueAsText
+        scenario_mode = "Novelty Reopen"
+        context = collect_selection_context(layer, layer_text, messages)
+        support_context = collect_layer_summary(support_layer, support_text, messages, "SUPPORT")
+        radius_info = radius_context(parameters[P_RADIUS].value)
+        placement_context = collect_placement_context(
+            parameters[P_PLACEMENT].value,
+            parameters[P_PLACEMENT].valueAsText,
+            messages,
+        )
+
+        dialog_result = open_novelty_control_panel(context, support_context, placement_context, radius_info)
+        validation = validate_planned_command(
+            dialog_result.get("command_name") or "Cancel",
+            context,
+            support_context,
+            radius_info,
+            placement_context,
+        )
+        command = build_command_payload(
+            gdb_path,
+            scenario_mode,
+            context,
+            support_context,
+            radius_info,
+            dialog_result,
+            validation=validation,
+            placement_context=placement_context,
+        )
+        payload = json.loads(command["payload_json"])
+        payload["concept_reopen"] = {
+            "ranking_lens": "most novel game",
+            "candidate_family": "Spatial Tactics / GP Card Battler",
+            "records_only": True,
+            "no_game_rules_applied": True,
+        }
+        command["payload_json"] = json.dumps(payload, sort_keys=True)
+        insert_ui_command(table_path, command)
+
+        if command["status"] == "error":
+            _log_warn(messages, "NOVELTY", command["message"])
+        else:
+            _log(messages, "NOVELTY", command["message"])
         _log(messages, "UI", "command_id = {0}".format(command["command_id"]))
         arcpy.SetParameterAsText(P_OUTPUT, table_path)
         _log(messages, "OUTPUT", "Output UI Command Table = {0}".format(table_path))
