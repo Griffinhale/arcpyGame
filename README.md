@@ -17,6 +17,14 @@ The trick is to treat the GIS stack as the engine:
 - **Geoprocessing parameters**: buttons, choices, commands.
 - **ArcGIS Pro map refresh**: game loop, probably turn-based or semi-idle rather than real-time.
 
+## Current spike artifacts
+
+- `toolbox/arcpy_game_spike.pyt`: original ArcGIS Pro feasibility spike for Python toolbox loading, parameters, selections, cursor updates, refresh, symbology hooks, and memory geoprocessing.
+- `toolbox/arcpy_game_gui_spike.pyt`: GUI validation spike for GP-pane-to-Tkinter handoff, durable command/session tables, live map preview updates, crash recovery, idempotency, Containment dry-runs, and Bufferlands dry-runs.
+- `toolbox/arcpy_game_rules.py`: pure Python Survey Sweeper rule engine, tested outside ArcGIS Pro.
+
+See `ideas/gui-validation-spike.md` for the GUI spike smoke-test sequence and interpretation notes.
+
 ## Design constraints / likely realities
 
 - Real-time action is probably painful. ArcPy + Pro rendering is not a 60fps loop.
