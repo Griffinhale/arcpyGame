@@ -55,7 +55,15 @@ DISTRICT_FIELDS = [
     ("risk", "LONG", "Health / Risk", None),
     ("services", "LONG", "Services", None),
     ("district_type", "TEXT", "Hidden District Type", 32),
+    ("land_use", "TEXT", "Land Use", 32),
+    ("zoning_overlay", "TEXT", "Zoning Overlay", 32),
     ("display_state", "TEXT", "Display State", 32),
+    ("service_gap_json", "TEXT", "Service Gaps", 1024),
+    ("population_mix_json", "TEXT", "Population Mix", 1024),
+    ("dissatisfaction_json", "TEXT", "Dissatisfaction", 1024),
+    ("incident_state", "TEXT", "Civic Incident State", 32),
+    ("incident_group", "TEXT", "Civic Incident Group", 32),
+    ("public_profile", "TEXT", "Public Profile", 512),
     ("last_report", "TEXT", "Last Report", 512),
 ]
 
@@ -65,6 +73,16 @@ SUPPORT_FIELDS = [
     ("template_id", "TEXT", "Template ID", 64),
     ("feature_name", "TEXT", "Feature Name", 128),
     ("feature_type", "TEXT", "Feature Type", 32),
+    ("archetype_id", "TEXT", "Archetype ID", 64),
+    ("family", "TEXT", "Feature Family", 32),
+    ("service_type", "TEXT", "Service Type", 32),
+    ("coverage_radius_m", "DOUBLE", "Coverage Radius Meters", None),
+    ("capacity", "LONG", "Capacity", None),
+    ("land_use", "TEXT", "Land Use", 32),
+    ("incident_type", "TEXT", "Incident Type", 32),
+    ("owner_group", "TEXT", "Owner Group", 64),
+    ("intensity", "LONG", "Intensity", None),
+    ("metadata_json", "TEXT", "Metadata JSON", 2048),
     ("status", "TEXT", "Status", 32),
     ("turn_created", "LONG", "Turn Created", None),
     ("expires_turn", "LONG", "Expires Turn", None),
@@ -282,7 +300,15 @@ def create_district_board(paths, seed, messages):
         "risk",
         "services",
         "district_type",
+        "land_use",
+        "zoning_overlay",
         "display_state",
+        "service_gap_json",
+        "population_mix_json",
+        "dissatisfaction_json",
+        "incident_state",
+        "incident_group",
+        "public_profile",
         "last_report",
     ]
     with arcpy.da.InsertCursor(paths["districts"], fields) as cursor:
@@ -301,7 +327,15 @@ def create_district_board(paths, seed, messages):
                 profile.risk,
                 profile.services,
                 profile.district_type,
+                profile.land_use,
+                profile.zoning_overlay,
                 profile.display_state,
+                encode_service_gap(profile.service_gap),
+                encode_group_bands(profile.population_mix, maximum=3),
+                encode_group_bands(profile.dissatisfaction, maximum=4),
+                profile.incident_state,
+                profile.incident_group,
+                profile.public_profile,
                 "New district profile generated.",
             ])
     _log(messages, "NEW", f"inserted {len(profiles)} districts")
@@ -350,9 +384,76 @@ def read_state(paths):
     return state
 
 
+def encode_group_bands(value, maximum=4):
+    out = {}
+    for group, band in (value or {}).items():
+        if group in rules.CITIZEN_GROUPS:
+            out[group] = max(0, min(maximum, int(band or 0)))
+    return json.dumps({group: band for group, band in sorted(out.items()) if band > 0}, sort_keys=True)
+
+
+def decode_group_bands(text, maximum=4):
+    if not text:
+        return {}
+    try:
+        parsed = json.loads(text)
+    except Exception:
+        return {}
+    if not isinstance(parsed, dict):
+        return {}
+    out = {}
+    for group, band in parsed.items():
+        if group in rules.CITIZEN_GROUPS:
+            out[group] = max(0, min(maximum, int(band or 0)))
+    return out
+
+
+def encode_service_gap(value):
+    out = {}
+    for service, gap in (value or {}).items():
+        if service in rules.SERVICE_TYPES:
+            out[service] = max(0, int(gap or 0))
+    return json.dumps({service: gap for service, gap in sorted(out.items()) if gap > 0}, sort_keys=True)
+
+
+def decode_service_gap(text):
+    if not text:
+        return {}
+    try:
+        parsed = json.loads(text)
+    except Exception:
+        return {}
+    if not isinstance(parsed, dict):
+        return {}
+    out = {}
+    for service, gap in parsed.items():
+        if service in rules.SERVICE_TYPES:
+            out[service] = max(0, int(gap or 0))
+    return out
+
+
 def read_districts(paths):
     out = {}
-    fields = ["cell_id", "district_name", "population", "prosperity", "unrest", "culture", "risk", "services", "district_type", "display_state"]
+    fields = [
+        "cell_id",
+        "district_name",
+        "population",
+        "prosperity",
+        "unrest",
+        "culture",
+        "risk",
+        "services",
+        "district_type",
+        "land_use",
+        "zoning_overlay",
+        "display_state",
+        "service_gap_json",
+        "population_mix_json",
+        "dissatisfaction_json",
+        "incident_state",
+        "incident_group",
+        "public_profile",
+    ]
     with arcpy.da.SearchCursor(paths["districts"], fields) as cursor:
         for row in cursor:
             profile = rules.DistrictProfile(
@@ -365,36 +466,74 @@ def read_districts(paths):
                 risk=int(row[6] or 0),
                 services=int(row[7] or 0),
                 district_type=row[8] or "mercantile",
-                display_state=row[9] or "stable",
+                land_use=row[9] or "",
+                zoning_overlay=row[10] or "",
+                display_state=row[11] or "stable",
+                service_gap=decode_service_gap(row[12]),
+                population_mix=decode_group_bands(row[13], maximum=3),
+                dissatisfaction=decode_group_bands(row[14], maximum=4),
+                incident_state=row[15] or "none",
+                incident_group=row[16] or "",
+                public_profile=row[17] or "",
             )
+            rules.normalize_profile(profile)
             out[profile.cell_id] = profile
     return out
 
 
 def write_district_updates(paths, districts, report, affected_ids=None):
     affected = set(affected_ids or districts)
-    fields = ["cell_id", "prosperity", "unrest", "culture", "risk", "services", "display_state", "last_report"]
+    fields = [
+        "cell_id",
+        "population",
+        "prosperity",
+        "unrest",
+        "culture",
+        "risk",
+        "services",
+        "land_use",
+        "zoning_overlay",
+        "display_state",
+        "service_gap_json",
+        "population_mix_json",
+        "dissatisfaction_json",
+        "incident_state",
+        "incident_group",
+        "public_profile",
+        "last_report",
+    ]
     with arcpy.da.UpdateCursor(paths["districts"], fields) as cursor:
         for row in cursor:
             cid = row[0]
             if cid not in districts:
                 continue
             profile = districts[cid]
-            row[1] = profile.prosperity
-            row[2] = profile.unrest
-            row[3] = profile.culture
-            row[4] = profile.risk
-            row[5] = profile.services
-            row[6] = profile.display_state
+            rules.normalize_profile(profile)
+            row[1] = profile.population
+            row[2] = profile.prosperity
+            row[3] = profile.unrest
+            row[4] = profile.culture
+            row[5] = profile.risk
+            row[6] = profile.services
+            row[7] = profile.land_use
+            row[8] = profile.zoning_overlay
+            row[9] = profile.display_state
+            row[10] = encode_service_gap(profile.service_gap)
+            row[11] = encode_group_bands(profile.population_mix, maximum=3)
+            row[12] = encode_group_bands(profile.dissatisfaction, maximum=4)
+            row[13] = profile.incident_state
+            row[14] = profile.incident_group
+            row[15] = profile.public_profile
             if cid in affected:
-                row[7] = report[:512]
+                row[16] = report[:512]
             cursor.updateRow(row)
 
 
 def generate_docket_rows(paths, seed, messages):
     state = read_state(paths)
+    districts = read_districts(paths)
     arcpy.management.DeleteRows(paths["docket"])
-    items = rules.generate_docket(turn=state.turn, seed=seed, count=3, state=state)
+    items = rules.generate_docket(turn=state.turn, seed=seed, count=3, state=state, districts=districts)
     fields = [
         "item_id",
         "turn",
@@ -535,6 +674,8 @@ def insert_or_replace_proposal(paths, item, target_ids, messages):
                     cursor.deleteRow()
 
     template = rules.TEMPLATES[item.template_id]
+    archetype = rules.feature_archetype_for_template(template)
+    metadata = rules.feature_metadata_for_template(template)
     geoms = district_geometry_lookup(paths)
     valid = [cid for cid in target_ids if cid in geoms]
     if item.geometry_type == "POINT" and len(valid) != 1:
@@ -552,6 +693,16 @@ def insert_or_replace_proposal(paths, item, target_ids, messages):
         item.template_id,
         item.title,
         template.category,
+        archetype.archetype_id,
+        archetype.family,
+        archetype.service_type,
+        float(archetype.coverage_radius_m),
+        archetype.capacity,
+        archetype.land_use,
+        archetype.incident_type,
+        item.stakeholder or template.stakeholder,
+        max(1, archetype.capacity or 1),
+        json.dumps(metadata, sort_keys=True)[:2048],
         "proposed",
         item.turn,
         item.turn + template.expires_after if template.expires_after else -1,
@@ -603,7 +754,9 @@ def proposal_spillover(paths, item):
     buffer_fc = r"memory\permit_office_spillover"
     if arcpy.Exists(buffer_fc):
         arcpy.management.Delete(buffer_fc)
-    arcpy.analysis.Buffer(layer_name, buffer_fc, "125 Meters")
+    archetype = rules.feature_archetype_for_template(item.template_id)
+    radius = max(1, int(archetype.coverage_radius_m or 125))
+    arcpy.analysis.Buffer(layer_name, buffer_fc, f"{radius} Meters")
     district_layer = f"district_spill_{uuid.uuid4().hex[:8]}"
     arcpy.management.MakeFeatureLayer(paths["districts"], district_layer)
     arcpy.management.SelectLayerByLocation(district_layer, "INTERSECT", buffer_fc, selection_type="NEW_SELECTION")
@@ -805,14 +958,17 @@ class DashboardController:
 
     def reload(self):
         state = read_state(self.paths)
+        districts = read_districts(self.paths)
         items = read_docket(self.paths)
         labels = [self.item_label(item) for item in items if item.status in ("open", "inspected", "active", "carried")]
         self.combo["values"] = labels
         if labels and self.item_var.get() not in labels:
             self.item_var.set(labels[0])
         heat = rules.heat_summary(state)
+        population = rules.population_city_summary(districts)
+        incidents = rules.incident_summary(districts)
         self.metrics_var.set(
-            f"Turn {state.turn}/6 | AP {state.ap}/{state.max_ap} | ${state.money} | P {state.prosperity} U {state.unrest} C {state.culture} R {state.risk} | Heat {heat}"
+            f"Turn {state.turn}/6 | AP {state.ap}/{state.max_ap} | ${state.money} | P {state.prosperity} U {state.unrest} C {state.culture} R {state.risk} | {population} | Heat {heat} | Incidents {incidents}"
         )
         self.refresh_detail()
 
@@ -836,19 +992,28 @@ class DashboardController:
             return
         state = read_state(self.paths)
         template = rules.TEMPLATES[item.template_id]
+        archetype = rules.feature_archetype_for_template(template)
         stakeholder = item.stakeholder or template.stakeholder
         target_rule = item.target_rule or template.target_rule
         heat = state.stakeholder_heat.get(stakeholder, 0)
+        districts = read_districts(self.paths)
+        target_profiles = [districts[cid] for cid in item.target_cell_ids if cid in districts]
+        population_hint = rules.target_population_hint(item, target_profiles)
+        population_line = f"\n{population_hint}" if population_hint else ""
         action_note = "Approve=enforce; Approve + Mitigate=settle/retro-permit; Deny=defer." if template.is_enforcement else "Approve=issue permit; Approve + Mitigate=issue with conditions; Deny=reject."
+        if template.is_incident:
+            action_note = "Approve=formal response; Approve + Mitigate=settle/service response; Deny=defer incident."
         text = (
             f"{item.title}\n"
             f"Type: {template.category}; geometry: {item.geometry_type}; stakeholder: {stakeholder.replace('_', ' ')}; heat: {heat}\n"
+            f"Feature: {archetype.label}; family: {archetype.family}; service: {archetype.service_type or 'none'}; land use: {archetype.land_use or 'none'}\n"
             f"Cost: {template.ap_cost} AP / ${template.money_cost}; mitigation +${template.mitigation_cost}\n"
             f"Target rule: {target_rule}\n"
             f"Failure mode: {template.failure_mode or 'none filed'}\n"
+            f"Contact: {template.contact_name or 'not assigned'}\n"
             f"Actions: {action_note}\n"
             f"Targets: {', '.join(item.target_cell_ids) if item.target_cell_ids else '(select on map, then preview)'}\n"
-            f"{item.preview_text}"
+            f"{item.preview_text}{population_line}"
         )
         self.detail_var.set(text)
 
@@ -944,6 +1109,7 @@ class DashboardController:
                 return
             proposal_status = item.status if item.status in ("denied", "deferred") else "denied"
             mark_proposals(self.paths, item.item_id, proposal_status, result.report)
+            write_district_updates(self.paths, districts, result.report, result.affected_cell_ids)
             write_state(self.paths, state)
             write_docket_item(self.paths, item)
             action_log(self.paths, state, result)
@@ -961,8 +1127,10 @@ class DashboardController:
         try:
             state = read_state(self.paths)
             items = read_docket(self.paths)
-            report = rules.advance_turn(state, items)
+            districts = read_districts(self.paths)
+            report = rules.advance_turn(state, items, districts)
             write_state(self.paths, state)
+            write_district_updates(self.paths, districts, report)
             for item in items:
                 write_docket_item(self.paths, item)
             generate_docket_rows(self.paths, self.seed, self.messages)
@@ -1029,8 +1197,9 @@ class PermitOfficePrototype(object):
             return
         if action == "Show Scorecard":
             state = read_state(paths)
+            districts = read_districts(paths)
             grade, report = rules.scorecard(state)
-            _log(messages, "AUDIT", report)
+            _log(messages, "AUDIT", f"{report} {rules.population_city_summary(districts)}; incidents={rules.incident_summary(districts)}.")
             return
         if action == "Open Dashboard":
             district_layer = parameters[P_DISTRICTS].value or paths["districts"]
