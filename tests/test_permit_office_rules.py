@@ -744,7 +744,10 @@ def test_audit_findings_include_money_features_services_and_violations():
 
 
 def test_arcpy_toolbox_schema_declares_governance_fields_without_new_feature_classes():
-    toolbox_text = (Path(__file__).parents[1] / "toolbox" / "arcpy_permit_office.pyt").read_text()
+    toolbox_dir = Path(__file__).parents[1] / "toolbox"
+    toolbox_text = (toolbox_dir / "arcpy_permit_office.pyt").read_text()
+    schema_text = (toolbox_dir / "permit_office_arcgis" / "schema.py").read_text()
+    combined_text = toolbox_text + schema_text
 
     for field_name in (
         "condition",
@@ -768,8 +771,27 @@ def test_arcpy_toolbox_schema_declares_governance_fields_without_new_feature_cla
         "hazard_summary",
         "mitigation_summary",
     ):
-        assert f'"{field_name}"' in toolbox_text
-    assert '"PermitProjects"' in toolbox_text
-    assert '"PermitPoints"' in toolbox_text
-    assert '"PermitLines"' in toolbox_text
-    assert '"PermitZones"' in toolbox_text
+        assert f'"{field_name}"' in combined_text
+    assert '"PermitProjects"' in combined_text
+    assert '"PermitPoints"' in combined_text
+    assert '"PermitLines"' in combined_text
+    assert '"PermitZones"' in combined_text
+
+
+def test_active_permit_office_files_stay_under_line_budget():
+    toolbox_dir = Path(__file__).parents[1] / "toolbox"
+    active_paths = [
+        toolbox_dir / "arcpy_permit_office.pyt",
+        toolbox_dir / "arcpy_permit_office_rules.py",
+        *sorted((toolbox_dir / "permit_office").glob("*.py")),
+        *sorted((toolbox_dir / "permit_office" / "catalogs").glob("*.py")),
+        *sorted((toolbox_dir / "permit_office_arcgis").glob("*.py")),
+    ]
+
+    oversized = {
+        path.relative_to(toolbox_dir).as_posix(): len(path.read_text().splitlines())
+        for path in active_paths
+        if len(path.read_text().splitlines()) >= 1000
+    }
+
+    assert oversized == {}
