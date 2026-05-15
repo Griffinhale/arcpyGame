@@ -58,11 +58,14 @@ It records the chosen command to `UICommand` and includes `placement_feature` an
 
 Each preview button:
 
+- changes the current Game Layer selection (`Preview A` restores the original selection; `Preview B` selects the next ObjectID when available),
 - updates selected cells in `ui_preview_state`,
 - calls `arcpy.RefreshLayer(...)`,
 - records the result in `UICommand`.
 
 Manual observation is required: while the modal remains open, inspect whether the map redraws immediately, only after dialog close, or not reliably.
+
+Observed follow-up: `RefreshLayer(...)` can be called from the Tkinter button. A temporary attempt to write unclassed `display_state` preview values made features disappear under unique-value symbology, so the spike now leaves `display_state` alone. The current test uses selection changes as the visible map signal because selection highlight does not require renderer classes.
 
 ### 5. GUI new/load session flow
 
@@ -211,7 +214,7 @@ Created only by specific validation actions:
 - `last_command_id`
 - `ui_lock_probe`
 
-These are not final gameplay fields.
+These are not final gameplay fields. `Live Preview Update` intentionally leaves `display_state` alone so it cannot push features into unclassed renderer values.
 
 ### `Placement Feature`
 

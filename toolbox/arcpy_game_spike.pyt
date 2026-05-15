@@ -76,6 +76,9 @@ BOARD_FIELDS = [
     ("test_count",    "LONG", "Test Count",        None),
 ]
 
+DISPLAY_STATE_FIELD = "display_state"
+DISPLAY_STATE_PREVIEW_VALUES = ["hidden", "marked", "marked-bumped"]
+
 
 # ---------------------------------------------------------------------------
 # Helpers (module level — pure functions where possible)
@@ -154,6 +157,78 @@ def add_field_if_missing(fc, name, field_type, alias=None, length=None):
         kwargs["field_length"] = length
     arcpy.management.AddField(fc, name, field_type, **kwargs)
     return True
+
+
+def apply_display_state_unique_symbology(layer, messages):
+    """Configure board symbology so display_state field updates redraw visibly."""
+    if layer is None:
+        _log_warn(messages, "T28", "no layer object available for display_state symbology")
+        return False
+
+    try:
+        if not layer.supports("SYMBOLOGY"):
+            _log_warn(messages, "T28", "layer does not support SYMBOLOGY")
+            return False
+    except Exception:
+        # Some layer objects do not expose supports consistently; try anyway.
+        pass
+
+    try:
+        sym = layer.symbology
+        sym.updateRenderer("UniqueValueRenderer")
+        sym.renderer.fields = [DISPLAY_STATE_FIELD]
+        try:
+            sym.renderer.useDefaultSymbol = True
+        except Exception as exc:
+            _log_warn(messages, "T28", "could not enable default symbol: {exc}".format(exc=exc))
+
+        # Pre-add the states used by this spike when Pro accepts them. Some
+        # versions only add values present in the data, so keep this best-effort.
+        try:
+            heading = DISPLAY_STATE_FIELD
+            if sym.renderer.groups:
+                heading = sym.renderer.groups[0].heading or heading
+            sym.renderer.addValues({heading: list(DISPLAY_STATE_PREVIEW_VALUES)})
+        except Exception as exc:
+            _log_warn(messages, "T28", "could not pre-add display_state values: {exc}".format(exc=exc))
+
+        try:
+            for group in sym.renderer.groups:
+                for item in group.items:
+                    if not item.values or not item.values[0]:
+                        continue
+                    value = str(item.values[0][0])
+                    if value in DISPLAY_STATE_PREVIEW_VALUES:
+                        item.label = value
+        except Exception as exc:
+            _log_warn(messages, "T28", "could not update display_state labels: {exc}".format(exc=exc))
+
+        layer.symbology = sym
+        _log(messages, "T28", "set unique-value symbology on {field}".format(field=DISPLAY_STATE_FIELD))
+        return True
+    except Exception as exc:
+        _log_warn(messages, "T28", "unique-value symbology setup failed: {exc}".format(exc=exc))
+        return False
+
+
+def refresh_layer_view(layer, messages, tag="T26"):
+    """Best-effort map redraw after field, selection, or symbology changes."""
+    if not layer:
+        _log_warn(messages, tag, "refresh skipped: no layer")
+        return False
+    layer_name = layer if isinstance(layer, str) else getattr(layer, "name", None)
+    if not layer_name:
+        _log_warn(messages, tag, "refresh skipped: layer name unavailable")
+        return False
+    try:
+        arcpy.RefreshLayer(layer_name)
+        _log(messages, tag, "RefreshLayer({n!r}) returned without error".format(n=layer_name))
+        return True
+    except AttributeError:
+        _log_warn(messages, tag, "arcpy.RefreshLayer does not exist in this Pro version")
+    except Exception as exc:
+        _log_warn(messages, tag, "RefreshLayer failed: {exc}".format(exc=exc))
+    return False
 
 
 def resolve_workspace(workspace_param_value, messages):
@@ -588,12 +663,16 @@ class GameControllerSpike(object):
         _log(messages, "T12", "GetCount post-insert = {n}".format(n=count))
 
         # T14: try to add to active map.
+        layer_obj = None
         try:
             aprx = arcpy.mp.ArcGISProject("CURRENT")
             active_map = aprx.activeMap
             if active_map is not None:
-                existing_names = {lyr.name for lyr in active_map.listLayers()}
-                if BOARD_FC_NAME in existing_names:
+                for lyr in active_map.listLayers():
+                    if lyr.name == BOARD_FC_NAME:
+                        layer_obj = lyr
+                        break
+                if layer_obj is not None:
                     _log(messages, "T14", "layer already in map; skipping addDataFromPath")
                 else:
                     layer_obj = active_map.addDataFromPath(board_fc)
@@ -602,6 +681,10 @@ class GameControllerSpike(object):
                 _log_warn(messages, "T14", "no active map")
         except Exception as exc:
             _log_warn(messages, "T14", "addDataFromPath failed: {exc}".format(exc=exc))
+
+        if layer_obj is not None:
+            if apply_display_state_unique_symbology(layer_obj, messages):
+                refresh_layer_view(layer_obj, messages, "T28")
 
         # T27: derived output.
         try:
@@ -732,7 +815,8 @@ class GameControllerSpike(object):
 
         # T25: did the map redraw? We can't observe rendering from Python; emit a hint.
         _log(messages, "T25",
-             "field updates issued. Inspect map: did symbology change without manual refresh?")
+             "field updates issued. Requesting layer refresh.")
+        refresh_layer_view(layer, messages, "T25")
 
         # T27: derived output for downstream chain.
         try:
@@ -751,13 +835,7 @@ class GameControllerSpike(object):
         _log(messages, "T26", "calling RefreshLayer with name = {n!r}".format(n=layer_name))
 
         # T26: RefreshLayer — may not exist in Pro; .RefreshActiveView is also gone.
-        try:
-            arcpy.RefreshLayer(layer_name)
-            _log(messages, "T26", "arcpy.RefreshLayer returned without error")
-        except AttributeError:
-            _log_warn(messages, "T26", "arcpy.RefreshLayer does not exist in this Pro version")
-        except Exception as exc:
-            _log_warn(messages, "T26", "RefreshLayer failed: {exc}".format(exc=exc))
+        refresh_layer_view(layer, messages, "T26")
 
         # T27: derived output again.
         try:
@@ -866,6 +944,7 @@ class GameControllerSpike(object):
             _log(messages, "T35", "GetCount(layer) after select = {n}".format(n=n_sel))
         except Exception as exc:
             _log_warn(messages, "T35", "post-select GetCount failed: {exc}".format(exc=exc))
+        refresh_layer_view(layer, messages, "T35")
 
     # ---- T13, T41 ----
     def _action_reset_tiny_board(self, parameters, messages):
@@ -878,6 +957,7 @@ class GameControllerSpike(object):
         if not ok:
             _log_warn(messages, "T13", "DeleteRows failed; trying TruncateTable")
             _safe(messages, "T13", arcpy.management.TruncateTable, layer)
+        refresh_layer_view(layer, messages, "T13")
 
         # Re-run the create flow to re-seed.
         self._action_create_tiny_board(parameters, messages)

@@ -557,6 +557,7 @@ def collect_selection_context(layer, layer_value_text, messages):
     """Read selected OIDs and cell IDs without treating an unselected layer as selected."""
     context = {
         "target_layer": _layer_display_name(layer, layer_value_text),
+        "catalog_path": "",
         "oid_field": "",
         "selected_oids": [],
         "target_cell_ids": [],
@@ -597,6 +598,7 @@ def collect_selection_context(layer, layer_value_text, messages):
             _log_warn(messages, "SELECTION", "Describe failed: {0}".format(exc))
 
     context["oid_field"] = oid_field
+    context["catalog_path"] = catalog_path or ""
     context["selected_oids"] = list(selected_oids)
     if not selected_oids:
         _log(messages, "SELECTION", "no selected OIDs found; cursor read skipped")
@@ -1197,6 +1199,66 @@ def update_selected_layer_field(layer, field_name, value, messages, tag):
     return updated
 
 
+def list_layer_oids(layer, context, messages, tag):
+    oid_field = context.get("oid_field") or ""
+    source = context.get("catalog_path") or layer
+    if not layer or not oid_field:
+        return []
+    try:
+        oids = []
+        with arcpy.da.SearchCursor(source, [oid_field]) as cursor:
+            for row in cursor:
+                try:
+                    oids.append(int(row[0]))
+                except (TypeError, ValueError):
+                    continue
+        return sorted(set(oids))
+    except Exception as exc:
+        _log_warn(messages, tag, "could not list layer OIDs for preview selection: {0}".format(exc))
+        return []
+
+
+def next_preview_oids(layer, context, messages, tag):
+    selected = sorted(set(context.get("selected_oids") or []))
+    if not selected:
+        return []
+    all_oids = list_layer_oids(layer, context, messages, tag)
+    if not all_oids:
+        return list(selected)
+
+    first_selected = selected[0]
+    for oid in all_oids:
+        if oid > first_selected:
+            return [oid]
+    return [all_oids[0]]
+
+
+def select_oids_on_layer(layer, context, oids, messages, tag):
+    oid_field = context.get("oid_field") or ""
+    source = context.get("catalog_path") or layer
+    clean_oids = []
+    for oid in oids or []:
+        try:
+            clean_oids.append(int(oid))
+        except (TypeError, ValueError):
+            continue
+    if not layer or not oid_field or not clean_oids:
+        _log_warn(messages, tag, "preview selection skipped; no OID target available")
+        return 0
+    where = "{0} IN ({1})".format(
+        arcpy.AddFieldDelimiters(source, oid_field),
+        ",".join(str(oid) for oid in sorted(set(clean_oids))),
+    )
+    try:
+        arcpy.management.SelectLayerByAttribute(layer, "NEW_SELECTION", where)
+        count = int(arcpy.management.GetCount(layer)[0])
+        _log(messages, tag, "preview selected {0} row(s) using {1}".format(count, where))
+        return count
+    except Exception as exc:
+        _log_warn(messages, tag, "preview selection failed: {0}".format(exc))
+        raise
+
+
 def refresh_layer(layer, layer_value_text, messages, tag):
     layer_name = _layer_display_name(layer, layer_value_text)
     if not layer_name:
@@ -1287,6 +1349,8 @@ def open_live_preview_dialog(layer, layer_text, context, messages):
         row=0, column=0, columnspan=3, sticky="w", pady=(0, 8)
     )
     selected = context.get("target_cell_ids") or context.get("selected_oids") or []
+    original_oids = sorted(set(context.get("selected_oids") or []))
+    alternate_oids = next_preview_oids(layer, context, messages, "LIVE")
     ttk.Label(frame, text="Selected targets: {0}".format(len(selected))).grid(
         row=1, column=0, columnspan=3, sticky="w", padx=12, pady=6
     )
@@ -1297,12 +1361,27 @@ def open_live_preview_dialog(layer, layer_text, context, messages):
 
     def preview(value):
         try:
+            target_oids = original_oids if value == "preview_a" else alternate_oids
+            selected_count = select_oids_on_layer(layer, context, target_oids, messages, "LIVE")
             updated = update_selected_layer_field(layer, UI_PREVIEW_FIELD, value, messages, "LIVE")
             refreshed = refresh_layer(layer, layer_text, messages, "LIVE")
-            step = {"value": value, "updated": updated, "refresh_called": refreshed}
+            step = {
+                "value": value,
+                "target_oids": target_oids,
+                "selected_count": selected_count,
+                "updated": updated,
+                "refresh_called": refreshed,
+            }
             steps.append(step)
             result["status"] = "created"
-            status_var.set("Preview {0}: updated {1} row(s); refresh_called={2}".format(value, updated, refreshed))
+            status_var.set(
+                "Preview {0}: selected={1}; probe rows={2}; refresh_called={3}.".format(
+                    value,
+                    selected_count,
+                    updated,
+                    refreshed,
+                )
+            )
         except Exception as exc:
             step = {"value": value, "error": str(exc)}
             steps.append(step)
