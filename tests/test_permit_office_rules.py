@@ -1,4 +1,5 @@
 import copy
+from pathlib import Path
 
 from toolbox import arcpy_permit_office_rules as rules
 
@@ -512,3 +513,263 @@ def test_scorecard_returns_audit_grade_and_metrics():
     assert grade == "PASS"
     assert "prosperity=70" in report
     assert "risk=15" in report
+
+
+def test_long_term_catalogs_validate_new_city_system_records():
+    assert rules.validate_feature_catalog() == []
+    assert set(rules.HAZARD_TYPES) == {"pollution", "flood", "fire", "noise", "heat", "ecology"}
+    assert {"bus_priority_link", "water_main_loop", "green_buffer_reserve", "inspection_order"} <= set(rules.FEATURE_ARCHETYPES)
+    assert {"housing_mandate", "port_boom"} <= set(rules.SCENARIO_RULES)
+    assert "affordable_infill_buildout" in rules.PROJECT_CHAINS
+
+
+def test_generated_districts_have_adjacency_housing_and_empty_hazards():
+    profiles = {p.cell_id: p for p in rules.generate_district_profiles(rows=2, cols=2, seed=2026)}
+
+    assert profiles["D0000"].adjacent_cell_ids == ["D0001", "D0100"]
+    assert profiles["D0101"].adjacent_cell_ids == ["D0001", "D0100"]
+    assert all(profile.housing_capacity >= profile.population for profile in profiles.values())
+    assert all(0 <= profile.affordability <= 100 for profile in profiles.values())
+    assert all(profile.hazards == {} for profile in profiles.values())
+    assert all(set(profile.network_access) == set(rules.SERVICE_TYPES) for profile in profiles.values())
+
+
+def test_line_network_access_affects_endpoints_and_one_hop_only():
+    profiles = {p.cell_id: p for p in rules.generate_district_profiles(rows=1, cols=4, seed=2026)}
+    feature = rules.FeatureInstance(
+        feature_id="bus-1",
+        archetype_id="bus_priority_link",
+        target_cell_ids=["D0000", "D0001"],
+        intensity=3,
+        status="active",
+    )
+
+    rules.recompute_network_access(profiles, [feature], turn=1)
+
+    assert profiles["D0000"].network_access["mobility"] == 3
+    assert profiles["D0001"].network_access["mobility"] == 3
+    assert profiles["D0002"].network_access["mobility"] == 2
+    assert profiles["D0003"].network_access["mobility"] == 0
+
+
+def test_housing_effects_recompute_vacancy_and_displacement_pressure():
+    profile = rules.DistrictProfile(
+        cell_id="D0000",
+        name="Lease Row",
+        population=950,
+        prosperity=70,
+        unrest=25,
+        culture=66,
+        risk=20,
+        services=55,
+        district_type="residential",
+        population_mix={"renters": 3, "artists": 2, "families": 2},
+        housing_capacity=1000,
+        affordability=32,
+    )
+    rules.normalize_profile(profile)
+
+    before_capacity = profile.housing_capacity
+    rules.apply_template_long_term_effects(rules.TEMPLATES["occupancy_certificate"], [profile], mitigated=True)
+
+    assert profile.housing_capacity == before_capacity + 420
+    assert profile.population > 950
+    assert profile.vacancy_rate > 0
+    assert profile.affordability > 32
+
+
+def test_hazards_accumulate_decay_and_are_reduced_by_mitigation():
+    profiles = {p.cell_id: p for p in rules.generate_district_profiles(rows=1, cols=2, seed=2026)}
+    source = rules.FeatureInstance("site-1", "construction_site", target_cell_ids=["D0000"], status="active", intensity=1)
+
+    rules.apply_hazard_turn(profiles, [source], turn=1)
+    assert profiles["D0000"].hazards["noise"] == 1
+    assert profiles["D0001"].hazards["noise"] == 1
+
+    rules.apply_hazard_turn(profiles, [], turn=2)
+    assert profiles["D0000"].hazards.get("noise", 0) == 0
+
+    profiles["D0000"].hazards = {"heat": 3, "ecology": 2}
+    buffer = rules.FeatureInstance("buffer-1", "green_buffer_reserve", target_cell_ids=["D0000"], status="active", intensity=3)
+    rules.recompute_network_access(profiles, [buffer], turn=3)
+    rules.apply_hazard_turn(profiles, [buffer], turn=3)
+    assert profiles["D0000"].hazards.get("heat", 0) <= 1
+
+
+def test_project_chain_spawns_due_step_and_advances_on_resolution():
+    profile = rules.DistrictProfile(
+        cell_id="D0000",
+        name="Buildout Row",
+        population=1200,
+        prosperity=50,
+        unrest=20,
+        culture=40,
+        risk=20,
+        services=65,
+        district_type="residential",
+    )
+    rules.normalize_profile(profile)
+    profiles = {profile.cell_id: profile}
+    state = rules.CityState(ap=3, money=120)
+    projects = {}
+    item = rules.DocketItem("rezoning-1", "affordable_infill_rezoning", rules.TEMPLATES["affordable_infill_rezoning"].title, "POLYGON", 1, risk_band="low")
+
+    result = rules.resolve_decision(state, item, profiles, "approve_mitigated", ["D0000"], seed=99, mitigated=True, projects=projects)
+
+    assert result.ok is True
+    assert projects
+    project = next(iter(projects.values()))
+    assert project.current_step_id == "construction"
+    due = rules.generate_docket(turn=project.due_turn, seed=2026, count=1, state=state, districts=profiles, projects=projects)
+    assert due[0].project_id == project.project_id
+    assert due[0].chain_step_id == "construction"
+
+    due[0].status = "active"
+    rules.advance_project_from_item(projects, due[0], state, approved=True, failed=False)
+    assert project.current_step_id == "inspection"
+
+
+def test_scenario_rules_change_docket_priority_and_scorecard_text():
+    state = rules.CityState(scenario_id="housing_mandate")
+    profiles = {p.cell_id: p for p in rules.generate_district_profiles(rows=1, cols=2, seed=2026)}
+    rules.apply_scenario(state, profiles)
+
+    docket = rules.generate_docket(turn=1, seed=2026, count=3, state=state, districts=profiles)
+    grade, report = rules.scorecard(state, profiles)
+
+    assert docket[0].template_id == "affordable_infill_rezoning"
+    assert grade in {"PASS", "CONDITIONAL", "FAIL"}
+    assert "scenario=housing_mandate" in report
+
+
+def test_governance_catalogs_cover_features_stakeholders_and_maintenance():
+    assert rules.validate_feature_catalog() == []
+    assert rules.MAINTENANCE_TEMPLATE_ID in rules.TEMPLATES
+    assert set(rules.FEATURE_ARCHETYPES) <= set(rules.FEATURE_OPERATING_RULES)
+    assert rules.STAKEHOLDERS["fire_department"].influence > rules.STAKEHOLDERS["vendors"].patience
+    assert rules.INSPECTION_RULES["contractor_renovation_waiver"].violation_codes == ("unsafe_work",)
+
+
+def test_inspection_creates_evidence_violations_deadlines_and_compliance_outcomes():
+    profile = rules.DistrictProfile(
+        cell_id="D0000",
+        name="Inspection Row",
+        population=1000,
+        prosperity=35,
+        unrest=35,
+        culture=30,
+        risk=70,
+        services=20,
+        district_type="residential",
+        dissatisfaction={"renters": 3},
+    )
+    rules.normalize_profile(profile)
+    item = rules.DocketItem("inspect-waiver", "contractor_renovation_waiver", rules.TEMPLATES["contractor_renovation_waiver"].title, "POINT", 2)
+
+    rules.inspect_item(item, seed=7, target_profiles=[profile])
+
+    inspection = item.case_json["inspection"]
+    assert item.risk_band == "high"
+    assert inspection["evidence"]
+    assert inspection["violations"][0]["code"] == "unsafe_work"
+    assert inspection["violations"][0]["deadline_turn"] == 3
+
+    state = rules.CityState(ap=3, money=80)
+    result = rules.resolve_decision(state, item, {profile.cell_id: profile}, "approve_mitigated", ["D0000"], seed=7, mitigated=True)
+
+    assert result.ok is True
+    assert item.case_json["inspection"]["violations"][0]["status"] == "complied"
+    assert item.case_json["inspection"]["violations"][0]["compliance_outcome"] == "settled"
+
+
+def test_feature_lifecycle_economy_and_maintenance_followup_are_deterministic():
+    profile = rules.DistrictProfile("D0000", "Service Yard", 1500, 55, 20, 40, 30, 45, "residential")
+    rules.normalize_profile(profile)
+    feature = rules.FeatureInstance(
+        "F-child",
+        "child_service_annex",
+        item_id="permit-child",
+        template_id="child_development_park_annex",
+        owner_group="families",
+        target_cell_ids=["D0000"],
+        turn_created=1,
+        condition=36,
+    )
+    state = rules.CityState(turn=1, money=30)
+
+    result = rules.advance_turn_result(state, [], {profile.cell_id: profile}, [feature])
+    docket = rules.generate_docket(state.turn, state=state, districts={profile.cell_id: profile}, active_features=[feature], count=3)
+
+    assert state.last_revenue >= 0
+    assert state.last_upkeep > 0
+    assert state.money == 30 + state.last_net
+    assert feature.status == "degraded"
+    assert feature.feature_id in result.feature_updates
+    assert docket[0].template_id == rules.MAINTENANCE_TEMPLATE_ID
+    assert docket[0].subject_feature_id == "F-child"
+
+
+def test_maintenance_decision_repairs_feature_and_reschedules_due_turn():
+    feature = rules.FeatureInstance("F-market", "vendor_market", owner_group="vendors", target_cell_ids=["D0000"], turn_created=1, condition=20, status="degraded")
+    rules.normalize_feature_instance(feature, turn=3)
+    profile = rules.DistrictProfile("D0000", "Market Row", 1000, 45, 25, 35, 25, 45, "mercantile")
+    item = rules.generate_docket(3, active_features=[feature], count=1)[0]
+    state = rules.CityState(turn=3, ap=3, money=50)
+
+    result = rules.resolve_decision(state, item, {profile.cell_id: profile}, "approve_mitigated", item.target_cell_ids, mitigated=True, active_features=[feature])
+
+    assert result.ok is True
+    assert item.status == "settled"
+    assert feature.condition > 20
+    assert feature.status == "active"
+    assert feature.maintenance_due_turn > state.turn
+    assert result.feature_updates["F-market"]["condition"] == feature.condition
+
+
+def test_audit_findings_include_money_features_services_and_violations():
+    profile = rules.DistrictProfile("D0000", "Gap Row", 1400, 35, 25, 30, 75, 5, "residential", population_mix={"families": 3})
+    rules.normalize_profile(profile)
+    feature = rules.FeatureInstance("F-failed", "utility_trench", status="failed", condition=0, target_cell_ids=["D0000"])
+    item = rules.DocketItem("case", "utility_expansion_trench", rules.TEMPLATES["utility_expansion_trench"].title, "LINE", 1, stakeholder="utility_board")
+    item.case_json = {"inspection": {"violations": [{"code": "unsafe_work", "severity": "critical", "deadline_turn": 1, "status": "open"}]}}
+    state = rules.CityState(turn=3, money=-1, last_net=-4)
+
+    audit = rules.generate_audit_result(state, {profile.cell_id: profile}, [feature], [item])
+
+    assert audit.grade == "FAIL"
+    assert any(finding.source == "money" for finding in audit.findings)
+    assert any(finding.source == "features" for finding in audit.findings)
+    assert any(finding.source == "services" for finding in audit.findings)
+    assert any(finding.source == "inspection" for finding in audit.findings)
+
+
+def test_arcpy_toolbox_schema_declares_governance_fields_without_new_feature_classes():
+    toolbox_text = (Path(__file__).parents[1] / "toolbox" / "arcpy_permit_office.pyt").read_text()
+
+    for field_name in (
+        "condition",
+        "maintenance_due_turn",
+        "last_maintained_turn",
+        "state_json",
+        "priority",
+        "due_turn",
+        "subject_feature_id",
+        "case_json",
+        "adjacent_cell_ids",
+        "network_access_json",
+        "hazard_json",
+        "housing_capacity",
+        "affordability",
+        "vacancy_rate",
+        "displacement_json",
+        "project_id",
+        "chain_step_id",
+        "scenario_tags",
+        "hazard_summary",
+        "mitigation_summary",
+    ):
+        assert f'"{field_name}"' in toolbox_text
+    assert '"PermitProjects"' in toolbox_text
+    assert '"PermitPoints"' in toolbox_text
+    assert '"PermitLines"' in toolbox_text
+    assert '"PermitZones"' in toolbox_text
