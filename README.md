@@ -22,9 +22,12 @@ The trick is to treat the GIS stack as the engine:
 - `toolbox/arcpy_game_spike.pyt`: original ArcGIS Pro feasibility spike for Python toolbox loading, parameters, selections, cursor updates, refresh, symbology hooks, and memory geoprocessing.
 - `toolbox/arcpy_game_gui_spike.pyt`: GUI validation spike for GP-pane-to-Tkinter handoff, durable command/session tables, live map preview updates, crash recovery, idempotency, Containment dry-runs, Bufferlands dry-runs, and Novelty Reopen control-panel checks.
 - `toolbox/arcpy_game_rules.py`: pure Python Survey Sweeper rule engine, tested outside ArcGIS Pro.
+- `toolbox/arcpy_permit_office.pyt`: Permit Office prototype toolbox for the new dashboard-map-loop city sim direction.
+- `toolbox/arcpy_permit_office_rules.py`: pure Python Permit Office sim rules for generated districts, docket items, inspections, approvals, mitigation, denials, and audit scoring.
 
 See `ideas/gui-validation-spike.md` for the GUI spike smoke-test sequence and interpretation notes.
 See `ideas/gui-era-concept-reopen.md` for the novelty-first concept re-rank after the GUI spike.
+See `docs/permit-office-prototype-smoke-test.md` for the Permit Office prototype smoke-test sequence.
 
 ## Design constraints / likely realities
 

@@ -192,3 +192,9 @@ Map/layer names: `Map` / `GameBoard_Spike`
 ## Safe next implementation step
 
 Proceed to Survey Sweeper rules/schema. The controller architecture (one tool + Action dropdown + cursor-over-layer + display_state symbology) is fully validated.
+
+## Follow-up: Automatic Symbology
+
+`Create Tiny Board` now configures the in-map `GameBoard_Spike` layer with `UniqueValueRenderer` on `display_state` after adding or finding the layer. The renderer keeps the default symbol enabled so future unlisted states do not disappear.
+
+Manual refresh requests were also added after board symbology setup, selected-row field updates, memory-buffer selection changes, and reset deletion/reseed steps. These are best-effort calls to `arcpy.RefreshLayer(...)`; failures are logged as warnings rather than stopping the tool.

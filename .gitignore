@@ -1,0 +1,19 @@
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+*.aprx.lock
+*.lock
+
+# ArcGIS local/generated data can be large and environment-specific.
+*.gdb/
+*.geodatabase/
+*.sd
+*.sddraft
+*.ppkx
+
