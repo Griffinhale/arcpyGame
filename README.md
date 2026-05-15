@@ -28,6 +28,7 @@ The trick is to treat the GIS stack as the engine:
 See `ideas/gui-validation-spike.md` for the GUI spike smoke-test sequence and interpretation notes.
 See `ideas/gui-era-concept-reopen.md` for the novelty-first concept re-rank after the GUI spike.
 See `docs/permit-office-prototype-smoke-test.md` for the Permit Office prototype smoke-test sequence.
+See `docs/permit-office-docket-design.md` for the first Permit Office docket template and enforcement design layer.
 
 ## Design constraints / likely realities
 

@@ -85,6 +85,9 @@ DOCKET_FIELDS = [
     ("preview_text", "TEXT", "Preview Text", 2048),
     ("risk_band", "TEXT", "Risk Band", 32),
     ("carryover", "TEXT", "Carryover Rule", 64),
+    ("stakeholder", "TEXT", "Stakeholder", 64),
+    ("origin_item_id", "TEXT", "Origin Item ID", 96),
+    ("target_rule", "TEXT", "Target Rule", 512),
 ]
 
 STATE_FIELDS = [
@@ -318,6 +321,7 @@ def write_state(paths, state):
         "unrest": (str(state.unrest), state.unrest),
         "culture": (str(state.culture), state.culture),
         "risk": (str(state.risk), state.risk),
+        "stakeholder_heat": (json.dumps(state.stakeholder_heat, sort_keys=True), None),
     }
     arcpy.management.DeleteRows(paths["state"])
     with arcpy.da.InsertCursor(paths["state"], ["key", "value_text", "value_num"]) as cursor:
@@ -337,6 +341,12 @@ def read_state(paths):
     for key in ("status", "last_report"):
         if key in values:
             setattr(state, key, values[key][0] or "")
+    if "stakeholder_heat" in values and values["stakeholder_heat"][0]:
+        try:
+            parsed = json.loads(values["stakeholder_heat"][0])
+            state.stakeholder_heat = {str(key): int(value) for key, value in parsed.items()}
+        except Exception:
+            state.stakeholder_heat = {}
     return state
 
 
@@ -384,8 +394,23 @@ def write_district_updates(paths, districts, report, affected_ids=None):
 def generate_docket_rows(paths, seed, messages):
     state = read_state(paths)
     arcpy.management.DeleteRows(paths["docket"])
-    items = rules.generate_docket(turn=state.turn, seed=seed, count=3)
-    fields = ["item_id", "turn", "template_id", "title", "geometry_type", "status", "inspected", "target_cell_ids", "preview_text", "risk_band", "carryover"]
+    items = rules.generate_docket(turn=state.turn, seed=seed, count=3, state=state)
+    fields = [
+        "item_id",
+        "turn",
+        "template_id",
+        "title",
+        "geometry_type",
+        "status",
+        "inspected",
+        "target_cell_ids",
+        "preview_text",
+        "risk_band",
+        "carryover",
+        "stakeholder",
+        "origin_item_id",
+        "target_rule",
+    ]
     with arcpy.da.InsertCursor(paths["docket"], fields) as cursor:
         for item in items:
             cursor.insertRow([
@@ -400,6 +425,9 @@ def generate_docket_rows(paths, seed, messages):
                 item.preview_text,
                 item.risk_band,
                 item.carryover,
+                item.stakeholder,
+                item.origin_item_id,
+                item.target_rule,
             ])
     _log(messages, "DOCKET", f"generated {len(items)} docket item(s) for turn {state.turn}")
     return items
@@ -407,7 +435,22 @@ def generate_docket_rows(paths, seed, messages):
 
 def read_docket(paths):
     items = []
-    fields = ["item_id", "turn", "template_id", "title", "geometry_type", "status", "inspected", "target_cell_ids", "preview_text", "risk_band", "carryover"]
+    fields = [
+        "item_id",
+        "turn",
+        "template_id",
+        "title",
+        "geometry_type",
+        "status",
+        "inspected",
+        "target_cell_ids",
+        "preview_text",
+        "risk_band",
+        "carryover",
+        "stakeholder",
+        "origin_item_id",
+        "target_rule",
+    ]
     with arcpy.da.SearchCursor(paths["docket"], fields) as cursor:
         for row in cursor:
             item = rules.DocketItem(
@@ -422,13 +465,16 @@ def read_docket(paths):
                 preview_text=row[8] or "",
                 risk_band=row[9] or "unknown",
                 carryover=row[10] or "expire_or_return",
+                stakeholder=row[11] or "",
+                origin_item_id=row[12] or "",
+                target_rule=row[13] or "",
             )
             items.append(item)
     return items
 
 
 def write_docket_item(paths, item):
-    fields = ["item_id", "status", "inspected", "target_cell_ids", "preview_text", "risk_band", "carryover"]
+    fields = ["item_id", "status", "inspected", "target_cell_ids", "preview_text", "risk_band", "carryover", "stakeholder", "origin_item_id", "target_rule"]
     with arcpy.da.UpdateCursor(paths["docket"], fields) as cursor:
         for row in cursor:
             if row[0] != item.item_id:
@@ -439,6 +485,9 @@ def write_docket_item(paths, item):
             row[4] = item.preview_text
             row[5] = item.risk_band
             row[6] = item.carryover
+            row[7] = item.stakeholder
+            row[8] = item.origin_item_id
+            row[9] = item.target_rule
             cursor.updateRow(row)
             return
 
@@ -569,11 +618,12 @@ def proposal_spillover(paths, item):
 def activate_proposal(paths, item, report):
     fc = {"POINT": paths["points"], "LINE": paths["lines"], "POLYGON": paths["zones"]}[item.geometry_type]
     fields = ["item_id", "status", "display_state", "report"]
+    status = item.status if item.status in ("active", "failed", "enforced", "settled") else "active"
     with arcpy.da.UpdateCursor(fc, fields) as cursor:
         for row in cursor:
             if row[0] == item.item_id and row[1] == "proposed":
-                row[1] = "active"
-                row[2] = "active"
+                row[1] = status
+                row[2] = status
                 row[3] = report[:1024]
                 cursor.updateRow(row)
 
@@ -686,7 +736,7 @@ def open_effect_report(title, report, affected, state):
     ttk.Label(frame, text=title, font=("Segoe UI", 12, "bold")).grid(row=0, column=0, sticky="w", pady=(0, 8))
     ttk.Label(frame, text=report, wraplength=560).grid(row=1, column=0, sticky="w", pady=4)
     ttk.Label(frame, text=f"Affected districts: {', '.join(affected) if affected else '(none)'}", wraplength=560).grid(row=2, column=0, sticky="w", pady=4)
-    metrics = f"AP {state.ap}/{state.max_ap} | ${state.money} | Prosperity {state.prosperity} | Unrest {state.unrest} | Culture {state.culture} | Risk {state.risk}"
+    metrics = f"AP {state.ap}/{state.max_ap} | ${state.money} | Prosperity {state.prosperity} | Unrest {state.unrest} | Culture {state.culture} | Risk {state.risk} | Heat {rules.heat_summary(state)}"
     ttk.Label(frame, text=metrics, wraplength=560).grid(row=3, column=0, sticky="w", pady=4)
     ttk.Button(frame, text="Close", command=root.destroy).grid(row=4, column=0, sticky="e", pady=(10, 0))
     root.grab_set()
@@ -760,8 +810,9 @@ class DashboardController:
         self.combo["values"] = labels
         if labels and self.item_var.get() not in labels:
             self.item_var.set(labels[0])
+        heat = rules.heat_summary(state)
         self.metrics_var.set(
-            f"Turn {state.turn}/6 | AP {state.ap}/{state.max_ap} | ${state.money} | P {state.prosperity} U {state.unrest} C {state.culture} R {state.risk}"
+            f"Turn {state.turn}/6 | AP {state.ap}/{state.max_ap} | ${state.money} | P {state.prosperity} U {state.unrest} C {state.culture} R {state.risk} | Heat {heat}"
         )
         self.refresh_detail()
 
@@ -783,11 +834,19 @@ class DashboardController:
         if not item:
             self.detail_var.set("No active docket item.")
             return
+        state = read_state(self.paths)
         template = rules.TEMPLATES[item.template_id]
+        stakeholder = item.stakeholder or template.stakeholder
+        target_rule = item.target_rule or template.target_rule
+        heat = state.stakeholder_heat.get(stakeholder, 0)
+        action_note = "Approve=enforce; Approve + Mitigate=settle/retro-permit; Deny=defer." if template.is_enforcement else "Approve=issue permit; Approve + Mitigate=issue with conditions; Deny=reject."
         text = (
             f"{item.title}\n"
-            f"Type: {template.category}; geometry: {item.geometry_type}; cost: {template.ap_cost} AP / ${template.money_cost}; "
-            f"mitigation +${template.mitigation_cost}\n"
+            f"Type: {template.category}; geometry: {item.geometry_type}; stakeholder: {stakeholder.replace('_', ' ')}; heat: {heat}\n"
+            f"Cost: {template.ap_cost} AP / ${template.money_cost}; mitigation +${template.mitigation_cost}\n"
+            f"Target rule: {target_rule}\n"
+            f"Failure mode: {template.failure_mode or 'none filed'}\n"
+            f"Actions: {action_note}\n"
             f"Targets: {', '.join(item.target_cell_ids) if item.target_cell_ids else '(select on map, then preview)'}\n"
             f"{item.preview_text}"
         )
@@ -878,7 +937,13 @@ class DashboardController:
             state = read_state(self.paths)
             districts = read_districts(self.paths)
             result = rules.resolve_decision(state, item, districts, "deny", item.target_cell_ids, seed=self.seed)
-            mark_proposals(self.paths, item.item_id, "denied", result.report)
+            if not result.ok:
+                command_finish(self.paths, command_id, "error", result.report, result.report)
+                self.status_var.set(result.report)
+                self.reload()
+                return
+            proposal_status = item.status if item.status in ("denied", "deferred") else "denied"
+            mark_proposals(self.paths, item.item_id, proposal_status, result.report)
             write_state(self.paths, state)
             write_docket_item(self.paths, item)
             action_log(self.paths, state, result)
