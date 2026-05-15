@@ -28,6 +28,7 @@ LINES = "PermitLines"
 ZONES = "PermitZones"
 DOCKET = "PermitDocket"
 GAME_STATE = "PermitGameState"
+PROJECTS = "PermitProjects"
 COMMANDS = "PermitUICommand"
 ACTION_LOG = "PermitActionLog"
 
@@ -59,6 +60,13 @@ DISTRICT_FIELDS = [
     ("zoning_overlay", "TEXT", "Zoning Overlay", 32),
     ("display_state", "TEXT", "Display State", 32),
     ("service_gap_json", "TEXT", "Service Gaps", 1024),
+    ("adjacent_cell_ids", "TEXT", "Adjacent District IDs", 512),
+    ("network_access_json", "TEXT", "Network Access", 1024),
+    ("hazard_json", "TEXT", "Hazards", 1024),
+    ("housing_capacity", "LONG", "Housing Capacity", None),
+    ("affordability", "LONG", "Affordability", None),
+    ("vacancy_rate", "SHORT", "Vacancy Rate", None),
+    ("displacement_json", "TEXT", "Displacement", 1024),
     ("population_mix_json", "TEXT", "Population Mix", 1024),
     ("dissatisfaction_json", "TEXT", "Dissatisfaction", 1024),
     ("incident_state", "TEXT", "Civic Incident State", 32),
@@ -71,11 +79,14 @@ SUPPORT_FIELDS = [
     ("feature_id", "TEXT", "Feature ID", 64),
     ("item_id", "TEXT", "Docket Item ID", 96),
     ("template_id", "TEXT", "Template ID", 64),
+    ("project_id", "TEXT", "Project ID", 96),
+    ("chain_step_id", "TEXT", "Project Step ID", 64),
     ("feature_name", "TEXT", "Feature Name", 128),
     ("feature_type", "TEXT", "Feature Type", 32),
     ("archetype_id", "TEXT", "Archetype ID", 64),
     ("family", "TEXT", "Feature Family", 32),
     ("service_type", "TEXT", "Service Type", 32),
+    ("network_type", "TEXT", "Network Type", 32),
     ("coverage_radius_m", "DOUBLE", "Coverage Radius Meters", None),
     ("capacity", "LONG", "Capacity", None),
     ("land_use", "TEXT", "Land Use", 32),
@@ -83,12 +94,18 @@ SUPPORT_FIELDS = [
     ("owner_group", "TEXT", "Owner Group", 64),
     ("intensity", "LONG", "Intensity", None),
     ("metadata_json", "TEXT", "Metadata JSON", 2048),
+    ("hazard_summary", "TEXT", "Hazard Summary", 512),
+    ("mitigation_summary", "TEXT", "Mitigation Summary", 512),
     ("status", "TEXT", "Status", 32),
     ("turn_created", "LONG", "Turn Created", None),
     ("expires_turn", "LONG", "Expires Turn", None),
     ("target_cell_ids", "TEXT", "Target District IDs", 512),
     ("display_state", "TEXT", "Display State", 32),
     ("report", "TEXT", "Report", 1024),
+    ("condition", "LONG", "Condition", None),
+    ("maintenance_due_turn", "LONG", "Maintenance Due Turn", None),
+    ("last_maintained_turn", "LONG", "Last Maintained Turn", None),
+    ("state_json", "TEXT", "Feature State JSON", 4000),
 ]
 
 DOCKET_FIELDS = [
@@ -106,12 +123,32 @@ DOCKET_FIELDS = [
     ("stakeholder", "TEXT", "Stakeholder", 64),
     ("origin_item_id", "TEXT", "Origin Item ID", 96),
     ("target_rule", "TEXT", "Target Rule", 512),
+    ("project_id", "TEXT", "Project ID", 96),
+    ("chain_step_id", "TEXT", "Project Step ID", 64),
+    ("scenario_tags", "TEXT", "Scenario Tags", 256),
+    ("priority", "LONG", "Priority", None),
+    ("due_turn", "LONG", "Due Turn", None),
+    ("subject_feature_id", "TEXT", "Subject Feature ID", 64),
+    ("case_json", "TEXT", "Case JSON", 4000),
 ]
 
 STATE_FIELDS = [
     ("key", "TEXT", "Key", 64),
     ("value_text", "TEXT", "Value Text", 2048),
     ("value_num", "DOUBLE", "Value Number", None),
+]
+
+PROJECT_FIELDS = [
+    ("project_id", "TEXT", "Project ID", 96),
+    ("chain_template_id", "TEXT", "Chain Template ID", 96),
+    ("current_step_id", "TEXT", "Current Step ID", 64),
+    ("status", "TEXT", "Status", 32),
+    ("turn_started", "LONG", "Turn Started", None),
+    ("due_turn", "LONG", "Due Turn", None),
+    ("stakeholder", "TEXT", "Stakeholder", 64),
+    ("target_cell_ids", "TEXT", "Target District IDs", 512),
+    ("payload_json", "TEXT", "Payload JSON", 4000),
+    ("last_report", "TEXT", "Last Report", 1024),
 ]
 
 COMMAND_FIELDS = [
@@ -263,6 +300,7 @@ def ensure_schema(gdb_path, messages):
         "zones": ensure_feature_class(gdb_path, ZONES, "POLYGON", SUPPORT_FIELDS, sr, messages),
         "docket": ensure_table(gdb_path, DOCKET, DOCKET_FIELDS, messages),
         "state": ensure_table(gdb_path, GAME_STATE, STATE_FIELDS, messages),
+        "projects": ensure_table(gdb_path, PROJECTS, PROJECT_FIELDS, messages),
         "commands": ensure_table(gdb_path, COMMANDS, COMMAND_FIELDS, messages),
         "action_log": ensure_table(gdb_path, ACTION_LOG, ACTION_LOG_FIELDS, messages),
     }
@@ -270,7 +308,7 @@ def ensure_schema(gdb_path, messages):
 
 
 def clear_game_rows(paths):
-    for key in ("districts", "points", "lines", "zones", "docket", "state", "commands", "action_log"):
+    for key in ("districts", "points", "lines", "zones", "docket", "state", "projects", "commands", "action_log"):
         if arcpy.Exists(paths[key]):
             arcpy.management.DeleteRows(paths[key])
 
@@ -304,6 +342,13 @@ def create_district_board(paths, seed, messages):
         "zoning_overlay",
         "display_state",
         "service_gap_json",
+        "adjacent_cell_ids",
+        "network_access_json",
+        "hazard_json",
+        "housing_capacity",
+        "affordability",
+        "vacancy_rate",
+        "displacement_json",
         "population_mix_json",
         "dissatisfaction_json",
         "incident_state",
@@ -331,6 +376,13 @@ def create_district_board(paths, seed, messages):
                 profile.zoning_overlay,
                 profile.display_state,
                 encode_service_gap(profile.service_gap),
+                ",".join(profile.adjacent_cell_ids),
+                encode_json(profile.network_access, limit=1024),
+                encode_json(profile.hazards, limit=1024),
+                profile.housing_capacity,
+                profile.affordability,
+                profile.vacancy_rate,
+                encode_json(profile.displacement, limit=1024),
                 encode_group_bands(profile.population_mix, maximum=3),
                 encode_group_bands(profile.dissatisfaction, maximum=4),
                 profile.incident_state,
@@ -355,7 +407,13 @@ def write_state(paths, state):
         "unrest": (str(state.unrest), state.unrest),
         "culture": (str(state.culture), state.culture),
         "risk": (str(state.risk), state.risk),
+        "scenario_id": (state.scenario_id, None),
         "stakeholder_heat": (json.dumps(state.stakeholder_heat, sort_keys=True), None),
+        "last_revenue": (str(state.last_revenue), state.last_revenue),
+        "last_upkeep": (str(state.last_upkeep), state.last_upkeep),
+        "last_net": (str(state.last_net), state.last_net),
+        "maintenance_backlog": (str(state.maintenance_backlog), state.maintenance_backlog),
+        "stakeholder_memory": (json.dumps(state.stakeholder_memory, sort_keys=True), None),
     }
     arcpy.management.DeleteRows(paths["state"])
     with arcpy.da.InsertCursor(paths["state"], ["key", "value_text", "value_num"]) as cursor:
@@ -369,18 +427,24 @@ def read_state(paths):
         for key, text, num in cursor:
             values[key] = (text, num)
     state = rules.CityState()
-    for key in ("turn", "max_turns", "ap", "max_ap", "money", "audit_stage", "prosperity", "unrest", "culture", "risk"):
+    for key in ("turn", "max_turns", "ap", "max_ap", "money", "audit_stage", "prosperity", "unrest", "culture", "risk", "last_revenue", "last_upkeep", "last_net", "maintenance_backlog"):
         if key in values and values[key][1] is not None:
             setattr(state, key, int(values[key][1]))
-    for key in ("status", "last_report"):
+    for key in ("status", "last_report", "scenario_id"):
         if key in values:
-            setattr(state, key, values[key][0] or "")
+            setattr(state, key, values[key][0] or ("default" if key == "scenario_id" else ""))
     if "stakeholder_heat" in values and values["stakeholder_heat"][0]:
         try:
             parsed = json.loads(values["stakeholder_heat"][0])
             state.stakeholder_heat = {str(key): int(value) for key, value in parsed.items()}
         except Exception:
             state.stakeholder_heat = {}
+    if "stakeholder_memory" in values and values["stakeholder_memory"][0]:
+        try:
+            parsed = json.loads(values["stakeholder_memory"][0])
+            state.stakeholder_memory = {str(key): int(value) for key, value in parsed.items()}
+        except Exception:
+            state.stakeholder_memory = {}
     return state
 
 
@@ -432,6 +496,26 @@ def decode_service_gap(text):
     return out
 
 
+def encode_json(value, limit=4000):
+    return json.dumps(value or {}, sort_keys=True)[:limit]
+
+
+def decode_json(text):
+    if not text:
+        return {}
+    try:
+        parsed = json.loads(text)
+    except Exception:
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def _summary_map(value):
+    if not isinstance(value, dict) or not value:
+        return ""
+    return ", ".join(f"{key} {amount}" for key, amount in sorted(value.items()))[:512]
+
+
 def read_districts(paths):
     out = {}
     fields = [
@@ -448,6 +532,13 @@ def read_districts(paths):
         "zoning_overlay",
         "display_state",
         "service_gap_json",
+        "adjacent_cell_ids",
+        "network_access_json",
+        "hazard_json",
+        "housing_capacity",
+        "affordability",
+        "vacancy_rate",
+        "displacement_json",
         "population_mix_json",
         "dissatisfaction_json",
         "incident_state",
@@ -470,11 +561,18 @@ def read_districts(paths):
                 zoning_overlay=row[10] or "",
                 display_state=row[11] or "stable",
                 service_gap=decode_service_gap(row[12]),
-                population_mix=decode_group_bands(row[13], maximum=3),
-                dissatisfaction=decode_group_bands(row[14], maximum=4),
-                incident_state=row[15] or "none",
-                incident_group=row[16] or "",
-                public_profile=row[17] or "",
+                adjacent_cell_ids=[part for part in (row[13] or "").split(",") if part],
+                network_access=decode_json(row[14]),
+                hazards=decode_json(row[15]),
+                housing_capacity=int(row[16] or 0),
+                affordability=int(row[17] or 0),
+                vacancy_rate=int(row[18] or 0),
+                displacement=decode_json(row[19]),
+                population_mix=decode_group_bands(row[20], maximum=3),
+                dissatisfaction=decode_group_bands(row[21], maximum=4),
+                incident_state=row[22] or "none",
+                incident_group=row[23] or "",
+                public_profile=row[24] or "",
             )
             rules.normalize_profile(profile)
             out[profile.cell_id] = profile
@@ -495,6 +593,13 @@ def write_district_updates(paths, districts, report, affected_ids=None):
         "zoning_overlay",
         "display_state",
         "service_gap_json",
+        "adjacent_cell_ids",
+        "network_access_json",
+        "hazard_json",
+        "housing_capacity",
+        "affordability",
+        "vacancy_rate",
+        "displacement_json",
         "population_mix_json",
         "dissatisfaction_json",
         "incident_state",
@@ -519,21 +624,178 @@ def write_district_updates(paths, districts, report, affected_ids=None):
             row[8] = profile.zoning_overlay
             row[9] = profile.display_state
             row[10] = encode_service_gap(profile.service_gap)
-            row[11] = encode_group_bands(profile.population_mix, maximum=3)
-            row[12] = encode_group_bands(profile.dissatisfaction, maximum=4)
-            row[13] = profile.incident_state
-            row[14] = profile.incident_group
-            row[15] = profile.public_profile
+            row[11] = ",".join(profile.adjacent_cell_ids)
+            row[12] = encode_json(profile.network_access, limit=1024)
+            row[13] = encode_json(profile.hazards, limit=1024)
+            row[14] = profile.housing_capacity
+            row[15] = profile.affordability
+            row[16] = profile.vacancy_rate
+            row[17] = encode_json(profile.displacement, limit=1024)
+            row[18] = encode_group_bands(profile.population_mix, maximum=3)
+            row[19] = encode_group_bands(profile.dissatisfaction, maximum=4)
+            row[20] = profile.incident_state
+            row[21] = profile.incident_group
+            row[22] = profile.public_profile
             if cid in affected:
-                row[16] = report[:512]
+                row[23] = report[:512]
             cursor.updateRow(row)
+
+
+def read_active_features(paths):
+    features = []
+    fields = [
+        "feature_id",
+        "item_id",
+        "template_id",
+        "project_id",
+        "chain_step_id",
+        "archetype_id",
+        "family",
+        "service_type",
+        "network_type",
+        "owner_group",
+        "target_cell_ids",
+        "capacity",
+        "intensity",
+        "status",
+        "turn_created",
+        "expires_turn",
+        "display_state",
+        "metadata_json",
+        "hazard_summary",
+        "mitigation_summary",
+        "condition",
+        "maintenance_due_turn",
+        "last_maintained_turn",
+        "state_json",
+    ]
+    for fc in (paths["points"], paths["lines"], paths["zones"]):
+        with arcpy.da.SearchCursor(fc, fields) as cursor:
+            for row in cursor:
+                feature = rules.FeatureInstance(
+                    feature_id=row[0],
+                    item_id=row[1] or "",
+                    template_id=row[2] or "",
+                    project_id=row[3] or "",
+                    chain_step_id=row[4] or "",
+                    archetype_id=row[5] or "",
+                    family=row[6] or "",
+                    service_type=row[7] or "",
+                    network_type=row[8] or "",
+                    owner_group=row[9] or "",
+                    target_cell_ids=[part for part in (row[10] or "").split(",") if part],
+                    capacity=int(row[11] or 0),
+                    intensity=int(row[12] or 1),
+                    status=row[13] or "active",
+                    turn_created=int(row[14] or 1),
+                    expires_turn=int(row[15] if row[15] not in (None, "") else -1),
+                    display_state=row[16] or "",
+                    metadata=decode_json(row[17]),
+                    condition=int(row[20] if row[20] not in (None, "") else 100),
+                    maintenance_due_turn=int(row[21] if row[21] not in (None, "") else -1),
+                    last_maintained_turn=int(row[22] or 0),
+                    state_json=decode_json(row[23]),
+                )
+                rules.normalize_feature_instance(feature)
+                features.append(feature)
+    return features
+
+
+def write_active_features(paths, features):
+    by_id = {feature.feature_id: feature for feature in features}
+    fields = [
+        "feature_id",
+        "status",
+        "display_state",
+        "condition",
+        "maintenance_due_turn",
+        "last_maintained_turn",
+        "state_json",
+        "metadata_json",
+        "report",
+    ]
+    for fc in (paths["points"], paths["lines"], paths["zones"]):
+        with arcpy.da.UpdateCursor(fc, fields) as cursor:
+            for row in cursor:
+                feature = by_id.get(row[0])
+                if not feature:
+                    continue
+                rules.normalize_feature_instance(feature)
+                row[1] = feature.status
+                row[2] = feature.display_state
+                row[3] = feature.condition
+                row[4] = feature.maintenance_due_turn
+                row[5] = feature.last_maintained_turn
+                row[6] = encode_json(feature.state_json)
+                row[7] = encode_json(feature.metadata, limit=2048)
+                row[8] = f"Feature {feature.feature_id}: {feature.status}, condition {feature.condition}"[:1024]
+                cursor.updateRow(row)
+
+
+def read_projects(paths):
+    projects = {}
+    project_path = paths.get("projects")
+    if not project_path or not arcpy.Exists(project_path):
+        return projects
+    fields = [
+        "project_id",
+        "chain_template_id",
+        "current_step_id",
+        "status",
+        "turn_started",
+        "due_turn",
+        "stakeholder",
+        "target_cell_ids",
+        "payload_json",
+        "last_report",
+    ]
+    with arcpy.da.SearchCursor(project_path, fields) as cursor:
+        for row in cursor:
+            project = rules.ProjectRecord(
+                project_id=row[0],
+                chain_template_id=row[1] or "",
+                current_step_id=row[2] or "",
+                status=row[3] or "active",
+                turn_started=int(row[4] or 1),
+                due_turn=int(row[5] or 1),
+                stakeholder=row[6] or "",
+                target_cell_ids=[part for part in (row[7] or "").split(",") if part],
+                payload=decode_json(row[8]),
+                last_report=row[9] or "",
+            )
+            projects[project.project_id] = project
+    return projects
+
+
+def write_projects(paths, projects):
+    project_path = paths.get("projects")
+    if not project_path or not arcpy.Exists(project_path):
+        return
+    arcpy.management.DeleteRows(project_path)
+    fields = [field[0] for field in PROJECT_FIELDS]
+    with arcpy.da.InsertCursor(project_path, fields) as cursor:
+        for project in sorted(projects.values(), key=lambda item: item.project_id):
+            cursor.insertRow([
+                project.project_id,
+                project.chain_template_id,
+                project.current_step_id,
+                project.status,
+                project.turn_started,
+                project.due_turn,
+                project.stakeholder,
+                ",".join(project.target_cell_ids),
+                encode_json(project.payload),
+                project.last_report[:1024],
+            ])
 
 
 def generate_docket_rows(paths, seed, messages):
     state = read_state(paths)
     districts = read_districts(paths)
+    active_features = read_active_features(paths)
+    projects = read_projects(paths)
     arcpy.management.DeleteRows(paths["docket"])
-    items = rules.generate_docket(turn=state.turn, seed=seed, count=3, state=state, districts=districts)
+    items = rules.generate_docket(turn=state.turn, seed=seed, count=3, state=state, districts=districts, projects=projects, active_features=active_features)
     fields = [
         "item_id",
         "turn",
@@ -549,6 +811,13 @@ def generate_docket_rows(paths, seed, messages):
         "stakeholder",
         "origin_item_id",
         "target_rule",
+        "project_id",
+        "chain_step_id",
+        "scenario_tags",
+        "priority",
+        "due_turn",
+        "subject_feature_id",
+        "case_json",
     ]
     with arcpy.da.InsertCursor(paths["docket"], fields) as cursor:
         for item in items:
@@ -567,6 +836,13 @@ def generate_docket_rows(paths, seed, messages):
                 item.stakeholder,
                 item.origin_item_id,
                 item.target_rule,
+                item.project_id,
+                item.chain_step_id,
+                ",".join(rules.TEMPLATES[item.template_id].scenario_tags),
+                item.priority,
+                item.due_turn,
+                item.subject_feature_id,
+                encode_json(item.case_json),
             ])
     _log(messages, "DOCKET", f"generated {len(items)} docket item(s) for turn {state.turn}")
     return items
@@ -589,6 +865,13 @@ def read_docket(paths):
         "stakeholder",
         "origin_item_id",
         "target_rule",
+        "project_id",
+        "chain_step_id",
+        "scenario_tags",
+        "priority",
+        "due_turn",
+        "subject_feature_id",
+        "case_json",
     ]
     with arcpy.da.SearchCursor(paths["docket"], fields) as cursor:
         for row in cursor:
@@ -607,13 +890,37 @@ def read_docket(paths):
                 stakeholder=row[11] or "",
                 origin_item_id=row[12] or "",
                 target_rule=row[13] or "",
+                project_id=row[14] or "",
+                chain_step_id=row[15] or "",
+                priority=int(row[17] or 0),
+                due_turn=int(row[18] or 0),
+                subject_feature_id=row[19] or "",
+                case_json=decode_json(row[20]),
             )
             items.append(item)
     return items
 
 
 def write_docket_item(paths, item):
-    fields = ["item_id", "status", "inspected", "target_cell_ids", "preview_text", "risk_band", "carryover", "stakeholder", "origin_item_id", "target_rule"]
+    fields = [
+        "item_id",
+        "status",
+        "inspected",
+        "target_cell_ids",
+        "preview_text",
+        "risk_band",
+        "carryover",
+        "stakeholder",
+        "origin_item_id",
+        "target_rule",
+        "project_id",
+        "chain_step_id",
+        "scenario_tags",
+        "priority",
+        "due_turn",
+        "subject_feature_id",
+        "case_json",
+    ]
     with arcpy.da.UpdateCursor(paths["docket"], fields) as cursor:
         for row in cursor:
             if row[0] != item.item_id:
@@ -627,6 +934,13 @@ def write_docket_item(paths, item):
             row[7] = item.stakeholder
             row[8] = item.origin_item_id
             row[9] = item.target_rule
+            row[10] = item.project_id
+            row[11] = item.chain_step_id
+            row[12] = ",".join(rules.TEMPLATES[item.template_id].scenario_tags)
+            row[13] = item.priority
+            row[14] = item.due_turn
+            row[15] = item.subject_feature_id
+            row[16] = encode_json(item.case_json)
             cursor.updateRow(row)
             return
 
@@ -687,15 +1001,42 @@ def insert_or_replace_proposal(paths, item, target_ids, messages):
 
     feature_id = str(uuid.uuid4())
     target_text = ",".join(valid)
+    expires_turn = item.turn + template.expires_after if template.expires_after else -1
+    feature_state = rules.FeatureInstance(
+        feature_id=feature_id,
+        item_id=item.item_id,
+        template_id=item.template_id,
+        archetype_id=archetype.archetype_id,
+        family=archetype.family,
+        service_type=archetype.service_type,
+        network_type=archetype.network_type or archetype.service_type,
+        owner_group=item.stakeholder or template.stakeholder,
+        target_cell_ids=valid,
+        capacity=archetype.capacity,
+        intensity=max(1, archetype.capacity or 1),
+        status="proposed",
+        turn_created=item.turn,
+        expires_turn=expires_turn,
+        display_state="proposed",
+        project_id=item.project_id,
+        chain_step_id=item.chain_step_id,
+        metadata=metadata,
+    )
+    rules.normalize_feature_instance(feature_state, item.turn)
+    feature_state.status = "proposed"
+    feature_state.display_state = "proposed"
     attrs = [
         feature_id,
         item.item_id,
         item.template_id,
+        item.project_id,
+        item.chain_step_id,
         item.title,
         template.category,
         archetype.archetype_id,
         archetype.family,
         archetype.service_type,
+        archetype.network_type or archetype.service_type,
         float(archetype.coverage_radius_m),
         archetype.capacity,
         archetype.land_use,
@@ -703,12 +1044,18 @@ def insert_or_replace_proposal(paths, item, target_ids, messages):
         item.stakeholder or template.stakeholder,
         max(1, archetype.capacity or 1),
         json.dumps(metadata, sort_keys=True)[:2048],
+        _summary_map(metadata.get("hazard_effects")),
+        _summary_map(metadata.get("mitigation_effects")),
         "proposed",
         item.turn,
-        item.turn + template.expires_after if template.expires_after else -1,
+        expires_turn,
         target_text,
         "proposed",
         template.preview,
+        feature_state.condition,
+        feature_state.maintenance_due_turn,
+        feature_state.last_maintained_turn,
+        encode_json(feature_state.state_json),
     ]
     if item.geometry_type == "POINT":
         geom = arcpy.PointGeometry(geoms[valid[0]].centroid, geoms[valid[0]].spatialReference)
@@ -770,14 +1117,36 @@ def proposal_spillover(paths, item):
 
 def activate_proposal(paths, item, report):
     fc = {"POINT": paths["points"], "LINE": paths["lines"], "POLYGON": paths["zones"]}[item.geometry_type]
-    fields = ["item_id", "status", "display_state", "report"]
-    status = item.status if item.status in ("active", "failed", "enforced", "settled") else "active"
+    fields = ["item_id", "feature_id", "archetype_id", "project_id", "chain_step_id", "turn_created", "expires_turn", "status", "display_state", "report", "condition", "maintenance_due_turn", "last_maintained_turn", "state_json"]
+    status = item.status if item.status in ("active", "failed", "enforced", "settled", "responded", "maintained") else "active"
     with arcpy.da.UpdateCursor(fc, fields) as cursor:
         for row in cursor:
-            if row[0] == item.item_id and row[1] == "proposed":
-                row[1] = status
-                row[2] = status
-                row[3] = report[:1024]
+            if row[0] == item.item_id and row[7] == "proposed":
+                feature = rules.FeatureInstance(
+                    feature_id=row[1],
+                    archetype_id=row[2],
+                    project_id=item.project_id or row[3] or "",
+                    chain_step_id=item.chain_step_id or row[4] or "",
+                    status=status,
+                    turn_created=int(row[5] or item.turn),
+                    expires_turn=int(row[6] if row[6] not in (None, "") else -1),
+                    condition=int(row[10] if row[10] not in (None, "") else 100),
+                    maintenance_due_turn=int(row[11] if row[11] not in (None, "") else -1),
+                    last_maintained_turn=int(row[12] or 0),
+                    state_json=decode_json(row[13]),
+                )
+                rules.normalize_feature_instance(feature, item.turn)
+                feature.status = status
+                feature.display_state = status
+                row[3] = feature.project_id
+                row[4] = feature.chain_step_id
+                row[7] = feature.status
+                row[8] = feature.display_state
+                row[9] = report[:1024]
+                row[10] = feature.condition
+                row[11] = feature.maintenance_due_turn
+                row[12] = feature.last_maintained_turn
+                row[13] = encode_json(feature.state_json)
                 cursor.updateRow(row)
 
 
@@ -1039,7 +1408,8 @@ class DashboardController:
         try:
             state = read_state(self.paths)
             districts = read_districts(self.paths)
-            result = rules.resolve_decision(state, item, districts, "inspect", item.target_cell_ids, seed=self.seed)
+            active_features = read_active_features(self.paths)
+            result = rules.resolve_decision(state, item, districts, "inspect", item.target_cell_ids, seed=self.seed, active_features=active_features)
             write_state(self.paths, state)
             write_docket_item(self.paths, item)
             action_log(self.paths, state, result)
@@ -1060,9 +1430,11 @@ class DashboardController:
             if not item.target_cell_ids:
                 selected = selected_cell_ids(self.district_layer)
                 insert_or_replace_proposal(self.paths, item, selected, self.messages)
-            spillover = proposal_spillover(self.paths, item)
+            spillover = [] if item.template_id == rules.MAINTENANCE_TEMPLATE_ID else proposal_spillover(self.paths, item)
             state = read_state(self.paths)
             districts = read_districts(self.paths)
+            active_features = read_active_features(self.paths)
+            projects = read_projects(self.paths)
             result = rules.resolve_decision(
                 state,
                 item,
@@ -1072,15 +1444,20 @@ class DashboardController:
                 spillover,
                 seed=self.seed,
                 mitigated=mitigated,
+                active_features=active_features,
+                projects=projects,
             )
             if not result.ok:
                 command_finish(self.paths, command_id, "error", result.report, result.report)
                 self.status_var.set(result.report)
                 self.reload()
                 return
+            if result.feature_updates:
+                write_active_features(self.paths, active_features)
             activate_proposal(self.paths, item, result.report)
             write_district_updates(self.paths, districts, result.report, result.affected_cell_ids)
             write_state(self.paths, state)
+            write_projects(self.paths, projects)
             write_docket_item(self.paths, item)
             action_log(self.paths, state, result)
             command_finish(self.paths, command_id, result.command_status, result.report)
@@ -1101,16 +1478,21 @@ class DashboardController:
         try:
             state = read_state(self.paths)
             districts = read_districts(self.paths)
-            result = rules.resolve_decision(state, item, districts, "deny", item.target_cell_ids, seed=self.seed)
+            active_features = read_active_features(self.paths)
+            projects = read_projects(self.paths)
+            result = rules.resolve_decision(state, item, districts, "deny", item.target_cell_ids, seed=self.seed, active_features=active_features, projects=projects)
             if not result.ok:
                 command_finish(self.paths, command_id, "error", result.report, result.report)
                 self.status_var.set(result.report)
                 self.reload()
                 return
+            if result.feature_updates:
+                write_active_features(self.paths, active_features)
             proposal_status = item.status if item.status in ("denied", "deferred") else "denied"
             mark_proposals(self.paths, item.item_id, proposal_status, result.report)
             write_district_updates(self.paths, districts, result.report, result.affected_cell_ids)
             write_state(self.paths, state)
+            write_projects(self.paths, projects)
             write_docket_item(self.paths, item)
             action_log(self.paths, state, result)
             command_finish(self.paths, command_id, result.command_status, result.report)
@@ -1128,9 +1510,14 @@ class DashboardController:
             state = read_state(self.paths)
             items = read_docket(self.paths)
             districts = read_districts(self.paths)
-            report = rules.advance_turn(state, items, districts)
+            active_features = read_active_features(self.paths)
+            projects = read_projects(self.paths)
+            turn_result = rules.advance_turn_result(state, items, districts, active_features, projects)
+            report = turn_result.report
             write_state(self.paths, state)
+            write_projects(self.paths, projects)
             write_district_updates(self.paths, districts, report)
+            write_active_features(self.paths, active_features)
             for item in items:
                 write_docket_item(self.paths, item)
             generate_docket_rows(self.paths, self.seed, self.messages)
@@ -1198,7 +1585,9 @@ class PermitOfficePrototype(object):
         if action == "Show Scorecard":
             state = read_state(paths)
             districts = read_districts(paths)
-            grade, report = rules.scorecard(state)
+            active_features = read_active_features(paths)
+            items = read_docket(paths)
+            grade, report = rules.scorecard(state, districts, active_features, items)
             _log(messages, "AUDIT", f"{report} {rules.population_city_summary(districts)}; incidents={rules.incident_summary(districts)}.")
             return
         if action == "Open Dashboard":
