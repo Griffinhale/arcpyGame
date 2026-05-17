@@ -67,5 +67,4 @@ The prototype writes:
 - The dashboard is intentionally the main controller.
 - Manual map refresh is acceptable if live redraw lags.
 - Proposed geometries are auto-generated from selected districts; Feature Set drawing is not used.
-- The first loop validates gameplay architecture, not final six-turn balance.
-
+- This smoke test validates ArcGIS dashboard-map mechanics. The final six-turn balance is locked by pure Python regression coverage, but still needs a recorded live ArcGIS Pro run.

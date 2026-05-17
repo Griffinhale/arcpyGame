@@ -8,8 +8,6 @@ testable outside ArcGIS Pro.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-import random
-from typing import Iterable
 
 
 CORE_METRICS = ("prosperity", "unrest", "culture", "risk")
@@ -426,5 +424,4 @@ class TurnAdvanceResult:
     upkeep: int = 0
     net: int = 0
     audit: AuditResult | None = None
-
 

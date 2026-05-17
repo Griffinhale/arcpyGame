@@ -6,7 +6,7 @@ from typing import Iterable
 from .models import *
 from .catalogs import *
 from .helpers import *
-from .systems import active_feature_instances, normalize_feature_instance, project_step_template
+from .systems import normalize_feature_instance, project_step_template
 
 def generate_district_profiles(rows: int = 5, cols: int = 5, seed: int = 2026) -> list[DistrictProfile]:
     rng = random.Random(seed)
@@ -340,4 +340,3 @@ def _inspection_summary_text(inspection_case: dict[str, object]) -> str:
 
 
 __all__ = [name for name in globals() if not name.startswith("__")]
-

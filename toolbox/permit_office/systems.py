@@ -250,10 +250,7 @@ def _feature_spatial_weights(feature: FeatureInstance, districts: dict[str, Dist
     weights: dict[str, float] = {}
     for cid in targets:
         weights[cid] = max(weights.get(cid, 0.0), 1.0)
-    if archetype.geometry_type == "LINE":
-        neighbor_weight = 0.5
-    else:
-        neighbor_weight = 0.5
+    neighbor_weight = 0.5
     for cid in targets:
         for adjacent in districts[cid].adjacent_cell_ids:
             if adjacent in districts and adjacent not in targets:
@@ -457,4 +454,3 @@ def _apply_recurring_economy(
 
 
 __all__ = [name for name in globals() if not name.startswith("__")]
-
