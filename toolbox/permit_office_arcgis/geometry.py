@@ -8,7 +8,13 @@ import arcpy
 from .messages import _log, _warn
 from .rules_loader import rules
 from .schema import DISTRICTS, LINES, POINTS, SUPPORT_FIELDS, ZONES
-from .store import encode_json, write_docket_item, _summary_map
+from .store import encode_json, write_docket_item
+
+
+def _summary_map(value):
+    if not isinstance(value, dict) or not value:
+        return ""
+    return ", ".join(f"{key} {amount}" for key, amount in sorted(value.items()))[:512]
 
 def selected_cell_ids(layer):
     if not layer:
@@ -267,5 +273,4 @@ def apply_simple_symbology(layer, key, messages):
         layer.symbology = sym
     except Exception as exc:
         _warn(messages, "SYM", f"symbology setup skipped for {getattr(layer, 'name', key)}: {exc}")
-
 

@@ -8,7 +8,15 @@ import arcpy
 
 from .messages import _log
 from .rules_loader import rules
-from .schema import DISTRICT_FIELDS, PROJECT_FIELDS, SUPPORT_FIELDS
+from .schema import DOCKET_FIELDS, PROJECT_FIELDS
+
+
+DOCKET_FIELD_NAMES = [field[0] for field in DOCKET_FIELDS]
+DOCKET_UPDATE_FIELDS = [
+    name
+    for name in DOCKET_FIELD_NAMES
+    if name not in {"turn", "template_id", "title", "geometry_type"}
+]
 
 def now_utc():
     return _datetime.datetime.utcnow()
@@ -209,12 +217,6 @@ def decode_json(text):
     except Exception:
         return {}
     return parsed if isinstance(parsed, dict) else {}
-
-
-def _summary_map(value):
-    if not isinstance(value, dict) or not value:
-        return ""
-    return ", ".join(f"{key} {amount}" for key, amount in sorted(value.items()))[:512]
 
 
 def read_districts(paths):
@@ -497,30 +499,7 @@ def generate_docket_rows(paths, seed, messages):
     projects = read_projects(paths)
     arcpy.management.DeleteRows(paths["docket"])
     items = rules.generate_docket(turn=state.turn, seed=seed, count=3, state=state, districts=districts, projects=projects, active_features=active_features)
-    fields = [
-        "item_id",
-        "turn",
-        "template_id",
-        "title",
-        "geometry_type",
-        "status",
-        "inspected",
-        "target_cell_ids",
-        "preview_text",
-        "risk_band",
-        "carryover",
-        "stakeholder",
-        "origin_item_id",
-        "target_rule",
-        "project_id",
-        "chain_step_id",
-        "scenario_tags",
-        "priority",
-        "due_turn",
-        "subject_feature_id",
-        "case_json",
-    ]
-    with arcpy.da.InsertCursor(paths["docket"], fields) as cursor:
+    with arcpy.da.InsertCursor(paths["docket"], DOCKET_FIELD_NAMES) as cursor:
         for item in items:
             cursor.insertRow([
                 item.item_id,
@@ -551,30 +530,7 @@ def generate_docket_rows(paths, seed, messages):
 
 def read_docket(paths):
     items = []
-    fields = [
-        "item_id",
-        "turn",
-        "template_id",
-        "title",
-        "geometry_type",
-        "status",
-        "inspected",
-        "target_cell_ids",
-        "preview_text",
-        "risk_band",
-        "carryover",
-        "stakeholder",
-        "origin_item_id",
-        "target_rule",
-        "project_id",
-        "chain_step_id",
-        "scenario_tags",
-        "priority",
-        "due_turn",
-        "subject_feature_id",
-        "case_json",
-    ]
-    with arcpy.da.SearchCursor(paths["docket"], fields) as cursor:
+    with arcpy.da.SearchCursor(paths["docket"], DOCKET_FIELD_NAMES) as cursor:
         for row in cursor:
             item = rules.DocketItem(
                 item_id=row[0],
@@ -603,26 +559,7 @@ def read_docket(paths):
 
 
 def write_docket_item(paths, item):
-    fields = [
-        "item_id",
-        "status",
-        "inspected",
-        "target_cell_ids",
-        "preview_text",
-        "risk_band",
-        "carryover",
-        "stakeholder",
-        "origin_item_id",
-        "target_rule",
-        "project_id",
-        "chain_step_id",
-        "scenario_tags",
-        "priority",
-        "due_turn",
-        "subject_feature_id",
-        "case_json",
-    ]
-    with arcpy.da.UpdateCursor(paths["docket"], fields) as cursor:
+    with arcpy.da.UpdateCursor(paths["docket"], DOCKET_UPDATE_FIELDS) as cursor:
         for row in cursor:
             if row[0] != item.item_id:
                 continue
@@ -680,5 +617,4 @@ def action_log(paths, state, result):
             result.report[:2048],
             json.dumps(result.city_delta)[:512],
         ])
-
 

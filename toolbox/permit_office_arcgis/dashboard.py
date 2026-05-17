@@ -244,15 +244,7 @@ class DashboardController:
             if result.feature_updates:
                 write_active_features(self.paths, active_features)
             activate_proposal(self.paths, item, result.report)
-            write_district_updates(self.paths, districts, result.report, result.affected_cell_ids)
-            write_state(self.paths, state)
-            write_projects(self.paths, projects)
-            write_docket_item(self.paths, item)
-            action_log(self.paths, state, result)
-            command_finish(self.paths, command_id, result.command_status, result.report)
-            refresh_all(self.paths, self.messages)
-            self.status_var.set(result.report)
-            open_effect_report(item.title, result.report, result.affected_cell_ids, state)
+            self._finish_decision(command_id, item, state, districts, projects, result)
         except Exception as exc:
             command_finish(self.paths, command_id, "error", error=str(exc))
             self.status_var.set(f"Approve failed: {exc}")
@@ -279,19 +271,22 @@ class DashboardController:
                 write_active_features(self.paths, active_features)
             proposal_status = item.status if item.status in ("denied", "deferred") else "denied"
             mark_proposals(self.paths, item.item_id, proposal_status, result.report)
-            write_district_updates(self.paths, districts, result.report, result.affected_cell_ids)
-            write_state(self.paths, state)
-            write_projects(self.paths, projects)
-            write_docket_item(self.paths, item)
-            action_log(self.paths, state, result)
-            command_finish(self.paths, command_id, result.command_status, result.report)
-            refresh_all(self.paths, self.messages)
-            self.status_var.set(result.report)
-            open_effect_report(item.title, result.report, result.affected_cell_ids, state)
+            self._finish_decision(command_id, item, state, districts, projects, result)
         except Exception as exc:
             command_finish(self.paths, command_id, "error", error=str(exc))
             self.status_var.set(f"Deny failed: {exc}")
         self.reload()
+
+    def _finish_decision(self, command_id, item, state, districts, projects, result):
+        write_district_updates(self.paths, districts, result.report, result.affected_cell_ids)
+        write_state(self.paths, state)
+        write_projects(self.paths, projects)
+        write_docket_item(self.paths, item)
+        action_log(self.paths, state, result)
+        command_finish(self.paths, command_id, result.command_status, result.report)
+        refresh_all(self.paths, self.messages)
+        self.status_var.set(result.report)
+        open_effect_report(item.title, result.report, result.affected_cell_ids, state)
 
     def advance_turn(self):
         command_id = command_insert(self.paths, "advance_turn", "", [])
@@ -317,5 +312,3 @@ class DashboardController:
             command_finish(self.paths, command_id, "error", error=str(exc))
             self.status_var.set(f"Advance failed: {exc}")
         self.reload()
-
-
