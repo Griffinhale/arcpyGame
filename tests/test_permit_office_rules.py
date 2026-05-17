@@ -59,13 +59,141 @@ def test_generate_docket_has_three_seeded_items_with_templates():
 
 
 def test_six_turn_demo_sequence_covers_shortlist():
+    expected = {
+        1: ["connector_corridor", "procession_route", "street_vendor_compact"],
+        2: ["utility_expansion_trench", "contractor_renovation_waiver", "public_art_museum_grant"],
+        3: ["natural_reserve_conversion", "mixed_use_rezoning", "fire_budget_escalation"],
+        4: ["child_development_park_annex", "street_vendor_compact", "utility_expansion_trench"],
+        5: ["connector_corridor", "mixed_use_rezoning", "public_art_museum_grant"],
+        6: ["natural_reserve_conversion", "fire_budget_escalation", "procession_route"],
+    }
     seen = set()
     for turn in range(1, 7):
         docket = rules.generate_docket(turn=turn, seed=2026, count=3)
         assert len(docket) == 3
+        assert [item.template_id for item in docket] == expected[turn]
         seen.update(item.template_id for item in docket)
 
     assert set(rules.DEMO_TEMPLATE_IDS) <= seen
+
+
+def _active_feature_from_route_item(item, turn):
+    template = rules.TEMPLATES[item.template_id]
+    archetype = rules.feature_archetype_for_template(template)
+    feature = rules.FeatureInstance(
+        feature_id=f"F-{item.item_id}",
+        archetype_id=archetype.archetype_id,
+        item_id=item.item_id,
+        template_id=item.template_id,
+        owner_group=item.stakeholder or template.stakeholder,
+        target_cell_ids=list(item.target_cell_ids),
+        capacity=archetype.capacity,
+        intensity=max(1, archetype.capacity or 1),
+        status=item.status,
+        turn_created=turn,
+    )
+    return rules.normalize_feature_instance(feature, turn)
+
+
+def test_seed_2026_golden_route_produces_stable_conditional_scorecard():
+    profiles = {profile.cell_id: profile for profile in rules.generate_district_profiles(seed=2026)}
+    state = rules.CityState()
+    active_features = []
+    docket_history = []
+    action_counts = {"inspect": 0, "approve": 0, "approve_mitigated": 0, "deny": 0}
+    generated_followup_seen = False
+
+    route = {
+        1: [
+            ("street_vendor_compact", "approve_mitigated", ["D0102"], ["D0101"], True),
+            ("connector_corridor", "approve", ["D0101", "D0102"], [], False),
+        ],
+        2: [
+            ("utility_expansion_trench", "approve", ["D0004", "D0104"], [], False),
+            ("contractor_renovation_waiver", "deny", ["D0000"], [], False),
+        ],
+        3: [
+            (rules.MAINTENANCE_TEMPLATE_ID, "approve", ["D0102"], [], False),
+            ("natural_reserve_conversion", "approve", ["D0200", "D0304"], [], False),
+        ],
+        4: [
+            (rules.CIVIC_INCIDENT_TEMPLATE_ID, "approve", ["D0001"], [], False),
+            ("child_development_park_annex", "deny", ["D0000"], [], False),
+            ("street_vendor_compact", "deny", ["D0102"], [], False),
+        ],
+    }
+    expected_route_dockets = {
+        1: ["connector_corridor", "procession_route", "street_vendor_compact"],
+        2: ["utility_expansion_trench", "contractor_renovation_waiver", "public_art_museum_grant"],
+        3: [rules.MAINTENANCE_TEMPLATE_ID, "natural_reserve_conversion", "mixed_use_rezoning"],
+        4: [rules.CIVIC_INCIDENT_TEMPLATE_ID, "child_development_park_annex", "street_vendor_compact"],
+        5: [rules.MAINTENANCE_TEMPLATE_ID, rules.CIVIC_INCIDENT_TEMPLATE_ID, "connector_corridor"],
+        6: [rules.MAINTENANCE_TEMPLATE_ID, rules.CIVIC_INCIDENT_TEMPLATE_ID, rules.CIVIC_INCIDENT_TEMPLATE_ID],
+    }
+
+    for turn in range(1, 7):
+        docket = rules.generate_docket(
+            turn=state.turn,
+            seed=2026,
+            count=3,
+            state=state,
+            districts=profiles,
+            active_features=active_features,
+        )
+        assert [item.template_id for item in docket] == expected_route_dockets[turn]
+        generated_followup_seen = generated_followup_seen or any(
+            item.template_id == rules.MAINTENANCE_TEMPLATE_ID for item in docket
+        )
+
+        for template_id, action, targets, spillovers, inspect_first in route.get(turn, []):
+            item = next(item for item in docket if item.template_id == template_id)
+            if inspect_first:
+                inspected = rules.resolve_decision(
+                    state,
+                    item,
+                    profiles,
+                    "inspect",
+                    targets,
+                    seed=2026,
+                    active_features=active_features,
+                )
+                assert inspected.ok is True
+                action_counts["inspect"] += 1
+
+            result = rules.resolve_decision(
+                state,
+                item,
+                profiles,
+                action,
+                targets,
+                spillover_cell_ids=spillovers,
+                seed=2026,
+                mitigated=action == "approve_mitigated",
+                active_features=active_features,
+            )
+            assert result.ok is True
+            action_counts[action] += 1
+            if item.status in {"active", "failed", "enforced", "settled", "responded", "maintained"} and item.template_id != rules.MAINTENANCE_TEMPLATE_ID:
+                active_features.append(_active_feature_from_route_item(item, state.turn))
+
+        docket_history.extend(docket)
+        if turn < 6:
+            rules.advance_turn_result(state, docket, profiles, active_features)
+
+    archetypes = {feature.archetype_id for feature in active_features}
+    grade, report = rules.scorecard(state, profiles, active_features, docket_history)
+
+    assert action_counts["inspect"] >= 1
+    assert action_counts["approve"] >= 1
+    assert action_counts["approve_mitigated"] >= 1
+    assert action_counts["deny"] >= 1
+    assert generated_followup_seen is True
+    assert {"vendor_market", "connector_corridor", "utility_trench", "protected_reserve"} <= archetypes
+    assert grade == "CONDITIONAL"
+    assert state.money == 15
+    assert (state.prosperity, state.unrest, state.culture, state.risk) == (60, 21, 46, 7)
+    assert "score=56" in report
+    assert "4 finding(s), 0 critical" in report
 
 
 def test_inspect_item_marks_item_and_adds_risk_band_hint():

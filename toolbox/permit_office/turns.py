@@ -174,6 +174,12 @@ def generate_audit_result(
     scenario = SCENARIO_RULES.get(state.scenario_id, SCENARIO_RULES["default"])
     score = _scenario_score(state, profiles, features, scenario)
     score += max(-10, min(10, state.last_net))
+    service_gap_counts: dict[str, int] = {}
+    service_gap_total = 0
+    service_gap_critical = 0
+    incident_count = 0
+    hazard_counts: dict[str, int] = {}
+    displacement_count = 0
     if state.money < 0:
         findings.append(AuditFinding("money.negative", "critical", "money", "Budget is negative.", -25))
     elif state.money < 15:
@@ -188,31 +194,98 @@ def generate_audit_result(
     for profile in profiles:
         normalize_profile(profile)
         if profile.incident_state != "none":
-            findings.append(AuditFinding(f"incident.{profile.cell_id}", "warning", "district", f"{profile.cell_id} has a visible {profile.incident_state}.", -8))
+            incident_count += 1
         if profile.risk >= 70:
             findings.append(AuditFinding(f"risk.{profile.cell_id}", "critical", "district", f"{profile.cell_id} risk is critical.", -12))
         if profile.unrest >= 70:
             findings.append(AuditFinding(f"unrest.{profile.cell_id}", "critical", "district", f"{profile.cell_id} unrest is critical.", -12))
         for service, gap in profile.service_gap.items():
             if gap >= AUDIT_THRESHOLDS["service_gap_critical"]:
-                findings.append(AuditFinding(f"service_gap.{service}.{profile.cell_id}", "critical", "services", f"{profile.cell_id} has a critical {service.replace('_', ' ')} gap.", -12))
+                service_gap_total += 1
+                service_gap_critical += 1
+                service_gap_counts[service] = service_gap_counts.get(service, 0) + 1
             elif gap >= AUDIT_THRESHOLDS["service_gap_warning"]:
-                findings.append(AuditFinding(f"service_gap.{service}.{profile.cell_id}", "warning", "services", f"{profile.cell_id} has a {service.replace('_', ' ')} gap.", -6))
+                service_gap_total += 1
+                service_gap_counts[service] = service_gap_counts.get(service, 0) + 1
         for hazard, band in profile.hazards.items():
             if band >= 3:
-                findings.append(AuditFinding(f"hazard.{hazard}.{profile.cell_id}", "warning", "hazards", f"{profile.cell_id} has elevated {hazard}.", -6))
+                hazard_counts[hazard] = hazard_counts.get(hazard, 0) + 1
         displacement = max(profile.displacement.values(), default=0)
         if displacement >= 3:
-            findings.append(AuditFinding(f"displacement.{profile.cell_id}", "warning", "housing", f"{profile.cell_id} has displacement pressure.", -6))
+            displacement_count += 1
 
+    if service_gap_total:
+        services = ", ".join(
+            f"{service.replace('_', ' ')} x{count}"
+            for service, count in sorted(service_gap_counts.items())
+        )
+        severity_text = "including critical gaps" if service_gap_critical else "warning-level gaps"
+        findings.append(
+            AuditFinding(
+                "service_gap.citywide",
+                "warning",
+                "services",
+                f"Citywide service review found {service_gap_total} district/service gap(s), {severity_text}: {services}.",
+                -8 if service_gap_critical else -5,
+            )
+        )
+    if incident_count:
+        findings.append(
+            AuditFinding(
+                "incident.citywide",
+                "warning",
+                "district",
+                f"Visible civic incident files remain in {incident_count} district(s).",
+                -8,
+            )
+        )
+    if hazard_counts:
+        hazards = ", ".join(
+            f"{hazard.replace('_', ' ')} x{count}"
+            for hazard, count in sorted(hazard_counts.items())
+        )
+        findings.append(
+            AuditFinding(
+                "hazard.citywide",
+                "warning",
+                "hazards",
+                f"Elevated hazard bands remain: {hazards}.",
+                -8,
+            )
+        )
+    if displacement_count:
+        findings.append(
+            AuditFinding(
+                "displacement.citywide",
+                "warning",
+                "housing",
+                f"Displacement pressure remains in {displacement_count} district(s).",
+                -6,
+            )
+        )
+
+    feature_condition_warnings = 0
+    lowest_feature_condition = 100
     for feature in features:
         normalize_feature_instance(feature, state.turn)
         if feature.status == "failed":
             findings.append(AuditFinding(f"feature.failed.{feature.feature_id}", "critical", "features", f"{feature.feature_id} has failed.", -14))
         elif feature.status in ("maintenance_due", "degraded") or feature.condition <= AUDIT_THRESHOLDS["feature_condition_warning"]:
-            severity = "critical" if feature.condition <= AUDIT_THRESHOLDS["feature_condition_critical"] else "warning"
-            penalty = -12 if severity == "critical" else -6
-            findings.append(AuditFinding(f"feature.condition.{feature.feature_id}", severity, "features", f"{feature.feature_id} condition is {feature.condition}.", penalty))
+            if feature.condition <= AUDIT_THRESHOLDS["feature_condition_critical"]:
+                findings.append(AuditFinding(f"feature.condition.{feature.feature_id}", "critical", "features", f"{feature.feature_id} condition is {feature.condition}.", -12))
+            else:
+                feature_condition_warnings += 1
+                lowest_feature_condition = min(lowest_feature_condition, feature.condition)
+    if feature_condition_warnings:
+        findings.append(
+            AuditFinding(
+                "feature.condition.citywide",
+                "warning",
+                "features",
+                f"{feature_condition_warnings} active feature(s) need maintenance review; lowest condition is {lowest_feature_condition}.",
+                -6,
+            )
+        )
 
     for item in docket or ():
         for violation in _open_violations(item):
@@ -292,4 +365,3 @@ def _open_violations(item: DocketItem) -> list[dict[str, object]]:
 
 
 __all__ = [name for name in globals() if not name.startswith("__")]
-

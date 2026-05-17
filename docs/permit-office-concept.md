@@ -1,8 +1,8 @@
-# Permit Office City Sim - Working Concept Notes
+# Permit Office Concept
 
 Date: 2026-05-14
 
-Purpose: capture the current concept direction before continuing Q&A. This is not a final recommendation or implementation plan.
+Purpose: capture the active concept direction for Permit Office as the repo's main ArcGIS Pro / ArcPy game.
 
 ## Current Working Concept
 
@@ -99,4 +99,3 @@ Possible later operations:
 - What are the first 6-10 docket item types?
 - What should a single "satisfying turn loop" demonstrate in ArcGIS Pro?
 - How explicit should GIS operation names be in UI vs logs/messages?
-
