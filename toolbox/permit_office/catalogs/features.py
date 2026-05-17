@@ -102,7 +102,6 @@ FEATURE_ARCHETYPES: dict[str, FeatureArchetype] = {
         capacity=2,
         land_use="commerce",
         coverage_effects={"prosperity": 1, "culture": 1, "services": 1},
-        hazard_effects={"noise": 1, "pollution": 1},
         allowed_district_types=("mercantile", "residential"),
         conflict_district_types=("civic", "natural"),
         incident_type="sanitation",
@@ -424,16 +423,16 @@ INCIDENT_STATE_BY_GROUP = {
 }
 
 FEATURE_OPERATING_RULES: dict[str, FeatureOperatingRule] = {
-    "connector_corridor": FeatureOperatingRule("connector_corridor", revenue_per_turn=1, upkeep_per_turn=3, decay_per_turn=4, maintenance_interval=3, maintenance_cost=9, repair_amount=45, failure_effects={"risk": 4, "unrest": 2}),
+    "connector_corridor": FeatureOperatingRule("connector_corridor", revenue_per_turn=1, upkeep_per_turn=3, decay_per_turn=4, maintenance_interval=5, maintenance_cost=9, repair_amount=45, failure_effects={"risk": 4, "unrest": 2}),
     "licensed_procession": FeatureOperatingRule("licensed_procession", revenue_per_turn=2, upkeep_per_turn=1, lifespan_turns=1, decay_per_turn=100, failure_effects={"unrest": 2, "risk": 1}),
-    "utility_trench": FeatureOperatingRule("utility_trench", upkeep_per_turn=4, decay_per_turn=5, maintenance_interval=3, maintenance_cost=10, repair_amount=50, failure_effects={"risk": 5, "unrest": 2}),
-    "protected_reserve": FeatureOperatingRule("protected_reserve", upkeep_per_turn=2, decay_per_turn=2, maintenance_interval=4, maintenance_cost=6, repair_amount=40, failure_effects={"risk": 3, "culture": -2}),
-    "mixed_use_overlay": FeatureOperatingRule("mixed_use_overlay", revenue_per_turn=5, upkeep_per_turn=1, decay_per_turn=1, maintenance_interval=4, maintenance_cost=7, repair_amount=35, failure_effects={"prosperity": -3, "unrest": 2}),
-    "child_service_annex": FeatureOperatingRule("child_service_annex", upkeep_per_turn=4, decay_per_turn=3, maintenance_interval=3, maintenance_cost=8, repair_amount=55, failure_effects={"risk": 4, "unrest": 2, "culture": -2}),
+    "utility_trench": FeatureOperatingRule("utility_trench", upkeep_per_turn=4, decay_per_turn=5, maintenance_interval=5, maintenance_cost=10, repair_amount=50, failure_effects={"risk": 5, "unrest": 2}),
+    "protected_reserve": FeatureOperatingRule("protected_reserve", upkeep_per_turn=2, decay_per_turn=2, maintenance_interval=6, maintenance_cost=6, repair_amount=40, failure_effects={"risk": 3, "culture": -2}),
+    "mixed_use_overlay": FeatureOperatingRule("mixed_use_overlay", revenue_per_turn=5, upkeep_per_turn=1, decay_per_turn=1, maintenance_interval=6, maintenance_cost=7, repair_amount=35, failure_effects={"prosperity": -3, "unrest": 2}),
+    "child_service_annex": FeatureOperatingRule("child_service_annex", upkeep_per_turn=4, decay_per_turn=3, maintenance_interval=6, maintenance_cost=8, repair_amount=55, failure_effects={"risk": 4, "unrest": 2, "culture": -2}),
     "vendor_market": FeatureOperatingRule("vendor_market", revenue_per_turn=4, upkeep_per_turn=1, decay_per_turn=5, maintenance_interval=2, maintenance_cost=5, repair_amount=35, failure_effects={"unrest": 3, "risk": 2, "prosperity": -1}),
     "renovation_site": FeatureOperatingRule("renovation_site", revenue_per_turn=3, lifespan_turns=3, decay_per_turn=15, failure_effects={"risk": 3, "unrest": 1}),
-    "fire_coverage_area": FeatureOperatingRule("fire_coverage_area", upkeep_per_turn=5, decay_per_turn=3, maintenance_interval=3, maintenance_cost=12, repair_amount=55, failure_effects={"risk": 6, "unrest": 2}),
-    "museum_grant_site": FeatureOperatingRule("museum_grant_site", revenue_per_turn=2, upkeep_per_turn=2, decay_per_turn=2, maintenance_interval=4, maintenance_cost=7, repair_amount=40, failure_effects={"culture": -3, "unrest": 2}),
+    "fire_coverage_area": FeatureOperatingRule("fire_coverage_area", upkeep_per_turn=5, decay_per_turn=3, maintenance_interval=6, maintenance_cost=12, repair_amount=55, failure_effects={"risk": 6, "unrest": 2}),
+    "museum_grant_site": FeatureOperatingRule("museum_grant_site", revenue_per_turn=2, upkeep_per_turn=2, decay_per_turn=2, maintenance_interval=6, maintenance_cost=7, repair_amount=40, failure_effects={"culture": -3, "unrest": 2}),
     "compliance_case": FeatureOperatingRule("compliance_case", upkeep_per_turn=1, lifespan_turns=2, decay_per_turn=20, failure_effects={"unrest": 2}),
     "civic_incident_marker": FeatureOperatingRule("civic_incident_marker", upkeep_per_turn=1, lifespan_turns=2, decay_per_turn=20, failure_effects={"unrest": 2, "risk": 1}),
     "bus_priority_link": FeatureOperatingRule("bus_priority_link", revenue_per_turn=1, upkeep_per_turn=2, decay_per_turn=4, maintenance_interval=3, maintenance_cost=8, repair_amount=45, failure_effects={"unrest": 2, "prosperity": -1}),
@@ -491,5 +490,3 @@ AUDIT_THRESHOLDS = {
     "feature_condition_warning": 35,
     "feature_condition_critical": 10,
 }
-
-
