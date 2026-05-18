@@ -268,10 +268,11 @@ def apply_scenario(state: CityState, districts: dict[str, DistrictProfile], scen
 
 def _feature_spatial_weights(feature: FeatureInstance, districts: dict[str, DistrictProfile]) -> dict[str, float]:
     targets = [cid for cid in feature.target_cell_ids if cid in districts]
-    archetype = FEATURE_ARCHETYPES[feature.archetype_id]
     weights: dict[str, float] = {}
     for cid in targets:
         weights[cid] = max(weights.get(cid, 0.0), 1.0)
+    # Feature classes only persist selected district IDs; adjacency gives
+    # network and hazard systems a cheap stand-in for buffer overlap.
     neighbor_weight = 0.5
     for cid in targets:
         for adjacent in districts[cid].adjacent_cell_ids:
