@@ -1,3 +1,5 @@
+"""Docket templates, scenario rules, and governance catalogs."""
+
 from __future__ import annotations
 
 from ..models import *
@@ -573,4 +575,3 @@ DEMO_SEQUENCE = {
     5: ("connector_corridor", "mixed_use_rezoning", "public_art_museum_grant"),
     6: ("natural_reserve_conversion", "fire_budget_escalation", "procession_route"),
 }
-

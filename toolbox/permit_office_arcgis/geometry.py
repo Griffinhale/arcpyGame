@@ -1,3 +1,5 @@
+"""ArcGIS geometry operations for previews, activation, and map refresh."""
+
 from __future__ import annotations
 
 import json
@@ -17,6 +19,8 @@ def _summary_map(value):
     return ", ".join(f"{key} {amount}" for key, amount in sorted(value.items()))[:512]
 
 def selected_cell_ids(layer):
+    """Return selected district IDs from a layer, or an empty list."""
+
     if not layer:
         return []
     has_selection = False
@@ -44,6 +48,8 @@ def selected_cell_ids(layer):
 
 
 def district_geometry_lookup(paths):
+    """Read district geometries keyed by cell ID."""
+
     lookup = {}
     with arcpy.da.SearchCursor(paths["districts"], ["cell_id", "SHAPE@"]) as cursor:
         for cid, geom in cursor:
@@ -52,6 +58,8 @@ def district_geometry_lookup(paths):
 
 
 def insert_or_replace_proposal(paths, item, target_ids, messages):
+    """Create the proposed point, line, or polygon feature for a docket item."""
+
     for fc in (paths["points"], paths["lines"], paths["zones"]):
         with arcpy.da.UpdateCursor(fc, ["item_id", "status"]) as cursor:
             for row in cursor:
@@ -149,6 +157,8 @@ def insert_or_replace_proposal(paths, item, target_ids, messages):
 
 
 def inset_polygon(geom):
+    """Return a smaller polygon centered inside a district geometry."""
+
     extent = geom.extent
     width = max(10.0, (extent.XMax - extent.XMin) * 0.58)
     height = max(10.0, (extent.YMax - extent.YMin) * 0.58)
@@ -165,6 +175,8 @@ def inset_polygon(geom):
 
 
 def proposal_spillover(paths, item):
+    """Find districts touched by the proposed feature's coverage buffer."""
+
     proposed_fc = {"POINT": paths["points"], "LINE": paths["lines"], "POLYGON": paths["zones"]}[item.geometry_type]
     where = "item_id = '{0}' AND status = 'proposed'".format(item.item_id.replace("'", "''"))
     layer_name = f"proposal_{uuid.uuid4().hex[:8]}"
@@ -187,6 +199,8 @@ def proposal_spillover(paths, item):
 
 
 def activate_proposal(paths, item, report):
+    """Convert a proposed support feature into its resolved gameplay status."""
+
     fc = {"POINT": paths["points"], "LINE": paths["lines"], "POLYGON": paths["zones"]}[item.geometry_type]
     fields = ["item_id", "feature_id", "archetype_id", "project_id", "chain_step_id", "turn_created", "expires_turn", "status", "display_state", "report", "condition", "maintenance_due_turn", "last_maintained_turn", "state_json"]
     status = item.status if item.status in ("active", "failed", "enforced", "settled", "responded", "maintained") else "active"
@@ -222,6 +236,8 @@ def activate_proposal(paths, item, report):
 
 
 def mark_proposals(paths, item_id, status, report=""):
+    """Mark unresolved proposal features as denied, deferred, or otherwise closed."""
+
     for fc in (paths["points"], paths["lines"], paths["zones"]):
         with arcpy.da.UpdateCursor(fc, ["item_id", "status", "display_state", "report"]) as cursor:
             for row in cursor:
@@ -233,6 +249,8 @@ def mark_proposals(paths, item_id, status, report=""):
 
 
 def refresh_all(paths, messages):
+    """Refresh all known map layers after persisted game changes."""
+
     for name in (DISTRICTS, POINTS, LINES, ZONES):
         try:
             arcpy.RefreshLayer(name)
@@ -242,6 +260,8 @@ def refresh_all(paths, messages):
 
 
 def add_outputs_to_map(paths, messages):
+    """Add active game outputs to the current ArcGIS map when missing."""
+
     try:
         aprx = arcpy.mp.ArcGISProject("CURRENT")
         active_map = aprx.activeMap
@@ -260,6 +280,8 @@ def add_outputs_to_map(paths, messages):
 
 
 def apply_simple_symbology(layer, key, messages):
+    """Apply display-state unique-value symbology when the layer supports it."""
+
     try:
         if not layer.supports("SYMBOLOGY"):
             return
@@ -273,4 +295,3 @@ def apply_simple_symbology(layer, key, messages):
         layer.symbology = sym
     except Exception as exc:
         _warn(messages, "SYM", f"symbology setup skipped for {getattr(layer, 'name', key)}: {exc}")
-

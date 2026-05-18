@@ -1,3 +1,5 @@
+"""Message adapters that work with ArcGIS tool messages and global ArcPy logs."""
+
 from __future__ import annotations
 
 import arcpy
@@ -24,5 +26,4 @@ def _err(messages, tag, text):
         messages.addErrorMessage(line)
     except Exception:
         arcpy.AddError(line)
-
 

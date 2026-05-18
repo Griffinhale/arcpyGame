@@ -1,3 +1,5 @@
+"""Turn advancement and audit scoring for the Permit Office game loop."""
+
 from __future__ import annotations
 
 from typing import Iterable
@@ -55,6 +57,8 @@ def advance_turn(
     features: Iterable[FeatureInstance] = (),
     projects: dict[str, ProjectRecord] | None = None,
 ) -> str:
+    """Advance the game one turn and return only the report text."""
+
     return advance_turn_result(state, open_items, districts, features, projects).report
 
 
@@ -65,6 +69,8 @@ def advance_turn_result(
     features: Iterable[FeatureInstance] = (),
     projects: dict[str, ProjectRecord] | None = None,
 ) -> TurnAdvanceResult:
+    """Advance unresolved cases, city systems, economy, incidents, and audits."""
+
     items = list(open_items)
     feature_list = list(features or ())
     carried = 0
@@ -158,6 +164,8 @@ def scorecard(
     active_features: Iterable[FeatureInstance] | None = None,
     docket: Iterable[DocketItem] | None = None,
 ) -> tuple[str, str]:
+    """Return the current audit grade and human-readable report."""
+
     audit = generate_audit_result(state, districts, active_features, docket)
     return audit.grade, audit.report
 
@@ -168,6 +176,8 @@ def generate_audit_result(
     active_features: Iterable[FeatureInstance] | None = None,
     docket: Iterable[DocketItem] | None = None,
 ) -> AuditResult:
+    """Score city state and produce audit findings for visible risks."""
+
     findings: list[AuditFinding] = []
     profiles = list((districts.values() if isinstance(districts, dict) else districts) or ())
     features = list(active_features or ())
@@ -191,6 +201,7 @@ def generate_audit_result(
     if state.risk >= 70:
         findings.append(AuditFinding("city.risk", "critical", "city", "Citywide risk is audit-critical.", -20))
 
+    # Audit findings aggregate citywide signals but keep severe district facts visible.
     for profile in profiles:
         normalize_profile(profile)
         if profile.incident_state != "none":

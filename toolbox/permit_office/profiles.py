@@ -1,3 +1,5 @@
+"""Profile, docket, and inspection generation for the rules package."""
+
 from __future__ import annotations
 
 import random
@@ -9,6 +11,8 @@ from .helpers import *
 from .systems import normalize_feature_instance, project_step_template
 
 def generate_district_profiles(rows: int = 5, cols: int = 5, seed: int = 2026) -> list[DistrictProfile]:
+    """Generate deterministic district profiles for a rectangular board."""
+
     rng = random.Random(seed)
     prefixes = ["North", "Old", "Canal", "Bright", "Lower", "Cinder", "Glass", "Civic"]
     suffixes = ["Ward", "Market", "Steps", "Yard", "Row", "Crossing", "Annex", "Green"]
@@ -55,6 +59,8 @@ def generate_docket(
     projects: Iterable[ProjectRecord] | dict[str, ProjectRecord] | None = None,
     active_features: Iterable[FeatureInstance] | None = None,
 ) -> list[DocketItem]:
+    """Generate the current turn docket, including due follow-up items first."""
+
     scenario = SCENARIO_RULES.get(state.scenario_id if state else "default", SCENARIO_RULES["default"])
     chosen = _scenario_ordered_templates(turn, scenario)
     if len(chosen) < count:
@@ -159,6 +165,8 @@ def _make_docket_item(turn: int, idx: int, template_id: str, stakeholder: str = 
 
 
 def _heat_followup_item(turn: int, state: CityState) -> DocketItem | None:
+    """Return the highest-priority stakeholder heat follow-up due this turn."""
+
     hot = []
     for stakeholder, heat in state.stakeholder_heat.items():
         profile = _stakeholder_profile(stakeholder)
@@ -174,6 +182,8 @@ def _heat_followup_item(turn: int, state: CityState) -> DocketItem | None:
 
 
 def _maintenance_followup_item(turn: int, active_features: Iterable[FeatureInstance]) -> DocketItem | None:
+    """Return the most urgent feature maintenance item, if one is due."""
+
     candidates = []
     for feature in active_features:
         normalize_feature_instance(feature, turn)
@@ -201,6 +211,8 @@ def _maintenance_followup_item(turn: int, active_features: Iterable[FeatureInsta
 
 
 def _incident_followup_item(turn: int, districts: dict[str, DistrictProfile]) -> DocketItem | None:
+    """Return the earliest visible local grievance that needs civic response."""
+
     visible = []
     for profile in districts.values():
         normalize_profile(profile)
@@ -215,6 +227,8 @@ def _incident_followup_item(turn: int, districts: dict[str, DistrictProfile]) ->
 
 
 def inspect_item(item: DocketItem, seed: int = 2026, target_profiles: Iterable[DistrictProfile] | None = None) -> DocketItem:
+    """Attach deterministic inspection evidence and risk to a docket item."""
+
     template = TEMPLATES[item.template_id]
     rng = random.Random(f"{seed}:{item.item_id}:inspect")
     profiles = list(target_profiles or ())
@@ -242,6 +256,8 @@ def inspection_case_for_item(
     seed: int = 2026,
     fallback_risk_band: str = "medium",
 ) -> dict[str, object]:
+    """Build structured inspection evidence and violations for a docket item."""
+
     template = TEMPLATES[item.template_id]
     rule = INSPECTION_RULES.get(template.template_id, INSPECTION_RULES["default"])
     profiles = list(target_profiles)

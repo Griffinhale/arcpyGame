@@ -1,3 +1,5 @@
+"""Decision resolution for docket actions and follow-up case types."""
+
 from __future__ import annotations
 
 import random
@@ -28,7 +30,10 @@ def resolve_decision(
     active_features: Iterable[FeatureInstance] | None = None,
     projects: dict[str, ProjectRecord] | None = None,
 ) -> DecisionResult:
+    """Apply a docket action to city state, district profiles, and case records."""
+
     action_key = action.lower().strip()
+    # Keep spillovers distinct so target approval math is not double-counted.
     targets = _unique_known(target_cell_ids, districts)
     spillovers = [cid for cid in _unique_known(spillover_cell_ids, districts) if cid not in targets]
     template = TEMPLATES[item.template_id]
@@ -36,6 +41,7 @@ def resolve_decision(
     item.stakeholder = item.stakeholder or template.stakeholder
     item.target_rule = item.target_rule or template.target_rule
 
+    # Generated follow-ups have different lifecycle rules than ordinary permits.
     if template.template_id == MAINTENANCE_TEMPLATE_ID:
         return _resolve_maintenance_decision(
             state,
@@ -136,6 +142,7 @@ def resolve_decision(
 
     district_deltas: dict[str, dict[str, int]] = {}
     city_delta = {metric: 0 for metric in CORE_METRICS}
+    # Include the selected targets in the seed so approval failures are repeatable per placement.
     rng = random.Random(f"{seed}:{item.item_id}:{','.join(targets)}:{mitigated}")
 
     state.ap -= template.ap_cost
@@ -250,6 +257,8 @@ def _resolve_maintenance_decision(
     mitigated: bool,
     active_features: Iterable[FeatureInstance] | None,
 ) -> DecisionResult:
+    """Resolve repair, deferral, and inspection actions for active features."""
+
     features = list(active_features or ())
     feature = next((candidate for candidate in features if candidate.feature_id == item.subject_feature_id), None)
     if action_key == "inspect":
@@ -337,6 +346,8 @@ def _resolve_enforcement_decision(
     mitigated: bool,
     projects: dict[str, ProjectRecord] | None = None,
 ) -> DecisionResult:
+    """Resolve compliance follow-ups produced by stakeholder heat."""
+
     if action_key == "deny":
         if state.ap < 1:
             return _blocked(action, item.item_id, "Deferring enforcement requires 1 AP.")
@@ -442,6 +453,8 @@ def _resolve_incident_decision(
     mitigated: bool,
     projects: dict[str, ProjectRecord] | None = None,
 ) -> DecisionResult:
+    """Resolve civic incident responses produced by local dissatisfaction."""
+
     if not targets:
         return _blocked(action, item.item_id, "Incident response requires one selected district.")
     if action_key == "deny":

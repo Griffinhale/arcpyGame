@@ -1,3 +1,5 @@
+"""Long-running city systems for projects, features, hazards, and housing."""
+
 from __future__ import annotations
 
 from typing import Iterable
@@ -7,6 +9,8 @@ from .catalogs import *
 from .helpers import *
 
 def project_step_template(chain_template_id: str, step_id: str) -> ProjectStepTemplate | None:
+    """Find a project step in a chain template."""
+
     chain = PROJECT_CHAINS.get(chain_template_id)
     if not chain:
         return None
@@ -17,6 +21,8 @@ def project_step_template(chain_template_id: str, step_id: str) -> ProjectStepTe
 
 
 def next_project_step(chain_template_id: str, step_id: str) -> ProjectStepTemplate | None:
+    """Return the next configured project step after the current one."""
+
     chain = PROJECT_CHAINS.get(chain_template_id)
     current = project_step_template(chain_template_id, step_id)
     if not chain or not current or not current.next_step_id:
@@ -30,6 +36,8 @@ def start_project_from_approval(
     template: DocketTemplate,
     target_cell_ids: Iterable[str],
 ) -> ProjectRecord | None:
+    """Create a project record when an approval starts a project chain."""
+
     chain_id = template.starts_chain_id
     if not chain_id:
         return None
@@ -66,6 +74,8 @@ def advance_project_from_item(
     approved: bool,
     failed: bool = False,
 ) -> ProjectRecord | None:
+    """Move an existing project according to the resolved docket item."""
+
     if not item.project_id or item.project_id not in projects:
         return None
     project = projects[item.project_id]
@@ -102,6 +112,8 @@ def advance_project_from_item(
 
 
 def active_feature_instances(features: Iterable[FeatureInstance], turn: int | None = None) -> list[FeatureInstance]:
+    """Return features that still participate in city systems."""
+
     active_status = {"active", "settled", "enforced", "responded", "maintenance_due", "degraded"}
     out = []
     for feature in features:
@@ -120,6 +132,8 @@ def recompute_network_access(
     features: Iterable[FeatureInstance],
     turn: int | None = None,
 ) -> dict[str, dict[str, int]]:
+    """Recompute service network access from active spatial features."""
+
     for profile in districts.values():
         profile.network_access = {service: 0 for service in SERVICE_TYPES}
     for feature in active_feature_instances(features, turn):
@@ -143,6 +157,8 @@ def apply_hazard_turn(
     features: Iterable[FeatureInstance],
     turn: int | None = None,
 ) -> dict[str, int]:
+    """Advance district hazard bands from sources, mitigations, and decay."""
+
     sources = {cid: {hazard: 0 for hazard in HAZARD_TYPES} for cid in districts}
     mitigations = {cid: {hazard: 0 for hazard in HAZARD_TYPES} for cid in districts}
     for feature in active_feature_instances(features, turn):
@@ -186,6 +202,8 @@ def apply_hazard_turn(
 
 
 def apply_housing_dynamics(districts: dict[str, DistrictProfile]) -> dict[str, int]:
+    """Advance housing capacity pressure and related population shifts."""
+
     population_delta = 0
     pressured = 0
     for profile in districts.values():
@@ -206,6 +224,8 @@ def apply_housing_dynamics(districts: dict[str, DistrictProfile]) -> dict[str, i
 
 
 def apply_template_long_term_effects(template: DocketTemplate, profiles: Iterable[DistrictProfile], mitigated: bool = False) -> dict[str, dict[str, int]]:
+    """Apply non-immediate housing and hazard effects from an approved template."""
+
     deltas: dict[str, dict[str, int]] = {}
     for profile in profiles:
         before = {
@@ -233,6 +253,8 @@ def apply_template_long_term_effects(template: DocketTemplate, profiles: Iterabl
 
 
 def apply_scenario(state: CityState, districts: dict[str, DistrictProfile], scenario_id: str | None = None) -> None:
+    """Apply a scenario's starting biases to city and district state."""
+
     if scenario_id:
         state.scenario_id = scenario_id
     scenario = SCENARIO_RULES.get(state.scenario_id, SCENARIO_RULES["default"])
@@ -331,11 +353,15 @@ def _apply_hazard_effects(profile: DistrictProfile, effects: dict[str, int]) -> 
 
 
 def operating_rule_for_feature(feature_or_archetype_id: FeatureInstance | str) -> FeatureOperatingRule:
+    """Return lifecycle economics for a feature, falling back to defaults."""
+
     archetype_id = feature_or_archetype_id.archetype_id if isinstance(feature_or_archetype_id, FeatureInstance) else feature_or_archetype_id
     return FEATURE_OPERATING_RULES.get(archetype_id, FeatureOperatingRule(archetype_id, upkeep_per_turn=1, decay_per_turn=5, maintenance_interval=3, maintenance_cost=6))
 
 
 def normalize_feature_instance(feature: FeatureInstance, turn: int | None = None) -> FeatureInstance:
+    """Fill derived feature fields and clamp lifecycle state."""
+
     archetype = FEATURE_ARCHETYPES.get(feature.archetype_id)
     if archetype:
         feature.family = feature.family or archetype.family
@@ -361,6 +387,8 @@ def normalize_feature_instance(feature: FeatureInstance, turn: int | None = None
 
 
 def feature_update_payload(feature: FeatureInstance) -> dict[str, object]:
+    """Return the ArcGIS fields that need updating after lifecycle changes."""
+
     return {
         "status": feature.status,
         "condition": feature.condition,
@@ -399,6 +427,7 @@ def _advance_feature_lifecycle(
         if feature.status in ("maintenance_due", "degraded", "failed"):
             backlog += 1
         if feature.status == "failed" and not feature.state_json.get("failure_applied"):
+            # Failure effects are one-shot so repeated turn advances do not compound them.
             for cid in feature.target_cell_ids:
                 if cid not in districts:
                     continue

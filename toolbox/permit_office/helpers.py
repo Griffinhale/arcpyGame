@@ -1,3 +1,5 @@
+"""Shared rule helpers for district state, population pressure, and effects."""
+
 from __future__ import annotations
 
 import random
@@ -7,6 +9,8 @@ from .models import *
 from .catalogs import *
 
 def display_state_for_profile(profile: DistrictProfile) -> str:
+    """Return the map-facing display state for a normalized district profile."""
+
     if profile.incident_state != "none":
         return "incident"
     if _top_dissatisfaction(profile)[1] >= DISSATISFACTION_AGGRIEVED_THRESHOLD:
@@ -40,6 +44,8 @@ def _stakeholder_escalation_score(stakeholder: str, heat: int) -> int:
 
 
 def adjust_stakeholder_pressure(state: CityState, stakeholder: str, amount: int, reason: str = "") -> int:
+    """Apply stakeholder heat, including patience and coalition side effects."""
+
     if not stakeholder or amount == 0:
         return 0
     profile = _stakeholder_profile(stakeholder)
@@ -53,6 +59,7 @@ def adjust_stakeholder_pressure(state: CityState, stakeholder: str, amount: int,
     else:
         state.stakeholder_heat.pop(stakeholder, None)
     if adjusted > 0 and adjusted >= 2:
+        # Large heat changes ripple to allies and rivals so follow-ups feel political.
         for ally in profile.allies:
             if ally != stakeholder:
                 state.stakeholder_heat[ally] = max(0, state.stakeholder_heat.get(ally, 0) + 1)
@@ -65,6 +72,8 @@ def adjust_stakeholder_pressure(state: CityState, stakeholder: str, amount: int,
 
 
 def heat_summary(state: CityState) -> str:
+    """Format the hottest stakeholder records for compact dashboard display."""
+
     hot = [(stakeholder, heat) for stakeholder, heat in state.stakeholder_heat.items() if heat > 0]
     if not hot:
         return "none"
@@ -74,6 +83,8 @@ def heat_summary(state: CityState) -> str:
 
 
 def feature_archetype_for_template(template_or_id: DocketTemplate | str) -> FeatureArchetype:
+    """Look up the feature archetype spawned by a docket template."""
+
     template = TEMPLATES[template_or_id] if isinstance(template_or_id, str) else template_or_id
     archetype_id = template.spawn_archetype_id or template.template_id
     try:
@@ -85,6 +96,8 @@ def feature_archetype_for_template(template_or_id: DocketTemplate | str) -> Feat
 
 
 def feature_metadata_for_template(template_or_id: DocketTemplate | str) -> dict[str, object]:
+    """Return ArcGIS-safe metadata for the feature spawned by a template."""
+
     archetype = feature_archetype_for_template(template_or_id)
     return {
         "archetype_id": archetype.archetype_id,
@@ -106,6 +119,8 @@ def feature_metadata_for_template(template_or_id: DocketTemplate | str) -> dict[
 
 
 def validate_feature_catalog() -> list[str]:
+    """Return catalog consistency errors without mutating gameplay state."""
+
     errors: list[str] = []
     for archetype_id, archetype in FEATURE_ARCHETYPES.items():
         if archetype.archetype_id != archetype_id:
@@ -197,11 +212,15 @@ def validate_feature_catalog() -> list[str]:
 
 
 def total_population(districts: Iterable[DistrictProfile] | dict[str, DistrictProfile]) -> int:
+    """Return the non-negative total population across districts."""
+
     profiles = districts.values() if isinstance(districts, dict) else districts
     return sum(max(0, int(profile.population)) for profile in profiles)
 
 
 def population_city_summary(districts: Iterable[DistrictProfile] | dict[str, DistrictProfile]) -> str:
+    """Format a compact population, incident, and grievance summary."""
+
     profiles = list(districts.values() if isinstance(districts, dict) else districts)
     if not profiles:
         return "population unavailable"
@@ -217,6 +236,8 @@ def population_city_summary(districts: Iterable[DistrictProfile] | dict[str, Dis
 
 
 def incident_summary(districts: Iterable[DistrictProfile] | dict[str, DistrictProfile]) -> str:
+    """Format visible civic incident files for dashboard metrics."""
+
     profiles = list(districts.values() if isinstance(districts, dict) else districts)
     incidents = [
         f"{profile.cell_id} {_group_label(profile.incident_group)} {profile.incident_state}"
@@ -229,6 +250,8 @@ def incident_summary(districts: Iterable[DistrictProfile] | dict[str, DistrictPr
 
 
 def target_population_hint(item: DocketItem, target_profiles: Iterable[DistrictProfile]) -> str:
+    """Summarize affected groups and grievances for an item preview."""
+
     profiles = list(target_profiles)
     if not profiles:
         return ""
@@ -248,6 +271,8 @@ def target_population_hint(item: DocketItem, target_profiles: Iterable[DistrictP
 
 
 def inspection_population_note(template: DocketTemplate, target_profiles: Iterable[DistrictProfile]) -> str:
+    """Build the population context sentence appended to inspection text."""
+
     profiles = list(target_profiles)
     archetype = feature_archetype_for_template(template)
     if not profiles:
@@ -280,6 +305,8 @@ def inspection_population_note(template: DocketTemplate, target_profiles: Iterab
 
 
 def normalize_profile(profile: DistrictProfile) -> DistrictProfile:
+    """Clamp derived district fields and refresh public-facing profile text."""
+
     if not profile.land_use:
         profile.land_use = LAND_USE_BY_DISTRICT_TYPE.get(profile.district_type, "mixed_use")
     profile.zoning_overlay = profile.zoning_overlay or ""
@@ -302,6 +329,8 @@ def normalize_profile(profile: DistrictProfile) -> DistrictProfile:
 
 
 def public_profile_for(profile: DistrictProfile) -> str:
+    """Build the public-facing census summary for a district."""
+
     groups = _top_presence_groups([profile], limit=3)
     if not groups:
         return "Public profile: no census emphasis filed."
@@ -309,6 +338,8 @@ def public_profile_for(profile: DistrictProfile) -> str:
 
 
 def compact_group_bands(bands: dict[str, int]) -> dict[str, int]:
+    """Return normalized non-zero group bands for persistence."""
+
     return {group: int(value) for group, value in _normalize_bands(bands, 4).items() if value > 0}
 
 
@@ -432,6 +463,8 @@ def _displacement_pressure(profile: DistrictProfile) -> int:
 
 
 def build_grid_adjacency(rows: int, cols: int) -> dict[str, list[str]]:
+    """Build four-way adjacency for deterministic generated district grids."""
+
     adjacency: dict[str, list[str]] = {}
     for row in range(rows):
         for col in range(cols):
@@ -445,6 +478,8 @@ def build_grid_adjacency(rows: int, cols: int) -> dict[str, list[str]]:
 
 
 def assign_grid_adjacency(profiles: Iterable[DistrictProfile], rows: int | None = None, cols: int | None = None) -> dict[str, list[str]]:
+    """Assign grid neighbors to profiles and return the resulting adjacency map."""
+
     profiles_by_id = {profile.cell_id: profile for profile in profiles}
     if rows is None or cols is None:
         parsed = [_parse_grid_cell_id(cell_id) for cell_id in profiles_by_id]
