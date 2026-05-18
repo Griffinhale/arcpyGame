@@ -18,6 +18,7 @@ from .systems import (
 )
 from .turns import _settle_item_violations
 
+
 def resolve_decision(
     state: CityState,
     item: DocketItem,
@@ -55,9 +56,9 @@ def resolve_decision(
         )
 
     if action_key == "inspect":
-        if state.ap < 1:
-            return _blocked(action, item.item_id, "Inspection requires 1 AP.")
-        state.ap -= 1
+        blocked = _spend_ap(state, action, item.item_id, "Inspection")
+        if blocked:
+            return blocked
         inspect_item(item, seed, [districts[cid] for cid in targets])
         item.status = "inspected"
         return DecisionResult(
@@ -98,9 +99,9 @@ def resolve_decision(
         )
 
     if action_key == "deny":
-        if state.ap < 1:
-            return _blocked(action, item.item_id, "Denial requires 1 AP.")
-        state.ap -= 1
+        blocked = _spend_ap(state, action, item.item_id, "Denial")
+        if blocked:
+            return blocked
         item.status = "denied"
         delta = {"unrest": 1, "prosperity": -1}
         _apply_city_delta(state, delta)
@@ -134,21 +135,20 @@ def resolve_decision(
         return _blocked(action, item.item_id, f"Unknown decision action {action!r}.")
     if not targets:
         return _blocked(action, item.item_id, "Approve requires at least one selected target district.")
-    if state.ap < template.ap_cost:
-        return _blocked(action, item.item_id, f"Approval requires {template.ap_cost} AP.")
     total_money = template.money_cost + (template.mitigation_cost if mitigated else 0)
-    if state.money < total_money:
-        return _blocked(action, item.item_id, f"Approval requires ${total_money}.")
+    blocked = _spend_resources(state, action, item.item_id, "Approval", template.ap_cost, total_money)
+    if blocked:
+        return blocked
 
     district_deltas: dict[str, dict[str, int]] = {}
     city_delta = {metric: 0 for metric in CORE_METRICS}
     # Include the selected targets in the seed so approval failures are repeatable per placement.
     rng = random.Random(f"{seed}:{item.item_id}:{','.join(targets)}:{mitigated}")
 
-    state.ap -= template.ap_cost
-    state.money -= total_money
     item.target_cell_ids = targets
 
+    # Target and spillover deltas share the city accumulator but still need
+    # separate per-district records for ArcGIS field updates and reports.
     for cid in targets:
         delta = _district_adjusted_effects(template.base_effects, districts[cid].district_type, template.category)
         delta = _land_use_adjusted_effects(delta, districts[cid], archetype)
@@ -204,7 +204,7 @@ def resolve_decision(
             _merge_delta(district_deltas.setdefault(cid, {}), delta)
     surfaced = _surface_new_incidents(state, [districts[cid] for cid in targets])
 
-    averaged = {metric: round(value / max(1, len(targets) + len(spillovers))) for metric, value in city_delta.items()}
+    averaged = _average_city_delta(city_delta, targets, spillovers)
     _apply_city_delta(state, averaged)
     if surfaced:
         averaged["unrest"] = averaged.get("unrest", 0) + surfaced
@@ -262,9 +262,9 @@ def _resolve_maintenance_decision(
     features = list(active_features or ())
     feature = next((candidate for candidate in features if candidate.feature_id == item.subject_feature_id), None)
     if action_key == "inspect":
-        if state.ap < 1:
-            return _blocked(action, item.item_id, "Maintenance inspection requires 1 AP.")
-        state.ap -= 1
+        blocked = _spend_ap(state, action, item.item_id, "Maintenance inspection")
+        if blocked:
+            return blocked
         item.inspected = True
         item.status = "inspected"
         condition = feature.condition if feature else 0
@@ -278,9 +278,9 @@ def _resolve_maintenance_decision(
         return _blocked(action, item.item_id, "Maintenance order requires a referenced active feature.")
     rule = operating_rule_for_feature(feature)
     if action_key == "deny":
-        if state.ap < 1:
-            return _blocked(action, item.item_id, "Deferring maintenance requires 1 AP.")
-        state.ap -= 1
+        blocked = _spend_ap(state, action, item.item_id, "Deferring maintenance")
+        if blocked:
+            return blocked
         item.status = "deferred"
         feature.status = "maintenance_due"
         feature.display_state = "maintenance_due"
@@ -302,13 +302,10 @@ def _resolve_maintenance_decision(
     if action_key not in ("approve", "approve_mitigated"):
         return _blocked(action, item.item_id, f"Unknown decision action {action!r}.")
     total_money = max(template.money_cost, rule.maintenance_cost) + (template.mitigation_cost if mitigated else 0)
-    if state.ap < template.ap_cost:
-        return _blocked(action, item.item_id, f"Maintenance requires {template.ap_cost} AP.")
-    if state.money < total_money:
-        return _blocked(action, item.item_id, f"Maintenance requires ${total_money}.")
+    blocked = _spend_resources(state, action, item.item_id, "Maintenance", template.ap_cost, total_money)
+    if blocked:
+        return blocked
 
-    state.ap -= template.ap_cost
-    state.money -= total_money
     repair = rule.repair_amount + (20 if mitigated else 0)
     feature.condition = max(0, min(100, feature.condition + repair))
     feature.last_maintained_turn = state.turn
@@ -349,9 +346,9 @@ def _resolve_enforcement_decision(
     """Resolve compliance follow-ups produced by stakeholder heat."""
 
     if action_key == "deny":
-        if state.ap < 1:
-            return _blocked(action, item.item_id, "Deferring enforcement requires 1 AP.")
-        state.ap -= 1
+        blocked = _spend_ap(state, action, item.item_id, "Deferring enforcement")
+        if blocked:
+            return blocked
         item.status = "deferred"
         delta = {"unrest": 2, "risk": 1}
         _apply_city_delta(state, delta)
@@ -380,14 +377,11 @@ def _resolve_enforcement_decision(
         return _blocked(action, item.item_id, f"Unknown decision action {action!r}.")
     if not targets:
         return _blocked(action, item.item_id, "Enforcement requires one selected district.")
-    if state.ap < template.ap_cost:
-        return _blocked(action, item.item_id, f"Enforcement requires {template.ap_cost} AP.")
     total_money = template.money_cost + (template.mitigation_cost if mitigated else 0)
-    if state.money < total_money:
-        return _blocked(action, item.item_id, f"Enforcement requires ${total_money}.")
+    blocked = _spend_resources(state, action, item.item_id, "Enforcement", template.ap_cost, total_money)
+    if blocked:
+        return blocked
 
-    state.ap -= template.ap_cost
-    state.money -= total_money
     item.target_cell_ids = targets
     item.status = "settled" if mitigated else "enforced"
 
@@ -409,7 +403,7 @@ def _resolve_enforcement_decision(
 
     heat_relief = -2 if mitigated else -STAKEHOLDER_HEAT_THRESHOLD
     heat_delta = _adjust_heat(state, item.stakeholder, heat_relief)
-    averaged = {metric: round(value / max(1, len(targets) + len(spillovers))) for metric, value in city_delta.items()}
+    averaged = _average_city_delta(city_delta, targets, spillovers)
     _apply_city_delta(state, averaged)
     affected = targets + spillovers
     _settle_item_violations(item, mitigated)
@@ -458,9 +452,9 @@ def _resolve_incident_decision(
     if not targets:
         return _blocked(action, item.item_id, "Incident response requires one selected district.")
     if action_key == "deny":
-        if state.ap < 1:
-            return _blocked(action, item.item_id, "Deferring a civic incident requires 1 AP.")
-        state.ap -= 1
+        blocked = _spend_ap(state, action, item.item_id, "Deferring a civic incident")
+        if blocked:
+            return blocked
         item.status = "deferred"
         group = item.stakeholder if item.stakeholder in CITIZEN_GROUPS else _top_dissatisfaction(districts[targets[0]])[0]
         for cid in targets:
@@ -492,14 +486,11 @@ def _resolve_incident_decision(
 
     if action_key not in ("approve", "approve_mitigated"):
         return _blocked(action, item.item_id, f"Unknown decision action {action!r}.")
-    if state.ap < template.ap_cost:
-        return _blocked(action, item.item_id, f"Incident response requires {template.ap_cost} AP.")
     total_money = template.money_cost + (template.mitigation_cost if mitigated else 0)
-    if state.money < total_money:
-        return _blocked(action, item.item_id, f"Incident response requires ${total_money}.")
+    blocked = _spend_resources(state, action, item.item_id, "Incident response", template.ap_cost, total_money)
+    if blocked:
+        return blocked
 
-    state.ap -= template.ap_cost
-    state.money -= total_money
     item.target_cell_ids = targets
     item.status = "settled" if mitigated else "responded"
     group = item.stakeholder if item.stakeholder in CITIZEN_GROUPS else _top_dissatisfaction(districts[targets[0]])[0]
@@ -526,7 +517,7 @@ def _resolve_incident_decision(
         district_deltas[cid]["dissatisfaction"] = -1
         _merge_delta(city_delta, delta)
 
-    averaged = {metric: round(value / max(1, len(targets) + len(spillovers))) for metric, value in city_delta.items()}
+    averaged = _average_city_delta(city_delta, targets, spillovers)
     _apply_city_delta(state, averaged)
     heat_delta = _adjust_heat(state, group, -1 if mitigated else 0)
     _settle_item_violations(item, mitigated)
@@ -551,6 +542,41 @@ def _resolve_incident_decision(
         item.status,
         stakeholder_delta={group: heat_delta} if heat_delta else {},
     )
+
+
+def _spend_ap(state: CityState, action: str, item_id: str, label: str, cost: int = 1) -> DecisionResult | None:
+    """Spend AP for a decision branch, or return the existing error shape."""
+
+    if state.ap < cost:
+        return _blocked(action, item_id, f"{label} requires {cost} AP.")
+    state.ap -= cost
+    return None
+
+
+def _spend_resources(
+    state: CityState,
+    action: str,
+    item_id: str,
+    label: str,
+    ap_cost: int,
+    money_cost: int,
+) -> DecisionResult | None:
+    """Validate and spend the AP/money pair used by approve-style actions."""
+
+    if state.ap < ap_cost:
+        return _blocked(action, item_id, f"{label} requires {ap_cost} AP.")
+    if state.money < money_cost:
+        return _blocked(action, item_id, f"{label} requires ${money_cost}.")
+    state.ap -= ap_cost
+    state.money -= money_cost
+    return None
+
+
+def _average_city_delta(city_delta: dict[str, int], targets: list[str], spillovers: list[str]) -> dict[str, int]:
+    """Average district-level effects into a single citywide metric delta."""
+
+    divisor = max(1, len(targets) + len(spillovers))
+    return {metric: round(value / divisor) for metric, value in city_delta.items()}
 
 
 __all__ = [name for name in globals() if not name.startswith("__")]

@@ -172,58 +172,25 @@ def read_state(paths):
 def encode_group_bands(value, maximum=4):
     """Encode population or dissatisfaction bands as compact clamped JSON."""
 
-    # ArcGIS stores these sparse band maps in text fields, so clamp before serializing.
-    out = {}
-    for group, band in (value or {}).items():
-        if group in rules.CITIZEN_GROUPS:
-            out[group] = max(0, min(maximum, int(band or 0)))
-    return json.dumps({group: band for group, band in sorted(out.items()) if band > 0}, sort_keys=True)
+    return json.dumps(_clamped_int_map(value, rules.CITIZEN_GROUPS, maximum=maximum), sort_keys=True)
 
 
 def decode_group_bands(text, maximum=4):
     """Decode group band JSON while discarding unknown groups."""
 
-    if not text:
-        return {}
-    try:
-        parsed = json.loads(text)
-    except Exception:
-        return {}
-    if not isinstance(parsed, dict):
-        return {}
-    out = {}
-    for group, band in parsed.items():
-        if group in rules.CITIZEN_GROUPS:
-            out[group] = max(0, min(maximum, int(band or 0)))
-    return out
+    return _clamped_int_map(_decode_json_dict(text), rules.CITIZEN_GROUPS, maximum=maximum)
 
 
 def encode_service_gap(value):
     """Encode service gaps as compact JSON for text fields."""
 
-    out = {}
-    for service, gap in (value or {}).items():
-        if service in rules.SERVICE_TYPES:
-            out[service] = max(0, int(gap or 0))
-    return json.dumps({service: gap for service, gap in sorted(out.items()) if gap > 0}, sort_keys=True)
+    return json.dumps(_clamped_int_map(value, rules.SERVICE_TYPES), sort_keys=True)
 
 
 def decode_service_gap(text):
     """Decode service-gap JSON while discarding unknown services."""
 
-    if not text:
-        return {}
-    try:
-        parsed = json.loads(text)
-    except Exception:
-        return {}
-    if not isinstance(parsed, dict):
-        return {}
-    out = {}
-    for service, gap in parsed.items():
-        if service in rules.SERVICE_TYPES:
-            out[service] = max(0, int(gap or 0))
-    return out
+    return _clamped_int_map(_decode_json_dict(text), rules.SERVICE_TYPES)
 
 
 def encode_json(value, limit=4000):
@@ -235,6 +202,12 @@ def encode_json(value, limit=4000):
 def decode_json(text):
     """Decode optional JSON text, returning an empty dict for invalid values."""
 
+    return _decode_json_dict(text)
+
+
+def _decode_json_dict(text):
+    """Decode ArcGIS text JSON, accepting only dictionary payloads."""
+
     if not text:
         return {}
     try:
@@ -242,6 +215,26 @@ def decode_json(text):
     except Exception:
         return {}
     return parsed if isinstance(parsed, dict) else {}
+
+
+def _clamped_int_map(value, allowed, maximum=None):
+    """Return sparse non-negative ints for allow-listed text-field maps."""
+
+    allowed_keys = set(allowed)
+    out = {}
+    for key, raw in (value or {}).items():
+        if key not in allowed_keys:
+            continue
+        try:
+            amount = int(raw or 0)
+        except (TypeError, ValueError):
+            continue
+        amount = max(0, amount)
+        if maximum is not None:
+            amount = min(maximum, amount)
+        if amount:
+            out[key] = amount
+    return dict(sorted(out.items()))
 
 
 def read_districts(paths):

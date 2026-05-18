@@ -858,6 +858,8 @@ def _approval_failure_effect(
 
 
 def _failure_chance(template: DocketTemplate, target_profiles: list[DistrictProfile], risk_band: str, mitigated: bool) -> float:
+    # Failure chance combines the inspection result with local fit; the clamp
+    # keeps routine approvals from becoming impossible or perfectly safe.
     avg_services = sum(p.services for p in target_profiles) / max(1, len(target_profiles))
     avg_risk = sum(p.risk for p in target_profiles) / max(1, len(target_profiles))
     chance = template.failure_base_chance

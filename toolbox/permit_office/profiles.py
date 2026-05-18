@@ -266,6 +266,8 @@ def inspection_case_for_item(
     avg_services = sum(profile.services for profile in profiles) / max(1, len(profiles))
     max_grievance = max((_top_dissatisfaction(profile)[1] for profile in profiles), default=0)
 
+    # Evidence codes are catalog data; this branch translates each code into
+    # context-sensitive severity without making templates carry game math.
     evidence: list[EvidenceRecord] = []
     for code in rule.evidence_codes:
         severity = "watch"
@@ -307,6 +309,8 @@ def inspection_case_for_item(
         label = VIOLATION_CODES.get(code, {}).get("label", code.replace("_", " ").title())
         evidence.append(EvidenceRecord(f"{item.item_id}:{code}", label, severity, code, note))
 
+    # Risk bands intentionally derive from evidence, then violations inherit
+    # the band so inspections and later compliance audits agree.
     severity_score = sum({"watch": 1, "warning": 2, "critical": 4}.get(record.severity, 1) for record in evidence)
     if any(record.severity == "critical" for record in evidence) or severity_score >= 6:
         risk_band = "high"
