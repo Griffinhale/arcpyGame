@@ -46,6 +46,8 @@ from permit_office_arcgis.store import (
 
 
 class Toolbox(object):
+    """ArcGIS toolbox declaration for the Permit Office prototype."""
+
     def __init__(self):
         self.label = TOOLBOX_LABEL
         self.alias = TOOLBOX_ALIAS
@@ -53,6 +55,8 @@ class Toolbox(object):
 
 
 class PermitOfficePrototype(object):
+    """ArcGIS geoprocessing tool that hosts the playable permit workflow."""
+
     def __init__(self):
         self.label = "Permit Office Prototype"
         self.description = "Generated-district permit office dashboard prototype."

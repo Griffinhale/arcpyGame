@@ -1,3 +1,5 @@
+"""Tkinter dashboard controller for ArcGIS-hosted Permit Office sessions."""
+
 from __future__ import annotations
 
 import traceback
@@ -30,6 +32,8 @@ from .store import (
 )
 
 def open_effect_report(title, report, affected, state):
+    """Show a short modal report after a dashboard action resolves."""
+
     try:
         import tkinter as tk
         from tkinter import ttk
@@ -55,6 +59,8 @@ def open_effect_report(title, report, affected, state):
 
 
 class DashboardController:
+    """Coordinate dashboard UI actions with ArcGIS persistence helpers."""
+
     def __init__(self, paths, district_layer, seed, messages):
         self.paths = paths
         self.district_layer = district_layer

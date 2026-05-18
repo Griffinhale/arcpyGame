@@ -1,3 +1,5 @@
+"""ArcGIS geodatabase schema creation for the Permit Office prototype."""
+
 from __future__ import annotations
 
 import os
@@ -165,6 +167,8 @@ ACTION_LOG_FIELDS = [
 
 
 def resolve_workspace(value, messages):
+    """Resolve the geodatabase path from user input, project home, or scratch."""
+
     if value:
         text = str(value)
         if text.lower().endswith(".gdb"):
@@ -183,6 +187,8 @@ def resolve_workspace(value, messages):
 
 
 def ensure_gdb(gdb_path, messages):
+    """Create the target file geodatabase when it does not already exist."""
+
     folder = os.path.dirname(gdb_path)
     name = os.path.basename(gdb_path)
     if folder and not os.path.isdir(folder):
@@ -194,6 +200,8 @@ def ensure_gdb(gdb_path, messages):
 
 
 def add_field_if_missing(table, name, field_type, alias=None, length=None):
+    """Add one ArcGIS field if the table does not already contain it."""
+
     existing = {field.name.lower() for field in arcpy.ListFields(table)}
     if name.lower() in existing:
         return False
@@ -207,6 +215,8 @@ def add_field_if_missing(table, name, field_type, alias=None, length=None):
 
 
 def ensure_table(gdb_path, name, fields, messages):
+    """Create or update a non-spatial table with the configured fields."""
+
     path = os.path.join(gdb_path, name)
     if not arcpy.Exists(path):
         arcpy.management.CreateTable(gdb_path, name)
@@ -217,6 +227,8 @@ def ensure_table(gdb_path, name, fields, messages):
 
 
 def ensure_feature_class(gdb_path, name, geometry_type, fields, spatial_ref, messages):
+    """Create or update a feature class with the configured fields."""
+
     path = os.path.join(gdb_path, name)
     if not arcpy.Exists(path):
         arcpy.management.CreateFeatureclass(gdb_path, name, geometry_type, spatial_reference=spatial_ref)
@@ -227,6 +239,8 @@ def ensure_feature_class(gdb_path, name, geometry_type, fields, spatial_ref, mes
 
 
 def active_spatial_reference(messages):
+    """Use the active ArcGIS map spatial reference, falling back to Web Mercator."""
+
     try:
         aprx = arcpy.mp.ArcGISProject("CURRENT")
         active_map = aprx.activeMap
@@ -238,6 +252,8 @@ def active_spatial_reference(messages):
 
 
 def ensure_schema(gdb_path, messages):
+    """Ensure all active feature classes and tables exist in the game geodatabase."""
+
     ensure_gdb(gdb_path, messages)
     sr = active_spatial_reference(messages)
     paths = {
@@ -255,7 +271,8 @@ def ensure_schema(gdb_path, messages):
 
 
 def clear_game_rows(paths):
+    """Delete gameplay rows while preserving the existing geodatabase schema."""
+
     for key in ("districts", "points", "lines", "zones", "docket", "state", "projects", "commands", "action_log"):
         if arcpy.Exists(paths[key]):
             arcpy.management.DeleteRows(paths[key])
-

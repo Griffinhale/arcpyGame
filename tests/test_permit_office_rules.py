@@ -1,3 +1,5 @@
+"""Regression coverage for the active Permit Office rules package."""
+
 import copy
 from pathlib import Path
 
@@ -908,6 +910,7 @@ def test_arcpy_toolbox_schema_declares_governance_fields_without_new_feature_cla
 
 def test_active_permit_office_files_stay_under_line_budget():
     toolbox_dir = Path(__file__).parents[1] / "toolbox"
+    # Keep the active ArcGIS toolbox small enough to review without counting archive files.
     active_paths = [
         toolbox_dir / "arcpy_permit_office.pyt",
         toolbox_dir / "arcpy_permit_office_rules.py",

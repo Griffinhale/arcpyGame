@@ -1,3 +1,5 @@
+"""ArcGIS persistence helpers for Permit Office state, features, and commands."""
+
 from __future__ import annotations
 
 import datetime as _datetime
@@ -19,10 +21,14 @@ DOCKET_UPDATE_FIELDS = [
 ]
 
 def now_utc():
+    """Return the current UTC timestamp for command and action rows."""
+
     return _datetime.datetime.utcnow()
 
 
 def square_polygon(x0, y0, size, sr):
+    """Build a square district polygon in the target spatial reference."""
+
     arr = arcpy.Array([
         arcpy.Point(x0, y0),
         arcpy.Point(x0 + size, y0),
@@ -34,6 +40,8 @@ def square_polygon(x0, y0, size, sr):
 
 
 def create_district_board(paths, seed, messages):
+    """Generate and persist a fresh deterministic district board."""
+
     sr = arcpy.Describe(paths["districts"]).spatialReference
     profiles = rules.generate_district_profiles(rows=5, cols=5, seed=seed)
     fields = [
@@ -103,6 +111,8 @@ def create_district_board(paths, seed, messages):
 
 
 def write_state(paths, state):
+    """Persist city state as key/value rows for ArcGIS-friendly storage."""
+
     values = {
         "turn": (str(state.turn), state.turn),
         "max_turns": (str(state.max_turns), state.max_turns),
@@ -131,6 +141,8 @@ def write_state(paths, state):
 
 
 def read_state(paths):
+    """Rehydrate city state from key/value rows."""
+
     values = {}
     with arcpy.da.SearchCursor(paths["state"], ["key", "value_text", "value_num"]) as cursor:
         for key, text, num in cursor:
@@ -158,6 +170,9 @@ def read_state(paths):
 
 
 def encode_group_bands(value, maximum=4):
+    """Encode population or dissatisfaction bands as compact clamped JSON."""
+
+    # ArcGIS stores these sparse band maps in text fields, so clamp before serializing.
     out = {}
     for group, band in (value or {}).items():
         if group in rules.CITIZEN_GROUPS:
@@ -166,6 +181,8 @@ def encode_group_bands(value, maximum=4):
 
 
 def decode_group_bands(text, maximum=4):
+    """Decode group band JSON while discarding unknown groups."""
+
     if not text:
         return {}
     try:
@@ -182,6 +199,8 @@ def decode_group_bands(text, maximum=4):
 
 
 def encode_service_gap(value):
+    """Encode service gaps as compact JSON for text fields."""
+
     out = {}
     for service, gap in (value or {}).items():
         if service in rules.SERVICE_TYPES:
@@ -190,6 +209,8 @@ def encode_service_gap(value):
 
 
 def decode_service_gap(text):
+    """Decode service-gap JSON while discarding unknown services."""
+
     if not text:
         return {}
     try:
@@ -206,10 +227,14 @@ def decode_service_gap(text):
 
 
 def encode_json(value, limit=4000):
+    """Encode a dictionary into a bounded ArcGIS text field."""
+
     return json.dumps(value or {}, sort_keys=True)[:limit]
 
 
 def decode_json(text):
+    """Decode optional JSON text, returning an empty dict for invalid values."""
+
     if not text:
         return {}
     try:
@@ -220,6 +245,8 @@ def decode_json(text):
 
 
 def read_districts(paths):
+    """Read district feature rows into normalized rule profiles."""
+
     out = {}
     fields = [
         "cell_id",
@@ -283,6 +310,8 @@ def read_districts(paths):
 
 
 def write_district_updates(paths, districts, report, affected_ids=None):
+    """Write changed district profiles and per-district reports back to ArcGIS."""
+
     affected = set(affected_ids or districts)
     fields = [
         "cell_id",
@@ -345,6 +374,8 @@ def write_district_updates(paths, districts, report, affected_ids=None):
 
 
 def read_active_features(paths):
+    """Read active support features from point, line, and polygon classes."""
+
     features = []
     fields = [
         "feature_id",
@@ -405,6 +436,8 @@ def read_active_features(paths):
 
 
 def write_active_features(paths, features):
+    """Persist lifecycle fields for existing support features."""
+
     by_id = {feature.feature_id: feature for feature in features}
     fields = [
         "feature_id",
@@ -436,6 +469,8 @@ def write_active_features(paths, features):
 
 
 def read_projects(paths):
+    """Read project records from the optional projects table."""
+
     projects = {}
     project_path = paths.get("projects")
     if not project_path or not arcpy.Exists(project_path):
@@ -471,6 +506,8 @@ def read_projects(paths):
 
 
 def write_projects(paths, projects):
+    """Replace persisted project rows with the current in-memory records."""
+
     project_path = paths.get("projects")
     if not project_path or not arcpy.Exists(project_path):
         return
@@ -493,6 +530,8 @@ def write_projects(paths, projects):
 
 
 def generate_docket_rows(paths, seed, messages):
+    """Generate the turn docket and replace the persisted docket table."""
+
     state = read_state(paths)
     districts = read_districts(paths)
     active_features = read_active_features(paths)
@@ -529,6 +568,8 @@ def generate_docket_rows(paths, seed, messages):
 
 
 def read_docket(paths):
+    """Read persisted docket rows into rule docket items."""
+
     items = []
     with arcpy.da.SearchCursor(paths["docket"], DOCKET_FIELD_NAMES) as cursor:
         for row in cursor:
@@ -559,6 +600,8 @@ def read_docket(paths):
 
 
 def write_docket_item(paths, item):
+    """Persist mutable fields for one docket item."""
+
     with arcpy.da.UpdateCursor(paths["docket"], DOCKET_UPDATE_FIELDS) as cursor:
         for row in cursor:
             if row[0] != item.item_id:
@@ -584,6 +627,8 @@ def write_docket_item(paths, item):
 
 
 def command_insert(paths, action, item_id, target_ids, payload=None):
+    """Create a command row before a dashboard action begins."""
+
     command_id = str(uuid.uuid4())
     fields = ["command_id", "created_utc", "action", "item_id", "status", "attempt_count", "target_cell_ids", "payload_json", "message"]
     with arcpy.da.InsertCursor(paths["commands"], fields) as cursor:
@@ -592,6 +637,8 @@ def command_insert(paths, action, item_id, target_ids, payload=None):
 
 
 def command_finish(paths, command_id, status, message="", error=""):
+    """Mark a command row finished with status and diagnostic text."""
+
     fields = ["command_id", "finished_utc", "status", "attempt_count", "message", "error_message"]
     with arcpy.da.UpdateCursor(paths["commands"], fields) as cursor:
         for row in cursor:
@@ -607,6 +654,8 @@ def command_finish(paths, command_id, status, message="", error=""):
 
 
 def action_log(paths, state, result):
+    """Append a compact audit trail entry for a resolved decision."""
+
     with arcpy.da.InsertCursor(paths["action_log"], ["created_utc", "turn", "action", "item_id", "target_cell_ids", "result", "city_delta"]) as cursor:
         cursor.insertRow([
             now_utc(),
@@ -617,4 +666,3 @@ def action_log(paths, state, result):
             result.report[:2048],
             json.dumps(result.city_delta)[:512],
         ])
-

@@ -1,3 +1,5 @@
+"""Feature archetypes and operating rules used by permit approvals."""
+
 from __future__ import annotations
 
 from ..models import *

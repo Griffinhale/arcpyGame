@@ -98,6 +98,8 @@ DISPLAY_STATES = (
 
 @dataclass(frozen=True)
 class FeatureArchetype:
+    """Catalog definition for the map feature created by a docket template."""
+
     archetype_id: str
     label: str
     family: str
@@ -122,6 +124,8 @@ class FeatureArchetype:
 
 @dataclass
 class FeatureInstance:
+    """Runtime state for a persisted support feature on the map."""
+
     feature_id: str
     archetype_id: str
     family: str = ""
@@ -148,6 +152,8 @@ class FeatureInstance:
 
 @dataclass(frozen=True)
 class HazardRule:
+    """Rules for hazard pressure, decay, and mitigation."""
+
     hazard_type: str
     affected_groups: tuple[str, ...]
     risk_threshold: int = 2
@@ -159,6 +165,8 @@ class HazardRule:
 
 @dataclass(frozen=True)
 class ProjectStepTemplate:
+    """One configured step in a multi-turn project chain."""
+
     step_id: str
     title: str
     template_id: str
@@ -173,6 +181,8 @@ class ProjectStepTemplate:
 
 @dataclass(frozen=True)
 class ProjectChainTemplate:
+    """Catalog definition for a sequenced project workflow."""
+
     chain_id: str
     label: str
     initial_step_id: str
@@ -181,6 +191,8 @@ class ProjectChainTemplate:
 
 @dataclass
 class ProjectRecord:
+    """Runtime state for a project chain opened by an approval."""
+
     project_id: str
     chain_template_id: str
     current_step_id: str
@@ -195,6 +207,8 @@ class ProjectRecord:
 
 @dataclass(frozen=True)
 class ScenarioRule:
+    """Scenario-specific starting biases and scoring priorities."""
+
     scenario_id: str
     label: str
     starting_city_effects: dict[str, int] = field(default_factory=dict)
@@ -209,6 +223,8 @@ class ScenarioRule:
 
 @dataclass(frozen=True)
 class DocketTemplate:
+    """Catalog definition for a permit, enforcement, or incident docket item."""
+
     template_id: str
     title: str
     category: str
@@ -247,6 +263,8 @@ class DocketTemplate:
 
 @dataclass
 class DistrictProfile:
+    """Mutable gameplay state for one generated district cell."""
+
     cell_id: str
     name: str
     population: int
@@ -276,6 +294,8 @@ class DistrictProfile:
 
 @dataclass
 class CityState:
+    """Mutable citywide turn, resource, metric, and heat state."""
+
     turn: int = 1
     max_turns: int = 6
     ap: int = 3
@@ -299,6 +319,8 @@ class CityState:
 
 @dataclass
 class DocketItem:
+    """Runtime docket case shown to the player for action."""
+
     item_id: str
     template_id: str
     title: str
@@ -323,6 +345,8 @@ class DocketItem:
 
 @dataclass
 class DecisionResult:
+    """Structured result returned by a resolved docket action."""
+
     ok: bool
     action: str
     item_id: str
@@ -342,6 +366,8 @@ ActiveFeature = FeatureInstance
 
 @dataclass(frozen=True)
 class FeatureOperatingRule:
+    """Lifecycle, upkeep, and maintenance economics for a feature archetype."""
+
     archetype_id: str
     revenue_per_turn: int = 0
     upkeep_per_turn: int = 0
@@ -357,6 +383,8 @@ class FeatureOperatingRule:
 
 @dataclass(frozen=True)
 class InspectionRule:
+    """Evidence and violation configuration for inspections."""
+
     rule_id: str
     evidence_codes: tuple[str, ...]
     violation_codes: tuple[str, ...] = ()
@@ -365,6 +393,8 @@ class InspectionRule:
 
 @dataclass(frozen=True)
 class EvidenceRecord:
+    """One inspection evidence entry recorded on a docket case."""
+
     evidence_id: str
     label: str
     severity: str
@@ -374,6 +404,8 @@ class EvidenceRecord:
 
 @dataclass(frozen=True)
 class ViolationRecord:
+    """One inspection violation and its compliance deadline."""
+
     violation_id: str
     code: str
     severity: str
@@ -385,6 +417,8 @@ class ViolationRecord:
 
 @dataclass(frozen=True)
 class StakeholderProfile:
+    """Political behavior profile for stakeholder heat escalation."""
+
     stakeholder_id: str
     influence: int = 2
     patience: int = 2
@@ -398,6 +432,8 @@ class StakeholderProfile:
 
 @dataclass(frozen=True)
 class AuditFinding:
+    """One audit finding and its contribution to the final score."""
+
     finding_id: str
     severity: str
     source: str
@@ -407,6 +443,8 @@ class AuditFinding:
 
 @dataclass(frozen=True)
 class AuditResult:
+    """Final audit grade, score, findings, and report text."""
+
     grade: str
     score: int
     findings: tuple[AuditFinding, ...]
@@ -415,6 +453,8 @@ class AuditResult:
 
 @dataclass
 class TurnAdvanceResult:
+    """Structured result from advancing the game loop by one turn."""
+
     report: str
     city_delta: dict[str, int] = field(default_factory=dict)
     district_deltas: dict[str, dict[str, int]] = field(default_factory=dict)
@@ -424,4 +464,3 @@ class TurnAdvanceResult:
     upkeep: int = 0
     net: int = 0
     audit: AuditResult | None = None
-
