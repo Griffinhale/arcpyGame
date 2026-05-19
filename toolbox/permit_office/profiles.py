@@ -10,6 +10,7 @@ from .catalogs import *
 from .helpers import *
 from .systems import normalize_feature_instance, project_step_template
 
+
 def generate_district_profiles(rows: int = 5, cols: int = 5, seed: int = 2026) -> list[DistrictProfile]:
     """Generate deterministic district profiles for a rectangular board."""
 
@@ -89,6 +90,8 @@ def generate_docket(
         if followup and len(items) < count:
             items.append(followup)
 
+    # Fill remaining docket slots with the deterministic demo sequence after
+    # mandatory follow-up work has been given priority.
     for template_id in chosen:
         if len(items) >= count:
             break
@@ -97,6 +100,8 @@ def generate_docket(
 
 
 def _scenario_ordered_templates(turn: int, scenario: ScenarioRule) -> list[str]:
+    """Merge scenario-priority templates ahead of the base demo sequence."""
+
     chosen: list[str] = []
     for template_id in scenario.docket_priority:
         if template_id in TEMPLATES and template_id not in chosen:
@@ -108,6 +113,8 @@ def _scenario_ordered_templates(turn: int, scenario: ScenarioRule) -> list[str]:
 
 
 def _project_due_items(turn: int, projects: Iterable[ProjectRecord] | dict[str, ProjectRecord] | None) -> list[DocketItem]:
+    """Convert due project records into docket items for the current turn."""
+
     if not projects:
         return []
     records = projects.values() if isinstance(projects, dict) else projects
@@ -121,6 +128,8 @@ def _project_due_items(turn: int, projects: Iterable[ProjectRecord] | dict[str, 
         if step:
             due.append((project.due_turn, project.project_id, project, step))
     out: list[DocketItem] = []
+    # Each due project step reuses its template, but carries project ids and
+    # targets forward so the decision resolver can advance the chain.
     for idx, (_due_turn, _project_id, project, step) in enumerate(sorted(due, key=lambda row: (row[0], row[1])), start=1):
         item = _make_docket_item(turn, idx, step.template_id, stakeholder=step.stakeholder or project.stakeholder, origin_item_id=f"project:{project.project_id}")
         item.project_id = project.project_id
@@ -135,6 +144,8 @@ def _project_due_items(turn: int, projects: Iterable[ProjectRecord] | dict[str, 
 
 
 def _make_docket_item(turn: int, idx: int, template_id: str, stakeholder: str = "", origin_item_id: str = "") -> DocketItem:
+    """Instantiate a docket item and specialize follow-up case labels."""
+
     template = TEMPLATES[template_id]
     item_stakeholder = stakeholder or template.stakeholder
     item_id = f"T{turn:02d}-{idx:02d}-{template_id}"
@@ -344,6 +355,8 @@ def inspection_case_for_item(
 
 
 def _inspection_summary_text(inspection_case: dict[str, object]) -> str:
+    """Format structured inspection evidence into short packet text."""
+
     evidence = inspection_case.get("evidence", [])
     violations = inspection_case.get("violations", [])
     if not evidence:

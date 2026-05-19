@@ -22,6 +22,8 @@ def _scenario_score(
     features: list[FeatureInstance],
     scenario: ScenarioRule,
 ) -> int:
+    """Calculate audit score using either default or scenario-specific weights."""
+
     if scenario.scenario_id == "default":
         return state.prosperity + state.culture - state.unrest - state.risk + state.money // 3
     weights = scenario.score_weights or SCENARIO_RULES["default"].score_weights
@@ -33,6 +35,8 @@ def _scenario_score(
         "risk": state.risk,
         "money": state.money // 3,
     }
+    # Scenario weights can inspect district-level systems, so fold those
+    # aggregate values into the same metric map as citywide fields.
     if profiles:
         metric_values["housing_capacity"] = sum(profile.housing_capacity for profile in profiles) // max(1, len(profiles) * 100)
         metric_values["affordability"] = sum(profile.affordability for profile in profiles) // max(1, len(profiles))
@@ -80,6 +84,8 @@ def advance_turn_result(
     overdue_violations = 0
     feature_updates: dict[str, dict[str, object]] = {}
     district_deltas: dict[str, dict[str, int]] = {}
+    # Unresolved docket work creates heat, local grievances, carryover state,
+    # and project delay before long-running systems advance.
     for item in items:
         overdue_violations += _advance_violation_deadlines(state, item)
         if item.status in ("open", "inspected"):
@@ -110,6 +116,8 @@ def advance_turn_result(
     new_incidents = 0
     system_notes: list[str] = []
     if districts:
+        # Network, hazard, housing, and population systems operate on normalized
+        # profiles so the next dashboard render sees current derived fields.
         if feature_list or any(profile.hazards for profile in districts.values()):
             recompute_network_access(districts, feature_list, state.turn)
             hazard_report = apply_hazard_turn(districts, feature_list, state.turn)
@@ -326,6 +334,8 @@ def generate_audit_result(
 
 
 def _settle_item_violations(item: DocketItem, mitigated: bool) -> None:
+    """Close open inspection violations after a resolved decision."""
+
     inspection = dict((item.case_json or {}).get("inspection") or {})
     violations = list(inspection.get("violations") or [])
     changed = False
@@ -346,6 +356,8 @@ def _settle_item_violations(item: DocketItem, mitigated: bool) -> None:
 
 
 def _advance_violation_deadlines(state: CityState, item: DocketItem) -> int:
+    """Mark overdue inspection violations and add enforcement pressure."""
+
     overdue = 0
     inspection = dict((item.case_json or {}).get("inspection") or {})
     violations = list(inspection.get("violations") or [])
@@ -369,6 +381,8 @@ def _advance_violation_deadlines(state: CityState, item: DocketItem) -> int:
 
 
 def _open_violations(item: DocketItem) -> list[dict[str, object]]:
+    """Return currently open or overdue violation records on an item."""
+
     inspection = (item.case_json or {}).get("inspection") or {}
     if not isinstance(inspection, dict):
         return []

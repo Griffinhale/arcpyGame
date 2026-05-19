@@ -49,6 +49,8 @@ class Toolbox(object):
     """ArcGIS toolbox declaration for the Permit Office prototype."""
 
     def __init__(self):
+        """Register the playable geoprocessing tool with ArcGIS Pro."""
+
         self.label = TOOLBOX_LABEL
         self.alias = TOOLBOX_ALIAS
         self.tools = [PermitOfficePrototype]
@@ -58,11 +60,15 @@ class PermitOfficePrototype(object):
     """ArcGIS geoprocessing tool that hosts the playable permit workflow."""
 
     def __init__(self):
+        """Configure static tool metadata displayed in ArcGIS Pro."""
+
         self.label = "Permit Office Prototype"
         self.description = "Generated-district permit office dashboard prototype."
         self.canRunInBackground = False
 
     def getParameterInfo(self):
+        """Declare ArcGIS tool parameters and their value-list constraints."""
+
         p_workspace = arcpy.Parameter("Game Workspace (optional)", "game_workspace", "DEWorkspace", "Optional", "Input")
         p_districts = arcpy.Parameter("District Layer", "district_layer", "GPFeatureLayer", "Optional", "Input")
         p_action = arcpy.Parameter("Action", "action", "GPString", "Required", "Input")
@@ -75,15 +81,21 @@ class PermitOfficePrototype(object):
         return [p_workspace, p_districts, p_action, p_seed, p_output]
 
     def updateParameters(self, parameters):
+        """Enable map-layer input only for dashboard actions."""
+
         action = parameters[P_ACTION].valueAsText
         parameters[P_DISTRICTS].enabled = action == "Open Dashboard"
 
     def execute(self, parameters, messages):
+        """Dispatch the selected ArcGIS tool action against game state."""
+
         action = parameters[P_ACTION].valueAsText or "Ping Environment"
         seed = int(parameters[P_SEED].value or 2026)
         gdb_path = resolve_workspace(parameters[P_WORKSPACE].value, messages)
         paths = ensure_schema(gdb_path, messages)
 
+        # Lightweight actions either report environment state or populate the
+        # geodatabase without opening the dashboard event loop.
         if action == "Ping Environment":
             _log(messages, "PING", f"workspace = {gdb_path}")
             _log(messages, "PING", f"templates = {', '.join(sorted(rules.TEMPLATES))}")
@@ -102,6 +114,8 @@ class PermitOfficePrototype(object):
             refresh_all(paths, messages)
             return
         if action == "Show Scorecard":
+            # Scorecards read persisted rows and pure rules data without
+            # mutating the game so they are safe as a quick audit check.
             state = read_state(paths)
             districts = read_districts(paths)
             active_features = read_active_features(paths)
@@ -110,6 +124,8 @@ class PermitOfficePrototype(object):
             _log(messages, "AUDIT", f"{report} {rules.population_city_summary(districts)}; incidents={rules.incident_summary(districts)}.")
             return
         if action == "Open Dashboard":
+            # Dashboard startup requires map outputs and seeded rows because
+            # Tkinter callbacks rely on persisted ArcGIS feature classes.
             district_layer = parameters[P_DISTRICTS].value or paths["districts"]
             add_outputs_to_map(paths, messages)
             if int(arcpy.management.GetCount(paths["districts"])[0]) == 0:

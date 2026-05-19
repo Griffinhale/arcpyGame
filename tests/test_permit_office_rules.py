@@ -7,6 +7,7 @@ from toolbox import arcpy_permit_office_rules as rules
 
 
 def test_generate_district_profiles_is_deterministic_and_named():
+    """Verify seeded district generation is stable and fully normalized."""
     first = rules.generate_district_profiles(rows=2, cols=2, seed=2026)
     second = rules.generate_district_profiles(rows=2, cols=2, seed=2026)
 
@@ -23,6 +24,7 @@ def test_generate_district_profiles_is_deterministic_and_named():
 
 
 def test_demo_template_catalog_has_case_file_metadata():
+    """Verify demo templates include the metadata needed for case files."""
     assert len(rules.DEMO_TEMPLATE_IDS) == 10
     assert set(rules.DEMO_TEMPLATE_IDS) < set(rules.TEMPLATES)
     for template_id in rules.DEMO_TEMPLATE_IDS:
@@ -37,6 +39,7 @@ def test_demo_template_catalog_has_case_file_metadata():
 
 
 def test_feature_archetype_catalog_is_valid_and_covers_all_templates():
+    """Verify templates resolve to valid feature archetypes and metadata."""
     assert rules.validate_feature_catalog() == []
     assert {"business", "public_resource", "natural_resource", "infrastructure", "event", "land_use", "incident", "compliance"} <= set(rules.FEATURE_FAMILIES)
     for template_id, template in rules.TEMPLATES.items():
@@ -48,6 +51,7 @@ def test_feature_archetype_catalog_is_valid_and_covers_all_templates():
 
 
 def test_generate_docket_has_three_seeded_items_with_templates():
+    """Verify the first seeded docket has three valid template-backed cases."""
     docket = rules.generate_docket(turn=1, seed=2026, count=3)
 
     assert len(docket) == 3
@@ -61,6 +65,7 @@ def test_generate_docket_has_three_seeded_items_with_templates():
 
 
 def test_six_turn_demo_sequence_covers_shortlist():
+    """Verify the deterministic demo schedule covers every shortlist case."""
     expected = {
         1: ["connector_corridor", "procession_route", "street_vendor_compact"],
         2: ["utility_expansion_trench", "contractor_renovation_waiver", "public_art_museum_grant"],
@@ -80,6 +85,7 @@ def test_six_turn_demo_sequence_covers_shortlist():
 
 
 def _active_feature_from_route_item(item, turn):
+    """Build a normalized feature instance from an approved route item."""
     template = rules.TEMPLATES[item.template_id]
     archetype = rules.feature_archetype_for_template(template)
     feature = rules.FeatureInstance(
@@ -98,6 +104,7 @@ def _active_feature_from_route_item(item, turn):
 
 
 def test_seed_2026_golden_route_produces_stable_conditional_scorecard():
+    """Verify the six-turn golden route preserves its conditional audit result."""
     profiles = {profile.cell_id: profile for profile in rules.generate_district_profiles(seed=2026)}
     state = rules.CityState()
     active_features = []
@@ -133,6 +140,8 @@ def test_seed_2026_golden_route_produces_stable_conditional_scorecard():
         6: [rules.MAINTENANCE_TEMPLATE_ID, rules.CIVIC_INCIDENT_TEMPLATE_ID, rules.CIVIC_INCIDENT_TEMPLATE_ID],
     }
 
+    # Each turn regenerates the visible docket from current state, then applies
+    # only the scripted player actions for this golden-route scenario.
     for turn in range(1, 7):
         docket = rules.generate_docket(
             turn=state.turn,
@@ -182,6 +191,8 @@ def test_seed_2026_golden_route_produces_stable_conditional_scorecard():
         if turn < 6:
             rules.advance_turn_result(state, docket, profiles, active_features)
 
+    # Final assertions pin the resulting audit, resources, and feature mix so
+    # future balance changes are intentional.
     archetypes = {feature.archetype_id for feature in active_features}
     grade, report = rules.scorecard(state, profiles, active_features, docket_history)
 
@@ -199,6 +210,7 @@ def test_seed_2026_golden_route_produces_stable_conditional_scorecard():
 
 
 def test_inspect_item_marks_item_and_adds_risk_band_hint():
+    """Verify inspection mutates the item with risk and packet text."""
     item = rules.generate_docket(turn=1, seed=2026, count=1)[0]
 
     inspected = rules.inspect_item(item, seed=2026)
@@ -210,6 +222,7 @@ def test_inspect_item_marks_item_and_adds_risk_band_hint():
 
 
 def test_inspect_item_adds_target_population_context_when_available():
+    """Verify inspections include local population support and grievance notes."""
     profile = rules.DistrictProfile(
         cell_id="D0000",
         name="Petition Row",
@@ -240,6 +253,7 @@ def test_inspect_item_adds_target_population_context_when_available():
 
 
 def test_approve_applies_costs_district_deltas_and_city_delta():
+    """Verify a normal approval spends resources and updates city/district state."""
     profiles = {p.cell_id: p for p in rules.generate_district_profiles(rows=2, cols=2, seed=2026)}
     state = rules.CityState(ap=3, money=60)
     item = rules.DocketItem(
@@ -271,6 +285,7 @@ def test_approve_applies_costs_district_deltas_and_city_delta():
 
 
 def test_approval_adjusts_population_pressure_and_local_grievance():
+    """Verify approval changes population mix, growth, and local grievance bands."""
     profile = rules.DistrictProfile(
         cell_id="D0000",
         name="Applicant Yard",
@@ -306,6 +321,7 @@ def test_approval_adjusts_population_pressure_and_local_grievance():
 
 
 def test_service_archetype_updates_services_and_land_use_overlay():
+    """Verify service features improve local service gaps after approval."""
     profile = rules.DistrictProfile(
         cell_id="D0000",
         name="Undercovered Row",
@@ -340,6 +356,7 @@ def test_service_archetype_updates_services_and_land_use_overlay():
 
 
 def test_land_use_overlay_is_applied_to_successful_zone_approval():
+    """Verify successful zoning approvals persist their overlay on districts."""
     profile = rules.DistrictProfile(
         cell_id="D0000",
         name="Rezoning Row",
@@ -371,6 +388,7 @@ def test_land_use_overlay_is_applied_to_successful_zone_approval():
 
 
 def test_mitigation_reduces_bad_side_effects_and_costs_more():
+    """Verify mitigated approvals cost more and dampen harmful deltas."""
     base_profiles = {p.cell_id: p for p in rules.generate_district_profiles(rows=2, cols=2, seed=10)}
     mitigated_profiles = copy.deepcopy(base_profiles)
     base_state = rules.CityState(ap=3, money=80)
@@ -397,6 +415,7 @@ def test_mitigation_reduces_bad_side_effects_and_costs_more():
 
 
 def test_deny_costs_ap_and_adds_small_city_friction():
+    """Verify denial spends AP and applies small city and stakeholder costs."""
     profiles = {p.cell_id: p for p in rules.generate_district_profiles(rows=1, cols=1, seed=2026)}
     state = rules.CityState(ap=3, money=60, unrest=20, prosperity=50)
     item = rules.DocketItem("deny-me", "fire_budget_escalation", rules.TEMPLATES["fire_budget_escalation"].title, "POLYGON", 1)
@@ -413,6 +432,7 @@ def test_deny_costs_ap_and_adds_small_city_friction():
 
 
 def test_ignored_items_add_heat_and_heat_generates_enforcement_followup():
+    """Verify ignored dockets create stakeholder heat and enforcement follow-up."""
     state = rules.CityState(turn=1, ap=0)
     items = [
         rules.DocketItem(
@@ -442,6 +462,7 @@ def test_ignored_items_add_heat_and_heat_generates_enforcement_followup():
 
 
 def test_enforcement_followup_can_be_settled_and_reduces_heat():
+    """Verify enforcement settlement resolves the item and cools stakeholder heat."""
     profiles = {p.cell_id: p for p in rules.generate_district_profiles(rows=1, cols=1, seed=2026)}
     state = rules.CityState(ap=3, money=60, stakeholder_heat={"vendors": 4})
     item = rules.generate_docket(turn=2, seed=2026, count=1, state=state)[0]
@@ -463,6 +484,7 @@ def test_enforcement_followup_can_be_settled_and_reduces_heat():
 
 
 def test_high_local_grievance_generates_civic_incident_followup():
+    """Verify high local dissatisfaction surfaces as a civic incident docket."""
     profile = rules.DistrictProfile(
         cell_id="D0000",
         name="Appeal Steps",
@@ -488,6 +510,7 @@ def test_high_local_grievance_generates_civic_incident_followup():
 
 
 def test_civic_incident_response_lowers_dissatisfaction_and_clears_incident():
+    """Verify civic incident response lowers grievance and clears incident state."""
     profile = rules.DistrictProfile(
         cell_id="D0000",
         name="Formal Complaint Green",
@@ -523,6 +546,7 @@ def test_civic_incident_response_lowers_dissatisfaction_and_clears_incident():
 
 
 def test_high_risk_bad_fit_approval_can_fail():
+    """Verify risky bad-fit approvals can trigger a failed outcome."""
     profile = rules.DistrictProfile(
         cell_id="D0000",
         name="Low Service Reserve",
@@ -554,6 +578,7 @@ def test_high_risk_bad_fit_approval_can_fail():
 
 
 def test_land_use_conflict_increases_failure_chance():
+    """Verify land-use conflict raises approval failure probability."""
     good = rules.DistrictProfile(
         cell_id="D0000",
         name="Market Fit",
@@ -587,6 +612,7 @@ def test_land_use_conflict_increases_failure_chance():
 
 
 def test_advance_turn_resets_ap_and_marks_audit_stage():
+    """Verify turn advancement restores AP and updates audit stage."""
     state = rules.CityState(turn=2, ap=0, max_ap=3)
     items = rules.generate_docket(turn=2, seed=2026, count=3)
 
@@ -600,6 +626,7 @@ def test_advance_turn_resets_ap_and_marks_audit_stage():
 
 
 def test_advance_turn_applies_population_drift_and_unresolved_local_grievance():
+    """Verify unresolved local cases and population drift apply during turn end."""
     profile = rules.DistrictProfile(
         cell_id="D0000",
         name="Growing Annex",
@@ -636,6 +663,7 @@ def test_advance_turn_applies_population_drift_and_unresolved_local_grievance():
 
 
 def test_scorecard_returns_audit_grade_and_metrics():
+    """Verify scorecard reports a grade and key city metrics."""
     state = rules.CityState(prosperity=70, culture=60, unrest=20, risk=15, money=45)
 
     grade, report = rules.scorecard(state)
@@ -646,6 +674,7 @@ def test_scorecard_returns_audit_grade_and_metrics():
 
 
 def test_long_term_catalogs_validate_new_city_system_records():
+    """Verify long-term systems have complete catalog coverage."""
     assert rules.validate_feature_catalog() == []
     assert set(rules.HAZARD_TYPES) == {"pollution", "flood", "fire", "noise", "heat", "ecology"}
     assert {"bus_priority_link", "water_main_loop", "green_buffer_reserve", "inspection_order"} <= set(rules.FEATURE_ARCHETYPES)
@@ -654,6 +683,7 @@ def test_long_term_catalogs_validate_new_city_system_records():
 
 
 def test_generated_districts_have_adjacency_housing_and_empty_hazards():
+    """Verify generated districts include adjacency, housing, and network fields."""
     profiles = {p.cell_id: p for p in rules.generate_district_profiles(rows=2, cols=2, seed=2026)}
 
     assert profiles["D0000"].adjacent_cell_ids == ["D0001", "D0100"]
@@ -665,6 +695,7 @@ def test_generated_districts_have_adjacency_housing_and_empty_hazards():
 
 
 def test_line_network_access_affects_endpoints_and_one_hop_only():
+    """Verify line networks affect endpoints and adjacent districts only."""
     profiles = {p.cell_id: p for p in rules.generate_district_profiles(rows=1, cols=4, seed=2026)}
     feature = rules.FeatureInstance(
         feature_id="bus-1",
@@ -683,6 +714,7 @@ def test_line_network_access_affects_endpoints_and_one_hop_only():
 
 
 def test_housing_effects_recompute_vacancy_and_displacement_pressure():
+    """Verify housing effects recalculate vacancy and affordability fields."""
     profile = rules.DistrictProfile(
         cell_id="D0000",
         name="Lease Row",
@@ -709,6 +741,7 @@ def test_housing_effects_recompute_vacancy_and_displacement_pressure():
 
 
 def test_hazards_accumulate_decay_and_are_reduced_by_mitigation():
+    """Verify hazards accumulate, decay, and respond to mitigation features."""
     profiles = {p.cell_id: p for p in rules.generate_district_profiles(rows=1, cols=2, seed=2026)}
     source = rules.FeatureInstance("site-1", "construction_site", target_cell_ids=["D0000"], status="active", intensity=1)
 
@@ -727,6 +760,7 @@ def test_hazards_accumulate_decay_and_are_reduced_by_mitigation():
 
 
 def test_project_chain_spawns_due_step_and_advances_on_resolution():
+    """Verify project approvals create due steps and advance after resolution."""
     profile = rules.DistrictProfile(
         cell_id="D0000",
         name="Buildout Row",
@@ -760,6 +794,7 @@ def test_project_chain_spawns_due_step_and_advances_on_resolution():
 
 
 def test_scenario_rules_change_docket_priority_and_scorecard_text():
+    """Verify scenarios alter docket priority and scorecard reporting."""
     state = rules.CityState(scenario_id="housing_mandate")
     profiles = {p.cell_id: p for p in rules.generate_district_profiles(rows=1, cols=2, seed=2026)}
     rules.apply_scenario(state, profiles)
@@ -773,6 +808,7 @@ def test_scenario_rules_change_docket_priority_and_scorecard_text():
 
 
 def test_governance_catalogs_cover_features_stakeholders_and_maintenance():
+    """Verify governance catalogs include features, stakeholders, and inspections."""
     assert rules.validate_feature_catalog() == []
     assert rules.MAINTENANCE_TEMPLATE_ID in rules.TEMPLATES
     assert set(rules.FEATURE_ARCHETYPES) <= set(rules.FEATURE_OPERATING_RULES)
@@ -781,6 +817,7 @@ def test_governance_catalogs_cover_features_stakeholders_and_maintenance():
 
 
 def test_inspection_creates_evidence_violations_deadlines_and_compliance_outcomes():
+    """Verify inspections create evidence, violations, and compliance outcomes."""
     profile = rules.DistrictProfile(
         cell_id="D0000",
         name="Inspection Row",
@@ -813,6 +850,7 @@ def test_inspection_creates_evidence_violations_deadlines_and_compliance_outcome
 
 
 def test_feature_lifecycle_economy_and_maintenance_followup_are_deterministic():
+    """Verify feature decay affects economy and generates maintenance follow-up."""
     profile = rules.DistrictProfile("D0000", "Service Yard", 1500, 55, 20, 40, 30, 45, "residential")
     rules.normalize_profile(profile)
     feature = rules.FeatureInstance(
@@ -840,6 +878,7 @@ def test_feature_lifecycle_economy_and_maintenance_followup_are_deterministic():
 
 
 def test_maintenance_decision_repairs_feature_and_reschedules_due_turn():
+    """Verify maintenance decisions repair features and reschedule upkeep."""
     feature = rules.FeatureInstance("F-market", "vendor_market", owner_group="vendors", target_cell_ids=["D0000"], turn_created=1, condition=20, status="degraded")
     rules.normalize_feature_instance(feature, turn=3)
     profile = rules.DistrictProfile("D0000", "Market Row", 1000, 45, 25, 35, 25, 45, "mercantile")
@@ -857,6 +896,7 @@ def test_maintenance_decision_repairs_feature_and_reschedules_due_turn():
 
 
 def test_audit_findings_include_money_features_services_and_violations():
+    """Verify audits include money, feature, service, and inspection findings."""
     profile = rules.DistrictProfile("D0000", "Gap Row", 1400, 35, 25, 30, 75, 5, "residential", population_mix={"families": 3})
     rules.normalize_profile(profile)
     feature = rules.FeatureInstance("F-failed", "utility_trench", status="failed", condition=0, target_cell_ids=["D0000"])
@@ -874,11 +914,14 @@ def test_audit_findings_include_money_features_services_and_violations():
 
 
 def test_arcpy_toolbox_schema_declares_governance_fields_without_new_feature_classes():
+    """Verify governance fields are declared without adding new map feature classes."""
     toolbox_dir = Path(__file__).parents[1] / "toolbox"
     toolbox_text = (toolbox_dir / "arcpy_permit_office.pyt").read_text()
     schema_text = (toolbox_dir / "permit_office_arcgis" / "schema.py").read_text()
     combined_text = toolbox_text + schema_text
 
+    # Governance and city-system data rides existing feature classes, so this
+    # guards against schema drift that would require new ArcGIS layers.
     for field_name in (
         "condition",
         "maintenance_due_turn",
@@ -909,6 +952,7 @@ def test_arcpy_toolbox_schema_declares_governance_fields_without_new_feature_cla
 
 
 def test_active_permit_office_files_stay_under_line_budget():
+    """Verify active source files remain below the reviewable line budget."""
     toolbox_dir = Path(__file__).parents[1] / "toolbox"
     # Keep the active ArcGIS toolbox small enough to review without counting archive files.
     active_paths = [

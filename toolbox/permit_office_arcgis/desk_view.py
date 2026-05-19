@@ -175,6 +175,8 @@ class PermitDeskView:
     """Canvas-based dashboard view for the overworked permit clerk desk."""
 
     def __init__(self, root, callbacks: DeskCallbacks, on_select_item: Callable[[str], None]):
+        """Create the canvas and bind mouse events to view callbacks."""
+
         import tkinter as tk
 
         self.root = root
@@ -206,12 +208,16 @@ class PermitDeskView:
         return self.model.selected_item_id
 
     def _on_configure(self, event):
+        """Redraw the canvas when the window size changes."""
+
         size = (event.width, event.height)
         if size != self._last_size:
             self._last_size = size
             self._draw(max(event.width, 900), max(event.height, 680))
 
     def _on_click(self, event):
+        """Dispatch a click to the topmost registered hit target."""
+
         for _kind, _ident, bbox, callback in reversed(self._click_targets):
             if _inside(event.x, event.y, bbox):
                 callback()
@@ -219,6 +225,8 @@ class PermitDeskView:
         return None
 
     def _on_motion(self, event):
+        """Update hover state and cursor for registered hit targets."""
+
         hover = ""
         for kind, ident, bbox, _callback in reversed(self._click_targets):
             if _inside(event.x, event.y, bbox):
@@ -232,6 +240,8 @@ class PermitDeskView:
             self._draw(width, height)
 
     def _on_leave(self, _event):
+        """Clear hover state when the pointer leaves the canvas."""
+
         if self._hover_key:
             self._hover_key = ""
             self.canvas.configure(cursor="")
@@ -240,11 +250,15 @@ class PermitDeskView:
             self._draw(width, height)
 
     def _draw(self, width, height):
+        """Draw all desk regions for the current view model."""
+
         c = self.canvas
         c.delete("all")
         self._click_targets = []
         self._draw_background(c, width, height)
 
+        # The desk is arranged as three top panels plus a bottom stamp tray so
+        # resizing keeps actions visible while preserving a readable case file.
         margin = 18
         gap = 14
         stamp_h = 126
@@ -263,6 +277,8 @@ class PermitDeskView:
         self._draw_stamp_tray(c, tray)
 
     def _draw_background(self, c, width, height):
+        """Paint the desk surface and non-interactive paper props."""
+
         c.create_rectangle(0, 0, width, height, fill=Palette.DESK, outline="")
         c.create_rectangle(0, 0, width, 8, fill=Palette.DESK_DARK, outline="")
         c.create_line(24, 58, width - 24, 58, fill="#6d8680", width=1)
@@ -277,6 +293,8 @@ class PermitDeskView:
         c.create_arc(width - 72, 17, width - 56, 33, start=90, extent=220, outline="#b8c9c2", width=2)
 
     def _draw_in_tray(self, c, box):
+        """Draw docket rows and register their selection hit targets."""
+
         x0, y0, x1, y1 = box
         _shadow_rect(c, x0 + 5, y0 + 6, x1 + 5, y1 + 6)
         c.create_rectangle(x0, y0, x1, y1, fill=Palette.FOLDER, outline="#9a854b", width=2)
@@ -299,6 +317,8 @@ class PermitDeskView:
         row_y = y0 + 66
         row_h = min(102, max(82, (y1 - row_y - 18) // max(1, len(self.model.docket_rows))))
         for idx, row in enumerate(self.model.docket_rows):
+            # Row state controls the paper lift, color, and click target so the
+            # selected case reads as the current physical folder.
             yy = row_y + idx * (row_h - 4)
             selected = row.selected
             hover = self._hover_key == f"docket:{row.item_id}"
@@ -323,6 +343,8 @@ class PermitDeskView:
             self._add_target("docket", row.item_id, bbox, lambda item_id=row.item_id: self.on_select_item(item_id))
 
     def _draw_case_file(self, c, box):
+        """Draw selected case details as the center packet."""
+
         x0, y0, x1, y1 = box
         _shadow_rect(c, x0 + 8, y0 + 10, x1 + 8, y1 + 10)
         c.create_rectangle(x0 + 14, y0 + 8, x1 - 8, y1 - 6, fill="#e7dcc3", outline="#b8aa8d")
@@ -341,6 +363,8 @@ class PermitDeskView:
         content_x = x0 + 24
         content_w = max(240, x1 - x0 - 70)
         y = y0 + 104
+        # Header fields stay compact; longer narrative content moves into ruled
+        # blocks so it can wrap without pushing the action tray.
         for field in case.fields[:8]:
             c.create_text(content_x, y, text=field.label.upper(), anchor="nw", fill=Palette.BLUE, font=self._font(6, "bold"))
             c.create_text(content_x + 108, y, text=_clip(field.value, 56), anchor="nw", fill=Palette.INK, font=self._font(8), width=content_w - 108)
@@ -361,6 +385,8 @@ class PermitDeskView:
         c.create_text(x1 - 42, y1 - 43, text=f"RISK: {case.risk_band.upper()}", anchor="e", fill=_risk_color(case.risk_band), font=self._font(9, "bold"))
 
     def _draw_ledger(self, c, box):
+        """Draw city metrics, heat, population, and incident ledger rows."""
+
         x0, y0, x1, y1 = box
         _shadow_rect(c, x0 + 5, y0 + 8, x1 + 5, y1 + 8)
         c.create_rectangle(x0, y0, x1, y1, fill=Palette.LEDGER, outline="#87987b", width=2)
@@ -390,6 +416,8 @@ class PermitDeskView:
             c.create_line(x0 + 18 + idx * 48, y1 - 16, x0 + 52 + idx * 48, y1 - 16, fill=color, width=2)
 
     def _draw_stamp_tray(self, c, box):
+        """Draw action buttons, status text, and the close control."""
+
         x0, y0, x1, y1 = box
         _shadow_rect(c, x0 + 5, y0 + 6, x1 + 5, y1 + 6)
         c.create_rectangle(x0, y0, x1, y1, fill="#d0c3a6", outline="#8e7f63", width=2)
@@ -414,6 +442,8 @@ class PermitDeskView:
         button_w = max(72, min(132, (usable - button_gap * (len(actions) - 1)) // len(actions)))
         button_h = 54
         by = y0 + 35
+        # Buttons are stamped onto the tray and registered as hit targets during
+        # drawing because the canvas has no native widget-level buttons.
         for idx, (label, color, callback) in enumerate(actions):
             bx = button_area_x0 + idx * (button_w + button_gap)
             hover = self._hover_key == f"action:{label}"
@@ -427,6 +457,8 @@ class PermitDeskView:
         self._add_target("action", "Close", close_box, self.callbacks.close)
 
     def _draw_stamp_button(self, c, x0, y0, x1, y1, label, color, hover, callback):
+        """Draw one stamp-style action button and register its hit target."""
+
         c.create_rectangle(x0 + 3, y0 + 4, x1 + 3, y1 + 4, fill="#6f5d44", outline="")
         c.create_rectangle(x0, y0, x1, y1, fill="#f0e4c8" if hover else Palette.PAPER, outline=color, width=3)
         c.create_rectangle(x0 + 8, y0 + 8, x1 - 8, y1 - 8, outline=color, width=1)
@@ -435,13 +467,19 @@ class PermitDeskView:
         self._add_target("action", label, (x0, y0, x1, y1), callback)
 
     def _add_target(self, kind, ident, bbox, callback):
+        """Record a clickable canvas rectangle for later event dispatch."""
+
         self._click_targets.append((kind, ident, bbox, callback))
 
     def _font(self, size, weight="normal"):
+        """Return the Segoe UI font tuple used by the desk canvas."""
+
         return ("Segoe UI", size, weight)
 
 
 def _resolve_selected_item(items, selected_item_id):
+    """Return the requested active item or the first item as a fallback."""
+
     if selected_item_id:
         for item in items:
             if item.item_id == selected_item_id:
@@ -450,9 +488,13 @@ def _resolve_selected_item(items, selected_item_id):
 
 
 def _case_summary(state, districts, item) -> CaseSummary:
+    """Convert a docket item into the structured case packet model."""
+
     if not item:
         return CaseSummary()
 
+    # Template, archetype, stakeholder, and district context are merged here so
+    # the Canvas layer only has presentation-ready text to draw.
     template = rules.TEMPLATES[item.template_id]
     archetype = rules.feature_archetype_for_template(template)
     stakeholder = item.stakeholder or template.stakeholder
@@ -492,6 +534,8 @@ def _case_summary(state, districts, item) -> CaseSummary:
 
 
 def _ledger_rows(state, districts) -> tuple[LedgerRow, ...]:
+    """Build the city ledger rows shown in the dashboard sidebar."""
+
     heat = rules.heat_summary(state)
     population = rules.population_city_summary(districts)
     incidents = rules.incident_summary(districts)
@@ -510,6 +554,8 @@ def _ledger_rows(state, districts) -> tuple[LedgerRow, ...]:
 
 
 def _inspection_summary(item) -> str:
+    """Format inspection evidence and violations for the case packet."""
+
     inspection = (item.case_json or {}).get("inspection") if isinstance(item.case_json, dict) else None
     if not inspection:
         if item.inspected:
@@ -530,6 +576,8 @@ def _inspection_summary(item) -> str:
 
 
 def _action_note(template) -> str:
+    """Describe how the stamp actions map to this template type."""
+
     if template.is_incident:
         return "Issue=formal response; Conditions=service settlement; Deny=defer incident."
     if template.is_enforcement:
@@ -538,6 +586,8 @@ def _action_note(template) -> str:
 
 
 def _draw_receipt_canvas(c, width, height, title, report, affected, state):
+    """Draw the filed-report receipt in a modal canvas."""
+
     c.create_rectangle(0, 0, width, height, fill=Palette.DESK, outline="")
     _shadow_rect(c, 50, 30, width - 44, height - 28)
     c.create_rectangle(42, 22, width - 52, height - 38, fill=Palette.PAPER, outline="#9b8f76", width=2)
@@ -558,6 +608,8 @@ def _draw_receipt_canvas(c, width, height, title, report, affected, state):
 
 
 def _draw_ruled_block(c, x0, y0, x1, y1, label, text, accent, font_factory):
+    """Draw a labeled ruled-paper text block."""
+
     c.create_rectangle(x0, y0, x1, y1, fill="#fbf3dc", outline="#d4c7aa")
     c.create_rectangle(x0, y0, x1, y0 + 20, fill="#efe3c8", outline="#d4c7aa")
     c.create_text(x0 + 8, y0 + 5, text=label, anchor="nw", fill=accent, font=font_factory(7, "bold"))
@@ -567,10 +619,14 @@ def _draw_ruled_block(c, x0, y0, x1, y1, label, text, accent, font_factory):
 
 
 def _shadow_rect(c, x0, y0, x1, y1):
+    """Draw a simple rectangular paper shadow."""
+
     c.create_rectangle(x0, y0, x1, y1, fill=Palette.PAPER_SHADOW, outline="")
 
 
 def _meter(value, maximum):
+    """Convert a value and maximum into a 0-100 meter percentage."""
+
     try:
         if maximum <= 0:
             return 0
@@ -580,20 +636,28 @@ def _meter(value, maximum):
 
 
 def _inside(x, y, bbox):
+    """Return whether a point is inside a canvas bounding box."""
+
     x0, y0, x1, y1 = bbox
     return x0 <= x <= x1 and y0 <= y <= y1
 
 
 def _display(value):
+    """Convert an identifier into title-style display text."""
+
     text = str(value or "none").replace("_", " ")
     return text[:1].upper() + text[1:]
 
 
 def _clip(value, width):
+    """Shorten text to a single normalized line for canvas rendering."""
+
     return shorten(" ".join(str(value or "").split()), width=width, placeholder="...")
 
 
 def _status_color(status):
+    """Map docket or feature status to a palette color."""
+
     value = (status or "").lower()
     if value in ("open", "carried"):
         return Palette.BLUE
@@ -607,6 +671,8 @@ def _status_color(status):
 
 
 def _risk_color(risk):
+    """Map inspection risk bands to a palette color."""
+
     value = (risk or "").lower()
     if value == "high":
         return Palette.RED
@@ -618,6 +684,8 @@ def _risk_color(risk):
 
 
 def _tone_color(tone):
+    """Map ledger row tone names to palette colors."""
+
     if tone == "good":
         return Palette.GREEN
     if tone == "bad":

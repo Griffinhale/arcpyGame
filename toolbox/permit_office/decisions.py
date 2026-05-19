@@ -55,6 +55,8 @@ def resolve_decision(
             active_features,
         )
 
+    # Inspection only spends AP and enriches the case packet; it intentionally
+    # stops before permit effects, projects, or ArcGIS feature activation.
     if action_key == "inspect":
         blocked = _spend_ap(state, action, item.item_id, "Inspection")
         if blocked:
@@ -102,6 +104,8 @@ def resolve_decision(
         blocked = _spend_ap(state, action, item.item_id, "Denial")
         if blocked:
             return blocked
+        # Denials avoid project effects but still create friction, stakeholder
+        # heat, and local population reactions.
         item.status = "denied"
         delta = {"unrest": 1, "prosperity": -1}
         _apply_city_delta(state, delta)
@@ -140,6 +144,8 @@ def resolve_decision(
     if blocked:
         return blocked
 
+    # Approval builds district-level deltas first, then averages those effects
+    # into citywide state after side effects, failures, and population reactions.
     district_deltas: dict[str, dict[str, int]] = {}
     city_delta = {metric: 0 for metric in CORE_METRICS}
     # Include the selected targets in the seed so approval failures are repeatable per placement.
@@ -171,6 +177,8 @@ def resolve_decision(
 
     side = _context_side_effect(template, [districts[cid] for cid in targets], rng, mitigated)
     if side:
+        # Context side effects represent local surprises that affect every
+        # selected district and the city accumulator.
         for cid in targets:
             _apply_profile_delta(districts[cid], side)
             _merge_delta(district_deltas.setdefault(cid, {}), side)
@@ -199,6 +207,8 @@ def resolve_decision(
     for cid, delta in population_deltas.items():
         _merge_delta(district_deltas.setdefault(cid, {}), delta)
     if not failure_triggered:
+        # Long-term housing and hazard changes only land when the permit itself
+        # succeeds; failed outcomes already applied their corrective delta.
         long_term_deltas = apply_template_long_term_effects(template, [districts[cid] for cid in targets], mitigated)
         for cid, delta in long_term_deltas.items():
             _merge_delta(district_deltas.setdefault(cid, {}), delta)
@@ -216,6 +226,8 @@ def resolve_decision(
         failure_text = f" Outcome failed: {template.failure_mode}; corrective delta {_format_delta(failure_delta)}."
     project_text = ""
     if projects is not None and not failure_triggered:
+        # Project records are either opened from a new approval or advanced when
+        # this docket item is a due project step.
         if template.starts_chain_id:
             project = start_project_from_approval(state, item, template, targets)
             if project:
@@ -261,6 +273,8 @@ def _resolve_maintenance_decision(
 
     features = list(active_features or ())
     feature = next((candidate for candidate in features if candidate.feature_id == item.subject_feature_id), None)
+    # Maintenance inspections attach condition evidence to the docket item but
+    # do not require the referenced feature to be mutable.
     if action_key == "inspect":
         blocked = _spend_ap(state, action, item.item_id, "Maintenance inspection")
         if blocked:
@@ -281,6 +295,8 @@ def _resolve_maintenance_decision(
         blocked = _spend_ap(state, action, item.item_id, "Deferring maintenance")
         if blocked:
             return blocked
+        # Deferral leaves the feature in the maintenance queue and raises city
+        # risk so the backlog is visible outside the docket.
         item.status = "deferred"
         feature.status = "maintenance_due"
         feature.display_state = "maintenance_due"
@@ -307,6 +323,8 @@ def _resolve_maintenance_decision(
         return blocked
 
     repair = rule.repair_amount + (20 if mitigated else 0)
+    # Successful maintenance repairs lifecycle fields and clears one-shot
+    # failure markers so future failures can be applied once again if needed.
     feature.condition = max(0, min(100, feature.condition + repair))
     feature.last_maintained_turn = state.turn
     if rule.maintenance_interval:
@@ -349,6 +367,8 @@ def _resolve_enforcement_decision(
         blocked = _spend_ap(state, action, item.item_id, "Deferring enforcement")
         if blocked:
             return blocked
+        # Deferred enforcement keeps the condition unresolved and converts
+        # stakeholder pressure into broader unrest and risk.
         item.status = "deferred"
         delta = {"unrest": 2, "risk": 1}
         _apply_city_delta(state, delta)
@@ -390,6 +410,8 @@ def _resolve_enforcement_decision(
     base = _mitigate(template.base_effects) if mitigated else dict(template.base_effects)
     spill = _mitigate(template.spillover_effects) if mitigated else dict(template.spillover_effects)
 
+    # Enforcement acts like a targeted correction: selected districts get the
+    # full base effect, while spillover districts get only catalog spillovers.
     for cid in targets:
         _apply_profile_delta(districts[cid], base)
         district_deltas[cid] = dict(base)
@@ -455,6 +477,8 @@ def _resolve_incident_decision(
         blocked = _spend_ap(state, action, item.item_id, "Deferring a civic incident")
         if blocked:
             return blocked
+        # Deferring an incident raises the attached group's dissatisfaction
+        # before the city-level unrest/risk penalty is applied.
         item.status = "deferred"
         group = item.stakeholder if item.stakeholder in CITIZEN_GROUPS else _top_dissatisfaction(districts[targets[0]])[0]
         for cid in targets:
@@ -500,6 +524,8 @@ def _resolve_incident_decision(
     district_deltas: dict[str, dict[str, int]] = {}
     city_delta = {metric: 0 for metric in CORE_METRICS}
 
+    # Incident response combines template effects with explicit grievance relief
+    # so normalized profiles can clear visible incident state.
     for cid in targets:
         _apply_profile_delta(districts[cid], base)
         _adjust_dissatisfaction(districts[cid], (group,), relief)
