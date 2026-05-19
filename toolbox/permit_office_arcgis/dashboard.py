@@ -32,6 +32,7 @@ from .store import (
 )
 from .desk_view import DeskCallbacks, PermitDeskView, build_desk_model, open_filed_report
 
+
 def open_effect_report(title, report, affected, state):
     """Show a filed-report receipt after a dashboard action resolves."""
 
@@ -42,12 +43,18 @@ class _StatusProxy:
     """Compatibility shim for the old StringVar-like controller calls."""
 
     def __init__(self, controller):
+        """Attach the proxy to the dashboard controller's status field."""
+
         self.controller = controller
 
     def set(self, value):
+        """Store status text in the controller for the next render."""
+
         self.controller.status_text = str(value or "")
 
     def get(self):
+        """Return the controller's current status text."""
+
         return self.controller.status_text
 
 
@@ -55,12 +62,16 @@ class DashboardController:
     """Coordinate dashboard UI actions with ArcGIS persistence helpers."""
 
     def __init__(self, paths, district_layer, seed, messages):
+        """Store ArcGIS handles used by dashboard callbacks."""
+
         self.paths = paths
         self.district_layer = district_layer
         self.seed = seed
         self.messages = messages
 
     def open(self):
+        """Create the Tkinter window, wire callbacks, and enter the UI loop."""
+
         try:
             import tkinter as tk
         except Exception as exc:
@@ -78,6 +89,8 @@ class DashboardController:
         self.selected_item_id = ""
         self.status_text = ""
         self.status_var = _StatusProxy(self)
+        # The view owns drawing and hit targets; the controller owns actions
+        # that mutate ArcGIS-backed game state.
         callbacks = DeskCallbacks(
             preview=self.preview_selected,
             inspect=self.inspect,
@@ -93,10 +106,14 @@ class DashboardController:
         self.root.mainloop()
 
     def select_item(self, item_id):
+        """Select a docket item and redraw the dashboard model."""
+
         self.selected_item_id = item_id
         self.reload()
 
     def reload(self):
+        """Read persisted game rows and render a fresh desk view model."""
+
         state = read_state(self.paths)
         districts = read_districts(self.paths)
         items = read_docket(self.paths)
@@ -105,9 +122,13 @@ class DashboardController:
         self.view.render(model)
 
     def item_label(self, item):
+        """Return a compact debugging label for a docket item."""
+
         return f"{item.item_id} | {item.geometry_type} | {item.status} | {item.title}"
 
     def active_item(self):
+        """Return the selected docket item or first actionable fallback."""
+
         item_id = self.selected_item_id
         if not item_id and getattr(self, "view", None):
             item_id = self.view.selected_item_id()
@@ -120,13 +141,19 @@ class DashboardController:
         return None
 
     def refresh_detail(self):
+        """Refresh visible dashboard details from persisted state."""
+
         self.reload()
 
     def preview_selected(self):
+        """Preview selected districts as proposed ArcGIS features."""
+
         item = self.active_item()
         if not item:
             return
         try:
+            # Map selection is converted into proposal rows, then outputs are
+            # refreshed so the player sees the proposed geometry immediately.
             selected = selected_cell_ids(self.district_layer)
             target_ids = insert_or_replace_proposal(self.paths, item, selected, self.messages)
             refresh_all(self.paths, self.messages)
@@ -137,11 +164,15 @@ class DashboardController:
             _warn(self.messages, "DASH", traceback.format_exc().strip().splitlines()[-1])
 
     def inspect(self):
+        """Resolve an inspection command for the active docket item."""
+
         item = self.active_item()
         if not item:
             return
         command_id = command_insert(self.paths, "inspect", item.item_id, item.target_cell_ids)
         try:
+            # Inspection reads the live state, lets pure rules attach evidence,
+            # then persists both the changed docket item and the command log.
             state = read_state(self.paths)
             districts = read_districts(self.paths)
             active_features = read_active_features(self.paths)
@@ -158,11 +189,15 @@ class DashboardController:
         self.reload()
 
     def apply_decision(self, action, mitigated):
+        """Approve or approve-with-mitigation for the active docket item."""
+
         item = self.active_item()
         if not item:
             return
         command_id = command_insert(self.paths, action, item.item_id, item.target_cell_ids)
         try:
+            # Approvals need current map proposal context before pure rules can
+            # resolve target effects, spillover, active features, and projects.
             if not item.target_cell_ids:
                 selected = selected_cell_ids(self.district_layer)
                 insert_or_replace_proposal(self.paths, item, selected, self.messages)
@@ -199,11 +234,15 @@ class DashboardController:
         self.reload()
 
     def deny(self):
+        """Deny the active docket item and persist resulting state changes."""
+
         item = self.active_item()
         if not item:
             return
         command_id = command_insert(self.paths, "deny", item.item_id, item.target_cell_ids)
         try:
+            # Denials use the same pure-rule resolver, but proposal features are
+            # marked denied instead of activated on the map.
             state = read_state(self.paths)
             districts = read_districts(self.paths)
             active_features = read_active_features(self.paths)
@@ -225,6 +264,8 @@ class DashboardController:
         self.reload()
 
     def _finish_decision(self, command_id, item, state, districts, projects, result):
+        """Persist a successful decision result and show its filed report."""
+
         write_district_updates(self.paths, districts, result.report, result.affected_cell_ids)
         write_state(self.paths, state)
         write_projects(self.paths, projects)
@@ -236,8 +277,12 @@ class DashboardController:
         open_effect_report(item.title, result.report, result.affected_cell_ids, state)
 
     def advance_turn(self):
+        """Advance the saved game one turn and regenerate the docket."""
+
         command_id = command_insert(self.paths, "advance_turn", "", [])
         try:
+            # Turn advancement mutates open docket items, city systems, active
+            # features, projects, and the next generated docket as one command.
             state = read_state(self.paths)
             items = read_docket(self.paths)
             districts = read_districts(self.paths)

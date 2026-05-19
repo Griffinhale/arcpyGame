@@ -20,6 +20,7 @@ DOCKET_UPDATE_FIELDS = [
     if name not in {"turn", "template_id", "title", "geometry_type"}
 ]
 
+
 def now_utc():
     """Return the current UTC timestamp for command and action rows."""
 
@@ -44,6 +45,8 @@ def create_district_board(paths, seed, messages):
 
     sr = arcpy.Describe(paths["districts"]).spatialReference
     profiles = rules.generate_district_profiles(rows=5, cols=5, seed=seed)
+    # The generated rule profiles are flattened into ArcGIS field values so the
+    # map layer remains the persisted source for the current board.
     fields = [
         "SHAPE@",
         "cell_id",
@@ -241,6 +244,8 @@ def read_districts(paths):
     """Read district feature rows into normalized rule profiles."""
 
     out = {}
+    # ArcGIS stores nested fields as delimited or JSON text; decode them back
+    # into rule dataclasses before normalizing derived fields.
     fields = [
         "cell_id",
         "district_name",
@@ -306,6 +311,8 @@ def write_district_updates(paths, districts, report, affected_ids=None):
     """Write changed district profiles and per-district reports back to ArcGIS."""
 
     affected = set(affected_ids or districts)
+    # Every district row is refreshed from normalized state, while last_report is
+    # only changed for affected districts so unrelated map notes survive.
     fields = [
         "cell_id",
         "population",
@@ -370,6 +377,8 @@ def read_active_features(paths):
     """Read active support features from point, line, and polygon classes."""
 
     features = []
+    # Support features live in separate geometry classes but share the same
+    # attribute contract, so collect them into one lifecycle list.
     fields = [
         "feature_id",
         "item_id",
@@ -432,6 +441,8 @@ def write_active_features(paths, features):
     """Persist lifecycle fields for existing support features."""
 
     by_id = {feature.feature_id: feature for feature in features}
+    # Lifecycle writes intentionally update only mutable runtime fields, leaving
+    # geometry and immutable permit metadata untouched.
     fields = [
         "feature_id",
         "status",
@@ -531,6 +542,8 @@ def generate_docket_rows(paths, seed, messages):
     projects = read_projects(paths)
     arcpy.management.DeleteRows(paths["docket"])
     items = rules.generate_docket(turn=state.turn, seed=seed, count=3, state=state, districts=districts, projects=projects, active_features=active_features)
+    # Docket rows mirror rule items exactly enough for the dashboard to reload
+    # without recomputing follow-up priority or case metadata.
     with arcpy.da.InsertCursor(paths["docket"], DOCKET_FIELD_NAMES) as cursor:
         for item in items:
             cursor.insertRow([

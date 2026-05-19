@@ -8,6 +8,7 @@ from .models import *
 from .catalogs import *
 from .helpers import *
 
+
 def project_step_template(chain_template_id: str, step_id: str) -> ProjectStepTemplate | None:
     """Find a project step in a chain template."""
 
@@ -136,6 +137,8 @@ def recompute_network_access(
 
     for profile in districts.values():
         profile.network_access = {service: 0 for service in SERVICE_TYPES}
+    # Active spatial features contribute weighted service access to selected
+    # districts and adjacent districts before service gaps are recalculated.
     for feature in active_feature_instances(features, turn):
         archetype = FEATURE_ARCHETYPES[feature.archetype_id]
         network_type = feature.network_type or archetype.network_type or feature.service_type or archetype.service_type
@@ -161,6 +164,8 @@ def apply_hazard_turn(
 
     sources = {cid: {hazard: 0 for hazard in HAZARD_TYPES} for cid in districts}
     mitigations = {cid: {hazard: 0 for hazard in HAZARD_TYPES} for cid in districts}
+    # Feature hazard and mitigation effects are gathered first so each district
+    # can resolve source, decay, and mitigation in a single pass.
     for feature in active_feature_instances(features, turn):
         archetype = FEATURE_ARCHETYPES[feature.archetype_id]
         hazard_effects = _instance_effect_map(feature, archetype, "hazard_effects")
@@ -267,6 +272,8 @@ def apply_scenario(state: CityState, districts: dict[str, DistrictProfile], scen
 
 
 def _feature_spatial_weights(feature: FeatureInstance, districts: dict[str, DistrictProfile]) -> dict[str, float]:
+    """Return target and adjacent-district weights for a feature instance."""
+
     targets = [cid for cid in feature.target_cell_ids if cid in districts]
     weights: dict[str, float] = {}
     for cid in targets:
@@ -282,12 +289,16 @@ def _feature_spatial_weights(feature: FeatureInstance, districts: dict[str, Dist
 
 
 def _weighted_band(amount: int, weight: float) -> int:
+    """Scale a banded effect by spatial weight while preserving small effects."""
+
     if amount <= 0 or weight <= 0:
         return 0
     return max(1, round(amount * weight))
 
 
 def _instance_effect_map(feature: FeatureInstance, archetype: FeatureArchetype, key: str) -> dict[str, int]:
+    """Read archetype effects with feature metadata overrides."""
+
     values = getattr(archetype, key)
     out = {str(name): int(value) for name, value in values.items() if int(value or 0)}
     raw = feature.metadata.get(key)
@@ -303,6 +314,8 @@ def _instance_effect_map(feature: FeatureInstance, archetype: FeatureArchetype, 
 
 
 def _service_hazard_mitigation(profile: DistrictProfile) -> dict[str, int]:
+    """Convert service network access into hazard mitigation bands."""
+
     mitigation = {hazard: 0 for hazard in HAZARD_TYPES}
     for hazard, rule in HAZARD_RULES.items():
         for service, amount in rule.mitigation_service_types.items():
@@ -313,6 +326,8 @@ def _service_hazard_mitigation(profile: DistrictProfile) -> dict[str, int]:
 
 
 def _apply_hazard_pressure(profile: DistrictProfile) -> None:
+    """Apply risk, unrest, and grievance pressure from active hazards."""
+
     risk_delta = 0
     unrest_delta = 0
     for hazard, band in _normalize_service_map(profile.hazards, HAZARD_TYPES, maximum=4, include_zeros=False).items():
@@ -327,6 +342,8 @@ def _apply_hazard_pressure(profile: DistrictProfile) -> None:
 
 
 def _apply_housing_effects(profile: DistrictProfile, effects: dict[str, int]) -> None:
+    """Apply housing capacity, population, and affordability effects."""
+
     if not effects:
         return
     if "housing_capacity" in effects or "capacity" in effects:
@@ -341,6 +358,8 @@ def _apply_housing_effects(profile: DistrictProfile, effects: dict[str, int]) ->
 
 
 def _apply_hazard_effects(profile: DistrictProfile, effects: dict[str, int]) -> None:
+    """Apply direct hazard band changes to one profile."""
+
     if not effects:
         return
     hazards = _normalize_service_map(profile.hazards, HAZARD_TYPES, maximum=4, include_zeros=True)
@@ -406,6 +425,8 @@ def _advance_feature_lifecycle(
     features: list[FeatureInstance],
     next_turn: int,
 ) -> tuple[dict[str, dict[str, object]], dict[str, dict[str, int]]]:
+    """Decay active features, surface maintenance status, and collect updates."""
+
     updates: dict[str, dict[str, object]] = {}
     district_deltas: dict[str, dict[str, int]] = {}
     backlog = 0
@@ -414,6 +435,8 @@ def _advance_feature_lifecycle(
         rule = operating_rule_for_feature(feature)
         if feature.status in ("proposed", "expired"):
             continue
+        # Lifecycle state advances from expiration, decay, and maintenance due
+        # dates before one-shot failure effects are applied to districts.
         if feature.expires_turn not in (-1, 0, None) and next_turn >= feature.expires_turn:
             feature.status = "expired"
         elif feature.status != "failed":
@@ -450,7 +473,11 @@ def _apply_recurring_economy(
     districts: dict[str, DistrictProfile],
     features: list[FeatureInstance],
 ) -> tuple[int, int, int]:
+    """Compute turn revenue, upkeep, and net money from districts and features."""
+
     district_revenue = 0
+    # District revenue rewards healthy population centers and penalizes risk or
+    # unrest before feature-specific economics are added.
     for profile in districts.values():
         raw = profile.population // 1000
         raw += max(0, profile.prosperity - 40) // 25
@@ -462,6 +489,8 @@ def _apply_recurring_economy(
 
     feature_revenue = 0
     upkeep = 0
+    # Only operating features contribute revenue or upkeep; degraded and due
+    # features still cost money but produce less income.
     for feature in features:
         normalize_feature_instance(feature, state.turn)
         if feature.status not in ("active", "settled", "enforced", "responded", "maintenance_due", "degraded"):

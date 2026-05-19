@@ -14,6 +14,8 @@ from .store import encode_json, write_docket_item
 
 
 def _summary_map(value):
+    """Format a compact sorted metadata map for ArcGIS text fields."""
+
     if not isinstance(value, dict) or not value:
         return ""
     return ", ".join(f"{key} {amount}" for key, amount in sorted(value.items()))[:512]
@@ -60,6 +62,8 @@ def district_geometry_lookup(paths):
 def insert_or_replace_proposal(paths, item, target_ids, messages):
     """Create the proposed point, line, or polygon feature for a docket item."""
 
+    # Only one proposed exhibit should exist at a time; the active docket item
+    # owns the preview geometry the dashboard will later approve or deny.
     for fc in (paths["points"], paths["lines"], paths["zones"]):
         with arcpy.da.UpdateCursor(fc, ["item_id", "status"]) as cursor:
             for row in cursor:
@@ -78,6 +82,8 @@ def insert_or_replace_proposal(paths, item, target_ids, messages):
     if item.geometry_type == "POLYGON" and not valid:
         raise ValueError("Zone permits require one or more selected districts.")
 
+    # The proposed ArcGIS row carries a normalized FeatureInstance payload so
+    # lifecycle systems can read the same fields after approval.
     feature_id = str(uuid.uuid4())
     target_text = ",".join(valid)
     expires_turn = item.turn + template.expires_after if template.expires_after else -1
@@ -145,6 +151,8 @@ def insert_or_replace_proposal(paths, item, target_ids, messages):
         geom = arcpy.Polyline(arcpy.Array([p1, p2]), geoms[valid[0]].spatialReference)
         fc = paths["lines"]
     else:
+        # Zone proposals use a smaller display polygon within the first selected
+        # district because the gameplay target list carries the full selection.
         geom = inset_polygon(geoms[valid[0]])
         fc = paths["zones"]
 
@@ -186,6 +194,8 @@ def proposal_spillover(paths, item):
         arcpy.management.Delete(buffer_fc)
     archetype = rules.feature_archetype_for_template(item.template_id)
     radius = max(1, int(archetype.coverage_radius_m or 125))
+    # ArcGIS does the geometric spillover calculation; the rules layer only sees
+    # the resulting district ids.
     arcpy.analysis.Buffer(layer_name, buffer_fc, f"{radius} Meters")
     district_layer = f"district_spill_{uuid.uuid4().hex[:8]}"
     arcpy.management.MakeFeatureLayer(paths["districts"], district_layer)
@@ -207,6 +217,8 @@ def activate_proposal(paths, item, report):
     with arcpy.da.UpdateCursor(fc, fields) as cursor:
         for row in cursor:
             if row[0] == item.item_id and row[7] == "proposed":
+                # Rehydrate the lifecycle fields before writing status so
+                # approval, failure, and maintenance state stay normalized.
                 feature = rules.FeatureInstance(
                     feature_id=row[1],
                     archetype_id=row[2],

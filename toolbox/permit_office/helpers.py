@@ -10,7 +10,6 @@ from .catalogs import *
 
 def display_state_for_profile(profile: DistrictProfile) -> str:
     """Return the map-facing display state for a normalized district profile."""
-
     if profile.incident_state != "none":
         return "incident"
     if _top_dissatisfaction(profile)[1] >= DISSATISFACTION_AGGRIEVED_THRESHOLD:
@@ -31,6 +30,7 @@ def display_state_for_profile(profile: DistrictProfile) -> str:
 
 
 def _stakeholder_profile(stakeholder: str) -> StakeholderProfile:
+    """Return a configured or synthetic profile for stakeholder heat math."""
     if stakeholder in STAKEHOLDERS:
         return STAKEHOLDERS[stakeholder]
     if stakeholder in CITIZEN_GROUPS:
@@ -39,13 +39,13 @@ def _stakeholder_profile(stakeholder: str) -> StakeholderProfile:
 
 
 def _stakeholder_escalation_score(stakeholder: str, heat: int) -> int:
+    """Score stakeholder heat after accounting for influence and patience."""
     profile = _stakeholder_profile(stakeholder)
     return heat * profile.influence - profile.patience
 
 
 def adjust_stakeholder_pressure(state: CityState, stakeholder: str, amount: int, reason: str = "") -> int:
     """Apply stakeholder heat, including patience and coalition side effects."""
-
     if not stakeholder or amount == 0:
         return 0
     profile = _stakeholder_profile(stakeholder)
@@ -73,7 +73,6 @@ def adjust_stakeholder_pressure(state: CityState, stakeholder: str, amount: int,
 
 def heat_summary(state: CityState) -> str:
     """Format the hottest stakeholder records for compact dashboard display."""
-
     hot = [(stakeholder, heat) for stakeholder, heat in state.stakeholder_heat.items() if heat > 0]
     if not hot:
         return "none"
@@ -84,7 +83,6 @@ def heat_summary(state: CityState) -> str:
 
 def feature_archetype_for_template(template_or_id: DocketTemplate | str) -> FeatureArchetype:
     """Look up the feature archetype spawned by a docket template."""
-
     template = TEMPLATES[template_or_id] if isinstance(template_or_id, str) else template_or_id
     archetype_id = template.spawn_archetype_id or template.template_id
     try:
@@ -97,7 +95,6 @@ def feature_archetype_for_template(template_or_id: DocketTemplate | str) -> Feat
 
 def feature_metadata_for_template(template_or_id: DocketTemplate | str) -> dict[str, object]:
     """Return ArcGIS-safe metadata for the feature spawned by a template."""
-
     archetype = feature_archetype_for_template(template_or_id)
     return {
         "archetype_id": archetype.archetype_id,
@@ -120,8 +117,9 @@ def feature_metadata_for_template(template_or_id: DocketTemplate | str) -> dict[
 
 def validate_feature_catalog() -> list[str]:
     """Return catalog consistency errors without mutating gameplay state."""
-
     errors: list[str] = []
+    # Feature archetypes are the spatial contract that templates and lifecycle
+    # rules depend on, so validate their identifiers and typed references first.
     for archetype_id, archetype in FEATURE_ARCHETYPES.items():
         if archetype.archetype_id != archetype_id:
             errors.append(f"{archetype_id}: archetype_id mismatch")
@@ -148,6 +146,8 @@ def validate_feature_catalog() -> list[str]:
             errors.append(f"{archetype_id}: operating rule id mismatch")
         if archetype_id not in FEATURE_ARCHETYPES:
             errors.append(f"{archetype_id}: operating rule has no archetype")
+    # Docket templates must resolve to real feature, stakeholder, project, and
+    # scenario records before the ArcGIS toolbox can safely materialize them.
     for template_id, template in TEMPLATES.items():
         if not template.spawn_archetype_id:
             errors.append(f"{template_id}: missing spawn_archetype_id")
@@ -179,6 +179,8 @@ def validate_feature_catalog() -> list[str]:
         for code in rule.evidence_codes + rule.violation_codes:
             if code not in VIOLATION_CODES:
                 errors.append(f"{rule_id}: unknown inspection code {code!r}")
+    # Long-running systems share hazards, project chains, and scenario ids; a
+    # missing reference here would surface later as a turn-resolution failure.
     for hazard_type, rule in HAZARD_RULES.items():
         if rule.hazard_type != hazard_type:
             errors.append(f"{hazard_type}: hazard_type mismatch")
@@ -213,14 +215,12 @@ def validate_feature_catalog() -> list[str]:
 
 def total_population(districts: Iterable[DistrictProfile] | dict[str, DistrictProfile]) -> int:
     """Return the non-negative total population across districts."""
-
     profiles = districts.values() if isinstance(districts, dict) else districts
     return sum(max(0, int(profile.population)) for profile in profiles)
 
 
 def population_city_summary(districts: Iterable[DistrictProfile] | dict[str, DistrictProfile]) -> str:
     """Format a compact population, incident, and grievance summary."""
-
     profiles = list(districts.values() if isinstance(districts, dict) else districts)
     if not profiles:
         return "population unavailable"
@@ -237,7 +237,6 @@ def population_city_summary(districts: Iterable[DistrictProfile] | dict[str, Dis
 
 def incident_summary(districts: Iterable[DistrictProfile] | dict[str, DistrictProfile]) -> str:
     """Format visible civic incident files for dashboard metrics."""
-
     profiles = list(districts.values() if isinstance(districts, dict) else districts)
     incidents = [
         f"{profile.cell_id} {_group_label(profile.incident_group)} {profile.incident_state}"
@@ -251,7 +250,6 @@ def incident_summary(districts: Iterable[DistrictProfile] | dict[str, DistrictPr
 
 def target_population_hint(item: DocketItem, target_profiles: Iterable[DistrictProfile]) -> str:
     """Summarize affected groups and grievances for an item preview."""
-
     profiles = list(target_profiles)
     if not profiles:
         return ""
@@ -272,7 +270,6 @@ def target_population_hint(item: DocketItem, target_profiles: Iterable[DistrictP
 
 def inspection_population_note(template: DocketTemplate, target_profiles: Iterable[DistrictProfile]) -> str:
     """Build the population context sentence appended to inspection text."""
-
     profiles = list(target_profiles)
     archetype = feature_archetype_for_template(template)
     if not profiles:
@@ -306,7 +303,6 @@ def inspection_population_note(template: DocketTemplate, target_profiles: Iterab
 
 def normalize_profile(profile: DistrictProfile) -> DistrictProfile:
     """Clamp derived district fields and refresh public-facing profile text."""
-
     if not profile.land_use:
         profile.land_use = LAND_USE_BY_DISTRICT_TYPE.get(profile.district_type, "mixed_use")
     profile.zoning_overlay = profile.zoning_overlay or ""
@@ -330,7 +326,6 @@ def normalize_profile(profile: DistrictProfile) -> DistrictProfile:
 
 def public_profile_for(profile: DistrictProfile) -> str:
     """Build the public-facing census summary for a district."""
-
     groups = _top_presence_groups([profile], limit=3)
     if not groups:
         return "Public profile: no census emphasis filed."
@@ -339,11 +334,11 @@ def public_profile_for(profile: DistrictProfile) -> str:
 
 def compact_group_bands(bands: dict[str, int]) -> dict[str, int]:
     """Return normalized non-zero group bands for persistence."""
-
     return {group: int(value) for group, value in _normalize_bands(bands, 4).items() if value > 0}
 
 
 def _unique_known(values: Iterable[str], districts: dict[str, DistrictProfile]) -> list[str]:
+    """Keep known district ids once while preserving first-seen order."""
     seen = set()
     out = []
     for value in values:
@@ -354,6 +349,7 @@ def _unique_known(values: Iterable[str], districts: dict[str, DistrictProfile]) 
 
 
 def _initial_population_mix(district_type: str, rng: random.Random) -> dict[str, int]:
+    """Create a deterministic census mix seeded from the district archetype."""
     mix = dict(ARCHETYPE_BASE_MIX.get(district_type, {}))
     spice_pool = [group for group in CITIZEN_GROUPS if group not in mix]
     for group in rng.sample(spice_pool, k=2):
@@ -365,6 +361,7 @@ def _initial_population_mix(district_type: str, rng: random.Random) -> dict[str,
 
 
 def _initial_dissatisfaction(population_mix: dict[str, int], prosperity: int, unrest: int, risk: int, services: int) -> dict[str, int]:
+    """Seed grievance bands from initial city metrics and local population mix."""
     dissatisfaction = {group: 0 for group, band in population_mix.items() if band > 0}
     if unrest >= 40:
         _adjust_dissatisfaction_map(dissatisfaction, ("renters", "workers", "students"), 1)
@@ -378,6 +375,7 @@ def _initial_dissatisfaction(population_mix: dict[str, int], prosperity: int, un
 
 
 def _normalize_bands(bands: dict[str, int] | None, maximum: int) -> dict[str, int]:
+    """Clamp all citizen-group bands and include missing groups at zero."""
     out = {group: 0 for group in CITIZEN_GROUPS}
     for group, value in (bands or {}).items():
         if group not in out:
@@ -392,6 +390,7 @@ def _normalize_service_map(
     maximum: int,
     include_zeros: bool = False,
 ) -> dict[str, int]:
+    """Clamp a typed service or hazard map to allowed keys and bands."""
     allowed_tuple = tuple(allowed)
     out = {key: 0 for key in allowed_tuple} if include_zeros else {}
     for key, value in (values or {}).items():
@@ -404,6 +403,9 @@ def _normalize_service_map(
 
 
 def _normalize_housing(profile: DistrictProfile) -> None:
+    """Fill derived housing fields and displacement pressure on a profile."""
+    # Missing capacity and affordability values are inferred from district type
+    # so old saves and generated profiles enter the same housing model.
     if profile.housing_capacity <= 0:
         vacancy_seed = {
             "residential": 14,
@@ -425,6 +427,8 @@ def _normalize_housing(profile: DistrictProfile) -> None:
             "natural": 44,
         }.get(profile.district_type, 50)
     profile.affordability = _clamp(profile.affordability)
+    # Vacancy and displacement are derived together so dashboards and follow-up
+    # logic read one consistent housing pressure snapshot.
     if profile.housing_capacity:
         profile.vacancy_rate = max(0, min(100, round((profile.housing_capacity - profile.population) * 100 / profile.housing_capacity)))
     else:
@@ -440,6 +444,7 @@ def _normalize_housing(profile: DistrictProfile) -> None:
 
 
 def _displacement_pressure(profile: DistrictProfile) -> int:
+    """Convert housing, prosperity, risk, and service context into pressure."""
     pressure = 0
     if profile.vacancy_rate <= 3:
         pressure += 2
@@ -464,7 +469,6 @@ def _displacement_pressure(profile: DistrictProfile) -> int:
 
 def build_grid_adjacency(rows: int, cols: int) -> dict[str, list[str]]:
     """Build four-way adjacency for deterministic generated district grids."""
-
     adjacency: dict[str, list[str]] = {}
     for row in range(rows):
         for col in range(cols):
@@ -479,7 +483,6 @@ def build_grid_adjacency(rows: int, cols: int) -> dict[str, list[str]]:
 
 def assign_grid_adjacency(profiles: Iterable[DistrictProfile], rows: int | None = None, cols: int | None = None) -> dict[str, list[str]]:
     """Assign grid neighbors to profiles and return the resulting adjacency map."""
-
     profiles_by_id = {profile.cell_id: profile for profile in profiles}
     if rows is None or cols is None:
         parsed = [_parse_grid_cell_id(cell_id) for cell_id in profiles_by_id]
@@ -493,6 +496,7 @@ def assign_grid_adjacency(profiles: Iterable[DistrictProfile], rows: int | None 
 
 
 def _parse_grid_cell_id(cell_id: str) -> tuple[int, int] | None:
+    """Parse generated district ids into row and column coordinates."""
     if len(cell_id or "") != 5 or not cell_id.startswith("D"):
         return None
     try:
@@ -507,9 +511,12 @@ def _apply_population_reaction(
     outcome: str,
     mitigated: bool,
 ) -> dict[str, dict[str, int]]:
+    """Apply approval outcome effects to population mix and grievances."""
     deltas: dict[str, dict[str, int]] = {}
     for profile in target_profiles:
         before_population = profile.population
+        # Each outcome moves supporters, concerned groups, and population in a
+        # different direction before the profile is re-normalized for display.
         if outcome == "approve":
             _adjust_dissatisfaction(profile, template.supporter_groups, -1)
             _adjust_dissatisfaction(profile, template.concerned_groups, 1 if not mitigated else 0)
@@ -536,6 +543,7 @@ def _apply_population_reaction(
 
 
 def _population_decision_delta(profile: DistrictProfile, template: DocketTemplate, mitigated: bool) -> int:
+    """Estimate population growth from a successful growth-oriented template."""
     if not template.growth_groups:
         return 0
     base = max(8, profile.population // 100)
@@ -547,6 +555,7 @@ def _population_decision_delta(profile: DistrictProfile, template: DocketTemplat
 
 
 def _advance_population_pressure(profile: DistrictProfile) -> int:
+    """Apply one turn of population drift from prosperity, risk, and services."""
     before = profile.population
     delta = 0
     if profile.prosperity >= 60 and profile.risk <= 45 and profile.unrest <= 45:
@@ -564,6 +573,7 @@ def _advance_population_pressure(profile: DistrictProfile) -> int:
 
 
 def _surface_new_incidents(state: CityState, profiles: Iterable[DistrictProfile]) -> int:
+    """Refresh profiles and add unrest when grievances become visible incidents."""
     surfaced = 0
     for profile in profiles:
         before = profile.incident_state
@@ -576,6 +586,7 @@ def _surface_new_incidents(state: CityState, profiles: Iterable[DistrictProfile]
 
 
 def _refresh_incident(profile: DistrictProfile) -> None:
+    """Set or clear the visible incident state from top dissatisfaction."""
     group, band = _top_dissatisfaction(profile)
     if band >= DISSATISFACTION_INCIDENT_THRESHOLD:
         profile.incident_group = group
@@ -586,6 +597,7 @@ def _refresh_incident(profile: DistrictProfile) -> None:
 
 
 def _adjust_dissatisfaction(profile: DistrictProfile, groups: Iterable[str], amount: int) -> None:
+    """Shift dissatisfaction for present citizen groups on one profile."""
     profile.dissatisfaction = _normalize_bands(profile.dissatisfaction, 4)
     for group in groups:
         if group not in CITIZEN_GROUPS:
@@ -597,12 +609,14 @@ def _adjust_dissatisfaction(profile: DistrictProfile, groups: Iterable[str], amo
 
 
 def _adjust_dissatisfaction_map(dissatisfaction: dict[str, int], groups: Iterable[str], amount: int) -> None:
+    """Shift an already-normalized dissatisfaction mapping in place."""
     for group in groups:
         if group in dissatisfaction:
             dissatisfaction[group] = max(0, min(4, dissatisfaction.get(group, 0) + amount))
 
 
 def _shift_mix(profile: DistrictProfile, groups: Iterable[str], amount: int) -> None:
+    """Move citizen-group presence bands and initialize grievances if needed."""
     profile.population_mix = _normalize_bands(profile.population_mix, 3)
     for group in groups:
         if group not in CITIZEN_GROUPS:
@@ -613,11 +627,13 @@ def _shift_mix(profile: DistrictProfile, groups: Iterable[str], amount: int) -> 
 
 
 def _top_presence_group(profile: DistrictProfile) -> tuple[str, int]:
+    """Return the most present citizen group on one profile."""
     profile.population_mix = _normalize_bands(profile.population_mix, 3)
     return sorted(profile.population_mix.items(), key=lambda pair: (-pair[1], pair[0]))[0]
 
 
 def _top_presence_groups(profiles: list[DistrictProfile], limit: int = 3) -> tuple[str, ...]:
+    """Return the strongest citizen groups across profiles."""
     totals = {group: 0 for group in CITIZEN_GROUPS}
     for profile in profiles:
         for group, band in _normalize_bands(profile.population_mix, 3).items():
@@ -627,11 +643,13 @@ def _top_presence_groups(profiles: list[DistrictProfile], limit: int = 3) -> tup
 
 
 def _top_dissatisfaction(profile: DistrictProfile) -> tuple[str, int]:
+    """Return the highest dissatisfaction band on one profile."""
     profile.dissatisfaction = _normalize_bands(profile.dissatisfaction, 4)
     return sorted(profile.dissatisfaction.items(), key=lambda pair: (-pair[1], pair[0]))[0]
 
 
 def _top_dissatisfaction_for_profiles(profiles: list[DistrictProfile]) -> tuple[str, int]:
+    """Return the strongest aggregate dissatisfaction across profiles."""
     totals = {group: 0 for group in CITIZEN_GROUPS}
     for profile in profiles:
         for group, band in _normalize_bands(profile.dissatisfaction, 4).items():
@@ -640,6 +658,7 @@ def _top_dissatisfaction_for_profiles(profiles: list[DistrictProfile]) -> tuple[
 
 
 def _present_template_groups(profiles: list[DistrictProfile], groups: Iterable[str]) -> tuple[str, ...]:
+    """Filter template groups to those present in selected profiles."""
     present = []
     for group in groups:
         if group in CITIZEN_GROUPS and any(profile.population_mix.get(group, 0) > 0 for profile in profiles):
@@ -648,6 +667,7 @@ def _present_template_groups(profiles: list[DistrictProfile], groups: Iterable[s
 
 
 def _strongest_template_group(profiles: list[DistrictProfile], groups: Iterable[str]) -> str:
+    """Return the configured group with the strongest selected presence."""
     scores = []
     for group in groups:
         if group not in CITIZEN_GROUPS:
@@ -660,10 +680,12 @@ def _strongest_template_group(profiles: list[DistrictProfile], groups: Iterable[
 
 
 def _group_label(group: str) -> str:
+    """Return a display label for a citizen or stakeholder group id."""
     return GROUP_LABELS.get(group, group.replace("_", " "))
 
 
 def _join_group_labels(groups: Iterable[str]) -> str:
+    """Join group labels into compact dashboard prose."""
     labels = [_group_label(group) for group in groups if group]
     if not labels:
         return "no filed group"
@@ -673,6 +695,7 @@ def _join_group_labels(groups: Iterable[str]) -> str:
 
 
 def _population_report_fragment(target_profiles: list[DistrictProfile]) -> str:
+    """Summarize selected district population context for a filed report."""
     if not target_profiles:
         return "No local population file was attached."
     group, band = _top_dissatisfaction_for_profiles(target_profiles)
@@ -685,6 +708,7 @@ def _population_report_fragment(target_profiles: list[DistrictProfile]) -> str:
 
 
 def _service_gap_for_profile(profile: DistrictProfile) -> dict[str, int]:
+    """Derive unmet service demand bands for one district profile."""
     services = max(0, min(100, int(profile.services)))
     gaps: dict[str, int] = {}
     if profile.population_mix.get("families", 0) >= 2:
@@ -707,6 +731,7 @@ def _service_gap_for_profile(profile: DistrictProfile) -> dict[str, int]:
 
 
 def _network_demand_for_profile(profile: DistrictProfile) -> dict[str, int]:
+    """Estimate per-service network demand from population and land context."""
     population_scale = max(1, profile.population // 1400)
     housing_scale = max(0, profile.housing_capacity // 2500)
     demand = {
@@ -729,6 +754,7 @@ def _network_demand_for_profile(profile: DistrictProfile) -> dict[str, int]:
 
 
 def _service_coverage_effect(archetype: FeatureArchetype, profile: DistrictProfile, role: str) -> dict[str, int]:
+    """Translate a feature's service coverage into district metric deltas."""
     if not archetype.coverage_effects:
         return {}
     delta: dict[str, int] = {}
@@ -748,6 +774,7 @@ def _service_coverage_effect(archetype: FeatureArchetype, profile: DistrictProfi
 
 
 def _land_use_adjusted_effects(delta: dict[str, int], profile: DistrictProfile, archetype: FeatureArchetype) -> dict[str, int]:
+    """Adjust district deltas for land-use fit or conflict."""
     adjusted = dict(delta)
     if profile.district_type in archetype.allowed_district_types:
         if archetype.service_type:
@@ -768,6 +795,7 @@ def _land_use_adjusted_effects(delta: dict[str, int], profile: DistrictProfile, 
 
 
 def _land_use_note(archetype: FeatureArchetype, profiles: list[DistrictProfile]) -> str:
+    """Explain land-use fit for selected profiles in filed-report prose."""
     district_types = {profile.district_type for profile in profiles}
     if district_types & set(archetype.conflict_district_types):
         return f"Land-use note: {archetype.label} conflicts with at least one selected district archetype."
@@ -779,6 +807,7 @@ def _land_use_note(archetype: FeatureArchetype, profiles: list[DistrictProfile])
 
 
 def _apply_land_use_change(profile: DistrictProfile, archetype: FeatureArchetype) -> None:
+    """Persist zoning overlay changes caused by land-use features."""
     if archetype.family == "land_use":
         profile.zoning_overlay = archetype.land_use
     elif archetype.family in ("natural_resource", "infrastructure") and archetype.land_use:
@@ -786,6 +815,7 @@ def _apply_land_use_change(profile: DistrictProfile, archetype: FeatureArchetype
 
 
 def _district_adjusted_effects(base: dict[str, int], district_type: str, category: str) -> dict[str, int]:
+    """Tune template effects for the receiving district archetype."""
     delta = dict(base)
     if district_type == "residential" and category in ("education", "residential"):
         delta["culture"] = delta.get("culture", 0) + 1
@@ -814,6 +844,7 @@ def _district_adjusted_effects(base: dict[str, int], district_type: str, categor
 
 
 def _mitigate(delta: dict[str, int]) -> dict[str, int]:
+    """Reduce harmful or oversized deltas for mitigated approvals."""
     out = {}
     for metric, value in delta.items():
         if metric in ("unrest", "risk") and value > 0:
@@ -826,6 +857,7 @@ def _mitigate(delta: dict[str, int]) -> dict[str, int]:
 
 
 def _context_side_effect(template: DocketTemplate, target_profiles: list[DistrictProfile], rng: random.Random, mitigated: bool) -> dict[str, int]:
+    """Roll a small contextual side effect from local risk and unrest."""
     if mitigated:
         threshold = 0.12
     else:
@@ -846,6 +878,7 @@ def _approval_failure_effect(
     rng: random.Random,
     mitigated: bool,
 ) -> dict[str, int]:
+    """Roll and return failure deltas for an approved docket item."""
     if not template.failure_effects:
         return {}
     chance = _failure_chance(template, target_profiles, risk_band, mitigated)
@@ -858,6 +891,7 @@ def _approval_failure_effect(
 
 
 def _failure_chance(template: DocketTemplate, target_profiles: list[DistrictProfile], risk_band: str, mitigated: bool) -> float:
+    """Calculate approval failure probability from inspection and local fit."""
     # Failure chance combines the inspection result with local fit; the clamp
     # keeps routine approvals from becoming impossible or perfectly safe.
     avg_services = sum(p.services for p in target_profiles) / max(1, len(target_profiles))
@@ -896,6 +930,7 @@ def _failure_chance(template: DocketTemplate, target_profiles: list[DistrictProf
 
 
 def _apply_profile_delta(profile: DistrictProfile, delta: dict[str, int]) -> None:
+    """Apply clamped district metric deltas and refresh derived fields."""
     for metric, value in delta.items():
         if metric in DISTRICT_METRICS:
             setattr(profile, metric, _clamp(getattr(profile, metric) + value))
@@ -903,25 +938,30 @@ def _apply_profile_delta(profile: DistrictProfile, delta: dict[str, int]) -> Non
 
 
 def _apply_city_delta(state: CityState, delta: dict[str, int]) -> None:
+    """Apply clamped citywide metric deltas to the mutable city state."""
     for metric, value in delta.items():
         if metric in CORE_METRICS:
             setattr(state, metric, _clamp(getattr(state, metric) + value))
 
 
 def _merge_delta(target: dict[str, int], delta: dict[str, int]) -> None:
+    """Accumulate metric deltas into an existing dictionary."""
     for metric, value in delta.items():
         target[metric] = target.get(metric, 0) + value
 
 
 def _adjust_heat(state: CityState, stakeholder: str, amount: int) -> int:
+    """Proxy stakeholder heat changes through the public pressure helper."""
     return adjust_stakeholder_pressure(state, stakeholder, amount)
 
 
 def _blocked(action: str, item_id: str, report: str) -> DecisionResult:
+    """Build a standardized blocked decision result."""
     return DecisionResult(False, action, item_id, report, command_status="error")
 
 
 def _format_delta(delta: dict[str, int]) -> str:
+    """Format district metric deltas for human-readable reports."""
     parts = []
     for metric in DISTRICT_METRICS:
         value = delta.get(metric, 0)
@@ -931,6 +971,7 @@ def _format_delta(delta: dict[str, int]) -> str:
 
 
 def _clamp(value: int) -> int:
+    """Clamp gameplay metric values to the 0-100 band."""
     return max(0, min(100, int(value)))
 
 
