@@ -7,5 +7,6 @@ from .systems import *
 from .profiles import *
 from .turns import *
 from .decisions import *
+from .city_detail import *
 
 __all__ = [name for name in globals() if not name.startswith("__")]

@@ -382,6 +382,12 @@ def operating_rule_for_feature(feature_or_archetype_id: FeatureInstance | str) -
 def normalize_feature_instance(feature: FeatureInstance, turn: int | None = None) -> FeatureInstance:
     """Fill derived feature fields and clamp lifecycle state."""
 
+    if feature.status == "context":
+        feature.intensity = max(1, int(feature.intensity or 1))
+        feature.condition = max(0, min(100, int(feature.condition if feature.condition is not None else 100)))
+        feature.state_json = dict(feature.state_json or {})
+        feature.metadata = dict(feature.metadata or {})
+        return feature
     archetype = FEATURE_ARCHETYPES.get(feature.archetype_id)
     if archetype:
         feature.family = feature.family or archetype.family
@@ -430,10 +436,11 @@ def _advance_feature_lifecycle(
     updates: dict[str, dict[str, object]] = {}
     district_deltas: dict[str, dict[str, int]] = {}
     backlog = 0
+    active_status = {"active", "settled", "enforced", "responded", "maintenance_due", "degraded"}
     for feature in features:
         before = feature_update_payload(normalize_feature_instance(feature, state.turn))
         rule = operating_rule_for_feature(feature)
-        if feature.status in ("proposed", "expired"):
+        if feature.status not in active_status and feature.status != "failed":
             continue
         # Lifecycle state advances from expiration, decay, and maintenance due
         # dates before one-shot failure effects are applied to districts.

@@ -536,6 +536,8 @@ def write_projects(paths, projects):
 def generate_docket_rows(paths, seed, messages):
     """Generate the turn docket and replace the persisted docket table."""
 
+    from .geometry import seed_docket_proposals
+
     state = read_state(paths)
     districts = read_districts(paths)
     active_features = read_active_features(paths)
@@ -569,6 +571,7 @@ def generate_docket_rows(paths, seed, messages):
                 item.subject_feature_id,
                 encode_json(item.case_json),
             ])
+    seed_docket_proposals(paths, items, seed, messages)
     _log(messages, "DOCKET", f"generated {len(items)} docket item(s) for turn {state.turn}")
     return items
 
