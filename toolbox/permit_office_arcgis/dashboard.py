@@ -79,8 +79,8 @@ class DashboardController:
 
         self.root = tk.Tk()
         self.root.title("Permit Office")
-        self.root.geometry("980x680")
-        self.root.minsize(900, 680)
+        self.root.geometry("1320x760")
+        self.root.minsize(1180, 720)
         try:
             self.root.attributes("-topmost", True)
         except Exception:

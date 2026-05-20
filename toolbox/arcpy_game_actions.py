@@ -18,7 +18,21 @@ from toolbox import arcpy_game_rules as rules
 
 def new_game_action(store, preset_name: str, seed: int) -> rules.ActionResult:
     """Reset persistence and write a fresh deterministic game."""
-    action = "New Game"
+    return _start_game_action(store, preset_name=preset_name, seed=seed, action="New Game")
+
+
+def reset_action(store, preset_name: str, seed: int) -> rules.ActionResult:
+    """Clear persisted rows and write a fresh deterministic game."""
+    return _start_game_action(store, preset_name=preset_name, seed=seed, action="Reset")
+
+
+def _start_game_action(
+    store,
+    *,
+    preset_name: str,
+    seed: int,
+    action: str,
+) -> rules.ActionResult:
     store.ensure_schema()
     store.clear_all()
 
