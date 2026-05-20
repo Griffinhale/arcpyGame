@@ -105,6 +105,21 @@ def test_new_game_calls_ensure_schema_and_clears_before_writing():
     assert "assert_schema" not in store.calls
 
 
+def test_reset_reseeds_board_with_reset_action_label():
+    store = FakeStore()
+
+    result = actions.reset_action(store, preset_name="Tiny Demo", seed=2026)
+
+    assert result.ok is True
+    assert result.action == "Reset"
+    assert store.state is not None
+    assert store.state.status == "playing"
+    assert len(store.cells) == 25
+    assert store.log[0]["action"] == "Reset"
+    assert store.calls.index("ensure_schema") < store.calls.index("clear_all")
+    assert store.calls.index("clear_all") < store.calls.index("write_full_game")
+
+
 def _store_with_seed_2026_game() -> FakeStore:
     store = FakeStore()
     actions.new_game_action(store, preset_name="Tiny Demo", seed=2026)
