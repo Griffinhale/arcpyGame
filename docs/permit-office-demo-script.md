@@ -26,11 +26,11 @@ Show the core dashboard-map loop in a stable order:
    - `D0304` Glass Steps, natural
    - `D0000` Civic Green, residential
    - `D0001` Cinder Yard, mercantile
-5. Select any district and run action `Open Dashboard`.
+5. Run action `Open Dashboard`.
 
 ## Steps
 
-For each decision, select the listed district or districts on the map, click `Preview From Selection`, then click the listed dashboard action. Items marked `Advance` are intentionally left open until `Advance Turn`.
+For each decision, click the listed docket row first. The row selects its seeded proposal and target districts on the map. If the listed district selection differs from the seeded target, select the listed district or districts on the map and click `Update From Map`, then click the listed dashboard action. Items marked `Advance` are intentionally left open until `Advance Turn`.
 
 | Turn | Docket item | District selection | Action | Expected result |
 | --- | --- | --- | --- | --- |
@@ -48,7 +48,7 @@ For each decision, select the listed district or districts on the map, click `Pr
 | 4 | Street Vendor Compact | `D0102` | `Deny` | Avoids duplicating the already active vendor market. Vendor heat rises. |
 | 5 | Maintenance Order: Vendor Market | none | Advance | Leave this open to preserve final cash; it becomes a scorecard maintenance finding. |
 | 5 | Civic Incident Response: Families | none | Advance | Leave unresolved as an audit beat. |
-| 5 | Connector Corridor Pilot | none | Advance | Optional preview only. Do not approve; budget is reserved for a stable scorecard. |
+| 5 | Connector Corridor Pilot | none | Advance | Optional show/hide only. Do not approve; budget is reserved for a stable scorecard. |
 | 6 | Maintenance Order: Connector Corridor | none | Advance | Leave unresolved as the visible maintenance backlog. |
 | 6 | Civic Incident Response: Commuters | none | Advance | Final unresolved civic file remains in the audit. |
 | 6 | Civic Incident Response: Families | none | Advance | Final unresolved civic file remains in the audit. |
@@ -61,7 +61,7 @@ After turn 6, run `Show Scorecard`.
   - `PermitPoints`: active vendor point and responded civic incident marker.
   - `PermitLines`: active connector corridor and utility trench.
   - `PermitZones`: active protected reserve polygon.
-  - Later maintenance/civic cards may create proposed rows when previewed; unresolved proposals can remain proposed or be marked by the dashboard according to the button used.
+  - Later maintenance/civic cards seed proposed rows automatically; unresolved proposals can remain visible or be hidden with `Hide Exhibit`.
 - Report beats:
   - Turn 1: inspection risk band appears on the vendor card; mitigated approval shows prosperity/culture with reduced nuisance.
   - Turn 2: utility approval visibly lowers risk; contractor denial creates a clean tradeoff.
@@ -75,8 +75,8 @@ After turn 6, run `Show Scorecard`.
 
 ## Failure Notes
 
-- If a preview does not draw immediately, use the layer refresh or reopen the dashboard; proposed geometry is generated from the selected districts.
+- If an exhibit does not draw immediately, use the layer refresh or reopen the dashboard; proposed geometry is seeded from filed targets and replaced only by `Update From Map`.
 - If the wrong item is selected, close the dashboard without advancing, reopen it, and reselect the docket row.
-- If money is lower than expected, skip optional previews and leave turn 5 and turn 6 items unresolved. The rehearsed ending depends on not spending the last reserve.
+- If money is lower than expected, skip optional exhibit toggles and leave turn 5 and turn 6 items unresolved. The rehearsed ending depends on not spending the last reserve.
 - If the final scorecard differs, rerun `New Game` with seed `2026`; route order depends on that seed and the generated active-feature follow-ups.
 - Live ArcGIS Pro smoke verification is still manual; pure Python regression coverage locks the route state and scorecard outcome.

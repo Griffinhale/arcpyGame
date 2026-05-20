@@ -6,10 +6,14 @@ import traceback
 
 from .geometry import (
     activate_proposal,
+    case_proposal_visible,
+    ensure_case_proposal,
+    hide_case_proposal,
     insert_or_replace_proposal,
     mark_proposals,
     proposal_spillover,
     refresh_all,
+    select_case_context,
     selected_cell_ids,
 )
 from .messages import _warn
@@ -92,7 +96,8 @@ class DashboardController:
         # The view owns drawing and hit targets; the controller owns actions
         # that mutate ArcGIS-backed game state.
         callbacks = DeskCallbacks(
-            preview=self.preview_selected,
+            toggle_exhibit=self.toggle_exhibit,
+            update_from_map=self.update_from_map,
             inspect=self.inspect,
             approve=lambda: self.apply_decision("approve", False),
             approve_mitigated=lambda: self.apply_decision("approve_mitigated", True),
@@ -109,6 +114,14 @@ class DashboardController:
         """Select a docket item and redraw the dashboard model."""
 
         self.selected_item_id = item_id
+        item = self.active_item()
+        if item:
+            try:
+                select_case_context(self.paths, self.district_layer, item, self.seed, self.messages)
+                self.status_text = f"Selected {item.title}; map context updated."
+            except Exception as exc:
+                self.status_text = f"Map selection failed: {exc}"
+                _warn(self.messages, "DASH", traceback.format_exc().strip().splitlines()[-1])
         self.reload()
 
     def reload(self):
@@ -117,7 +130,20 @@ class DashboardController:
         state = read_state(self.paths)
         districts = read_districts(self.paths)
         items = read_docket(self.paths)
-        model = build_desk_model(state, districts, items, self.selected_item_id, self.status_text)
+        proposal_visible_by_item = {}
+        for item in items:
+            try:
+                proposal_visible_by_item[item.item_id] = case_proposal_visible(self.paths, item)
+            except Exception:
+                proposal_visible_by_item[item.item_id] = False
+        model = build_desk_model(
+            state,
+            districts,
+            items,
+            self.selected_item_id,
+            self.status_text,
+            proposal_visible_by_item,
+        )
         self.selected_item_id = model.selected_item_id
         self.view.render(model)
 
@@ -145,22 +171,42 @@ class DashboardController:
 
         self.reload()
 
-    def preview_selected(self):
-        """Preview selected districts as proposed ArcGIS features."""
+    def toggle_exhibit(self):
+        """Hide or show the selected unresolved proposal exhibit."""
 
         item = self.active_item()
         if not item:
             return
         try:
-            # Map selection is converted into proposal rows, then outputs are
-            # refreshed so the player sees the proposed geometry immediately.
+            if case_proposal_visible(self.paths, item):
+                changed = hide_case_proposal(self.paths, item.item_id)
+                action = "Hid" if changed else "No exhibit found for"
+                target_ids = item.target_cell_ids
+            else:
+                target_ids = ensure_case_proposal(self.paths, item, self.seed, self.messages)
+                action = "Showed"
+            refresh_all(self.paths, self.messages)
+            suffix = f" for {', '.join(target_ids)}" if target_ids else ""
+            self.status_var.set(f"{action} {item.title}{suffix}.")
+            self.reload()
+        except Exception as exc:
+            self.status_var.set(f"Exhibit toggle failed: {exc}")
+            _warn(self.messages, "DASH", traceback.format_exc().strip().splitlines()[-1])
+
+    def update_from_map(self):
+        """Replace the selected case's proposed exhibit from current map selection."""
+
+        item = self.active_item()
+        if not item:
+            return
+        try:
             selected = selected_cell_ids(self.district_layer)
             target_ids = insert_or_replace_proposal(self.paths, item, selected, self.messages)
             refresh_all(self.paths, self.messages)
-            self.status_var.set(f"Previewed {item.title} for {', '.join(target_ids)}.")
+            self.status_var.set(f"Updated {item.title} from map selection: {', '.join(target_ids)}.")
             self.reload()
         except Exception as exc:
-            self.status_var.set(f"Preview failed: {exc}")
+            self.status_var.set(f"Update from map failed: {exc}")
             _warn(self.messages, "DASH", traceback.format_exc().strip().splitlines()[-1])
 
     def inspect(self):
@@ -194,13 +240,15 @@ class DashboardController:
         item = self.active_item()
         if not item:
             return
-        command_id = command_insert(self.paths, action, item.item_id, item.target_cell_ids)
+        command_id = None
         try:
             # Approvals need current map proposal context before pure rules can
             # resolve target effects, spillover, active features, and projects.
-            if not item.target_cell_ids:
-                selected = selected_cell_ids(self.district_layer)
-                insert_or_replace_proposal(self.paths, item, selected, self.messages)
+            target_ids = list(item.target_cell_ids or ())
+            if not target_ids:
+                target_ids = selected_cell_ids(self.district_layer)
+            target_ids = ensure_case_proposal(self.paths, item, self.seed, self.messages, target_ids or None)
+            command_id = command_insert(self.paths, action, item.item_id, target_ids)
             spillover = [] if item.template_id == rules.MAINTENANCE_TEMPLATE_ID else proposal_spillover(self.paths, item)
             state = read_state(self.paths)
             districts = read_districts(self.paths)
@@ -228,7 +276,8 @@ class DashboardController:
             activate_proposal(self.paths, item, result.report)
             self._finish_decision(command_id, item, state, districts, projects, result)
         except Exception as exc:
-            command_finish(self.paths, command_id, "error", error=str(exc))
+            if command_id:
+                command_finish(self.paths, command_id, "error", error=str(exc))
             self.status_var.set(f"Approve failed: {exc}")
             _warn(self.messages, "DASH", traceback.format_exc().strip().splitlines()[-1])
         self.reload()
