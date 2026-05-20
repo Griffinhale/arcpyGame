@@ -50,6 +50,54 @@ def selected_cell_ids(layer):
     return [row[0] for row in arcpy.da.SearchCursor(layer, [cell_field])]
 
 
+def ensure_case_proposal(paths, item, seed, messages, target_ids=None) -> list[str]:
+    """Ensure an unresolved docket item has a proposed exhibit row."""
+
+    if item.status not in ("open", "inspected", "carried"):
+        return list(item.target_cell_ids or ())
+    if target_ids is not None:
+        return insert_or_replace_proposal(paths, item, list(target_ids), messages)
+
+    existing = _case_proposal_targets(paths, item.item_id)
+    if existing:
+        if not item.target_cell_ids:
+            item.target_cell_ids = existing
+            _try_write_docket_item(paths, item, messages)
+        return existing
+
+    districts = _district_records(paths)
+    targets = list(item.target_cell_ids or _suggest_targets(item, districts, seed))
+    return insert_or_replace_proposal(paths, item, targets, messages)
+
+
+def hide_case_proposal(paths, item_id) -> bool:
+    """Remove the selected unresolved proposal without touching city features."""
+
+    hidden = False
+    for fc in (paths["points"], paths["lines"], paths["zones"]):
+        with arcpy.da.UpdateCursor(fc, ["item_id", "status"]) as cursor:
+            for row in cursor:
+                if row[0] == item_id and row[1] == "proposed":
+                    cursor.deleteRow()
+                    hidden = True
+    return hidden
+
+
+def case_proposal_visible(paths, item) -> bool:
+    """Return whether a docket item's unresolved proposal is present on the map."""
+
+    item_id = getattr(item, "item_id", item)
+    return bool(_case_proposal_targets(paths, item_id))
+
+
+def select_case_context(paths, district_layer, item, seed, messages) -> None:
+    """Select the docket item's proposal, target districts, and referenced feature."""
+
+    targets = ensure_case_proposal(paths, item, seed, messages)
+    _select_district_targets(district_layer, targets, messages)
+    _select_support_context(paths, item, messages)
+
+
 def district_geometry_lookup(paths):
     """Read district geometries keyed by cell ID."""
 
@@ -58,6 +106,85 @@ def district_geometry_lookup(paths):
         for cid, geom in cursor:
             lookup[cid] = geom
     return lookup
+
+
+def _case_proposal_targets(paths, item_id):
+    """Return stored target IDs for the first proposed row matching an item."""
+
+    for fc in (paths["points"], paths["lines"], paths["zones"]):
+        with arcpy.da.SearchCursor(fc, ["item_id", "status", "target_cell_ids"]) as cursor:
+            for row in cursor:
+                if row[0] == item_id and row[1] == "proposed":
+                    return [part for part in (row[2] or "").split(",") if part]
+    return []
+
+
+def _try_write_docket_item(paths, item, messages):
+    """Persist target IDs when proposal rows reveal older docket state."""
+
+    try:
+        write_docket_item(paths, item)
+    except Exception as exc:
+        _warn(messages, "PREVIEW", f"could not persist targets for {item.item_id}: {exc}")
+
+
+def _select_district_targets(district_layer, target_ids, messages):
+    """Select target districts in ArcGIS using their cell IDs."""
+
+    where = _where_in("cell_id", target_ids)
+    _select_layer(district_layer, "NEW_SELECTION", where, messages, "district targets")
+
+
+def _select_support_context(paths, item, messages):
+    """Select proposal/support rows owned by this case and its subject feature."""
+
+    parts = []
+    if item.item_id:
+        parts.append(_where_equals("item_id", item.item_id))
+    if item.subject_feature_id:
+        parts.append(_where_equals("feature_id", item.subject_feature_id))
+    where = " OR ".join(parts) if parts else None
+    for layer_name, path in ((POINTS, paths["points"]), (LINES, paths["lines"]), (ZONES, paths["zones"])):
+        if not _select_layer(layer_name, "NEW_SELECTION", where, messages, layer_name, warn=False):
+            _select_layer(path, "NEW_SELECTION", where, messages, path)
+
+
+def _select_layer(layer, selection_type, where, messages, label, warn=True) -> bool:
+    """Apply a selection expression, returning whether ArcPy accepted it."""
+
+    try:
+        if where:
+            arcpy.management.SelectLayerByAttribute(layer, selection_type, where)
+        else:
+            arcpy.management.SelectLayerByAttribute(layer, "CLEAR_SELECTION")
+        return True
+    except Exception as exc:
+        if warn:
+            _warn(messages, "SELECT", f"{label} selection failed: {exc}")
+        return False
+
+
+def _where_in(field, values):
+    """Build a simple ArcGIS SQL IN expression for text IDs."""
+
+    clean = [str(value) for value in values or () if value]
+    if not clean:
+        return None
+    if len(clean) == 1:
+        return _where_equals(field, clean[0])
+    return f"{field} IN ({', '.join(_sql_text(value) for value in clean)})"
+
+
+def _where_equals(field, value):
+    """Build a simple ArcGIS SQL equality expression for a text ID."""
+
+    return f"{field} = {_sql_text(value)}"
+
+
+def _sql_text(value):
+    """Quote a text literal for simple ArcGIS SQL expressions."""
+
+    return "'{0}'".format(str(value).replace("'", "''"))
 
 
 def insert_or_replace_proposal(paths, item, target_ids, messages):

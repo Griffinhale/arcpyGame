@@ -24,10 +24,12 @@ Permit Office Prototype
    - Creates or resets `permit_office.gdb`.
    - Adds `PermitDistricts`, `PermitPoints`, `PermitLines`, and `PermitZones` to the active map.
    - Generates a 5x5 named district board and three docket items.
-3. Select one district on the map.
+3. Select one district on the map if you want to override the seeded exhibit.
 4. Run `Open Dashboard`.
-5. In the dashboard, pick a point-style docket item and click `Preview From Selection`.
-   - A proposed point feature should appear in `PermitPoints`.
+5. In the dashboard, pick a point-style docket item.
+   - The docket row should select its proposed exhibit and target district on the map.
+   - Click `Hide Exhibit`, then `Show Exhibit`; only that selected proposed row should disappear and return.
+   - If changing placement, select a replacement district and click `Update From Map`.
 6. Click `Inspect`.
    - AP should decrease and the dashboard item text should include a risk band.
 7. Click `Approve` or `Approve + Mitigate`.
@@ -37,11 +39,11 @@ Permit Office Prototype
    - GP messages should include refresh attempts.
 8. Test a line item:
    - Select exactly two districts.
-   - Click `Preview From Selection`.
+   - Click `Update From Map`.
    - Approve the corridor/procession item.
 9. Test a polygon item:
    - Select one or more districts.
-   - Click `Preview From Selection`.
+   - Click `Update From Map`.
    - Approve or deny it.
 10. Click `Advance Turn`.
     - AP should reset.
@@ -66,5 +68,5 @@ The prototype writes:
 
 - The dashboard is intentionally the main controller.
 - Manual map refresh is acceptable if live redraw lags.
-- Proposed geometries are auto-generated from selected districts; Feature Set drawing is not used.
+- Proposed geometries are seeded automatically and can be replaced from the current district selection; Feature Set drawing is not used.
 - This smoke test validates ArcGIS dashboard-map mechanics. The final six-turn balance is locked by pure Python regression coverage, but still needs a recorded live ArcGIS Pro run.

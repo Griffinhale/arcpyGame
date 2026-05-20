@@ -16,7 +16,8 @@ ACTIVE_STATUSES = ("open", "inspected", "active", "carried")
 class DeskCallbacks:
     """UI actions exposed by the dashboard controller."""
 
-    preview: Callable[[], None]
+    toggle_exhibit: Callable[[], None]
+    update_from_map: Callable[[], None]
     inspect: Callable[[], None]
     approve: Callable[[], None]
     approve_mitigated: Callable[[], None]
@@ -47,6 +48,15 @@ class CaseField:
 
 
 @dataclass(frozen=True)
+class ImpactBucket:
+    """One compact permit-impact summary bucket."""
+
+    label: str
+    value: str
+    tone: str = "neutral"
+
+
+@dataclass(frozen=True)
 class CaseSummary:
     """Structured permit-packet content for the selected case."""
 
@@ -55,11 +65,12 @@ class CaseSummary:
     status: str = ""
     category: str = ""
     fields: tuple[CaseField, ...] = ()
-    districts: str = "(select on map, then preview)"
+    districts: str = "(seeded exhibit; use Update From Map to revise)"
     preview: str = "Select a docket file from the in tray."
     inspection: str = "Inspection addendum not filed."
     action_note: str = ""
     risk_band: str = "unknown"
+    impact_buckets: tuple[ImpactBucket, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -81,11 +92,20 @@ class DeskViewModel:
     case: CaseSummary = field(default_factory=CaseSummary)
     ledger_rows: tuple[LedgerRow, ...] = ()
     status_text: str = ""
+    exhibit_visible: bool = False
 
 
-def build_desk_model(state, districts, items, selected_item_id="", status_text="") -> DeskViewModel:
+def build_desk_model(
+    state,
+    districts,
+    items,
+    selected_item_id="",
+    status_text="",
+    proposal_visible_by_item=None,
+) -> DeskViewModel:
     """Format gameplay state into a presentation-only desk model."""
 
+    proposal_visible_by_item = proposal_visible_by_item or {}
     active_items = [item for item in items if item.status in ACTIVE_STATUSES]
     selected = _resolve_selected_item(active_items, selected_item_id)
     selected_id = selected.item_id if selected else ""
@@ -103,8 +123,9 @@ def build_desk_model(state, districts, items, selected_item_id="", status_text="
     )
     case = _case_summary(state, districts, selected)
     ledger_rows = _ledger_rows(state, districts)
-    status = status_text or "No filed report yet. Select districts in ArcGIS, then preview the exhibit."
-    return DeskViewModel(docket_rows, selected_id, case, ledger_rows, status)
+    status = status_text or "No filed report yet. Select a docket row; use Update From Map only when changing targets."
+    exhibit_visible = bool(proposal_visible_by_item.get(selected_id))
+    return DeskViewModel(docket_rows, selected_id, case, ledger_rows, status, exhibit_visible)
 
 
 def open_filed_report(title, report, affected, state):
@@ -368,22 +389,19 @@ class PermitDeskView:
         content_x = x0 + 24
         content_w = max(240, x1 - x0 - 70)
         y = y0 + 116
-        # Header fields stay compact; longer narrative content moves into ruled
-        # blocks so it can wrap without pushing the action tray.
-        for field in case.fields[:8]:
+        # Header fields stay compact; impact buckets carry the decision math so
+        # the case packet does not become a wall of permit prose.
+        for field in case.fields[:4]:
             c.create_text(content_x, y, text=field.label.upper(), anchor="nw", fill=Palette.BLUE, font=self._font(6, "bold"))
             c.create_text(content_x + 108, y, text=_clip(field.value, 56), anchor="nw", fill=Palette.INK, font=self._font(8), width=content_w - 108)
             y += 23
 
         y += 6
         paper_bottom = y1 - 42
-        _draw_ruled_block(c, content_x, y, content_x + content_w, y + 52, "SELECTED DISTRICTS", case.districts, Palette.BLUE, self._font)
-        y += 66
-        remaining = max(126, paper_bottom - y)
-        preview_h = min(116, max(82, remaining - 76))
-        _draw_ruled_block(c, content_x, y, content_x + content_w, y + preview_h, "EXHIBIT PREVIEW", _clip(case.preview, 260), Palette.GREEN, self._font)
-        y += preview_h + 12
-        inspection_h = max(46, min(82, paper_bottom - y))
+        _draw_ruled_block(c, content_x, y, content_x + content_w, y + 44, "SELECTED DISTRICTS", case.districts, Palette.BLUE, self._font)
+        y += 56
+        y += _draw_impact_buckets(c, content_x, y, content_w, case.impact_buckets, self._font) + 10
+        inspection_h = max(46, min(74, paper_bottom - y))
         _draw_ruled_block(c, content_x, y, content_x + content_w, y + inspection_h, "INSPECTION ADDENDUM", _clip(case.inspection, 190), Palette.RED, self._font)
 
         c.create_line(x0 + 10, y1 - 24, x1 - 34, y1 - 24, fill="#d1c4a8", dash=(3, 5))
@@ -442,11 +460,13 @@ class PermitDeskView:
         status_w = max(210, button_area_x0 - x0 - 42)
         c.create_text(x0 + 22, y0 + 68, text=_clip(self.model.status_text, 170), anchor="nw", width=status_w, fill=Palette.INK, font=self._font(9))
 
+        exhibit_label = "Hide Exhibit" if self.model.exhibit_visible else "Show Exhibit"
         actions = (
-            ("Preview Exhibit", Palette.BLUE, self.callbacks.preview),
+            (exhibit_label, Palette.BLUE, self.callbacks.toggle_exhibit),
+            ("Update From Map", "#4f7875", self.callbacks.update_from_map),
             ("Inspect File", Palette.GOLD, self.callbacks.inspect),
             ("Issue Permit", Palette.GREEN, self.callbacks.approve),
-            ("Issue With Conditions", "#4f7875", self.callbacks.approve_mitigated),
+            ("Issue With Conditions", "#527d65", self.callbacks.approve_mitigated),
             ("Deny", Palette.RED, self.callbacks.deny),
             ("End Filing Day", Palette.INK, self.callbacks.advance_turn),
         )
@@ -530,8 +550,9 @@ def _case_summary(state, districts, item) -> CaseSummary:
         CaseField("Failure Mode", template.failure_mode or "none filed"),
     )
     action_note = _action_note(template)
-    districts_text = ", ".join(item.target_cell_ids) if item.target_cell_ids else "(select on map, then preview)"
+    districts_text = ", ".join(item.target_cell_ids) if item.target_cell_ids else "(seeded exhibit; use Update From Map to revise)"
     inspection = _inspection_summary(item)
+    impact_buckets = _impact_buckets(state, districts, item, template)
     return CaseSummary(
         title=item.title,
         item_id=item.item_id,
@@ -543,7 +564,177 @@ def _case_summary(state, districts, item) -> CaseSummary:
         inspection=inspection,
         action_note=action_note,
         risk_band=item.risk_band or "unknown",
+        impact_buckets=impact_buckets,
     )
+
+
+def _impact_buckets(state, districts, item, template) -> tuple[ImpactBucket, ...]:
+    """Build concise impact buckets for the selected case."""
+
+    targets = [districts[cid] for cid in item.target_cell_ids if cid in districts]
+    inspection = (item.case_json or {}).get("inspection") if isinstance(item.case_json, dict) else None
+    total_money = template.money_cost + template.mitigation_cost
+    cost_tone = "bad" if state.ap < template.ap_cost or state.money < template.money_cost else "watch" if state.money < total_money else "neutral"
+    cost = f"{template.ap_cost} AP / ${template.money_cost}; conditions +${template.mitigation_cost}"
+    city = _city_bucket_value(template)
+    city_tone = _delta_tone(template.base_effects | template.spillover_effects)
+    target = _target_bucket_value(item, targets)
+    target_tone = "neutral" if targets else "watch"
+
+    if inspection:
+        people, people_tone = _inspected_people_bucket(template, targets)
+        follow_up, follow_tone = _inspection_followup_bucket(inspection, item)
+    else:
+        people = _qualitative_people_bucket(template)
+        people_tone = "neutral"
+        follow_up = _qualitative_followup_bucket(template)
+        follow_tone = "watch" if template.failure_mode else "neutral"
+
+    return (
+        ImpactBucket("Cost", cost, cost_tone),
+        ImpactBucket("City", city, city_tone),
+        ImpactBucket("Target", target, target_tone),
+        ImpactBucket("People", people, people_tone),
+        ImpactBucket("Follow-up", follow_up, follow_tone),
+    )
+
+
+def _city_bucket_value(template) -> str:
+    """Format city and spillover effects as one compact bucket value."""
+
+    base = _format_effects(template.base_effects)
+    spill = _format_effects(template.spillover_effects)
+    if spill and spill != "none":
+        return f"target {base}; spill {spill}"
+    return f"target {base}"
+
+
+def _target_bucket_value(item, targets) -> str:
+    """Format selected target context without long prose."""
+
+    if not item.target_cell_ids:
+        return "seeded target pending map update"
+    types = sorted({profile.district_type for profile in targets if profile.district_type})
+    type_text = "/".join(types[:2]) if types else "filed"
+    return f"{len(item.target_cell_ids)} district(s); {type_text}"
+
+
+def _qualitative_people_bucket(template) -> str:
+    """Format pre-inspection people impact qualitatively."""
+
+    supporters = _join_labels(template.supporter_groups[:2])
+    objectors = _join_labels(template.concerned_groups[:2])
+    if supporters != "none" and objectors != "none":
+        return f"{supporters} support; {objectors} object"
+    if supporters != "none":
+        return f"{supporters} likely support"
+    if objectors != "none":
+        return f"{objectors} may object"
+    return "public comment pending"
+
+
+def _qualitative_followup_bucket(template) -> str:
+    """Format pre-inspection follow-up qualitatively."""
+
+    if template.failure_mode:
+        return f"inspect for {template.failure_mode}"
+    return "routine filing path"
+
+
+def _inspected_people_bucket(template, targets) -> tuple[str, str]:
+    """Format inspected supporter, objector, and grievance context."""
+
+    supporter = _strongest_group(targets, template.supporter_groups)
+    objector = _strongest_group(targets, template.concerned_groups)
+    grievance_group, grievance_band = _top_grievance(targets)
+    parts = []
+    if supporter:
+        parts.append(f"{_group_label(supporter)} support")
+    if objector:
+        parts.append(f"{_group_label(objector)} object")
+    if grievance_band:
+        parts.append(f"{_group_label(grievance_group)} {rules.GRIEVANCE_BAND_LABELS[grievance_band]}")
+    tone = "bad" if grievance_band >= rules.DISSATISFACTION_INCIDENT_THRESHOLD else "watch" if grievance_band >= rules.DISSATISFACTION_AGGRIEVED_THRESHOLD or objector else "neutral"
+    return "; ".join(parts) if parts else "population evidence filed", tone
+
+
+def _inspection_followup_bucket(inspection, item) -> tuple[str, str]:
+    """Format inspected risk, evidence, and violations."""
+
+    evidence = inspection.get("evidence") or []
+    violations = inspection.get("violations") or []
+    risk = str(inspection.get("risk_band") or item.risk_band or "unknown").lower()
+    value = f"{risk} risk; {len(evidence)} evidence; {len(violations)} violation(s)"
+    return value, _risk_tone(risk)
+
+
+def _format_effects(effects) -> str:
+    """Format metric deltas for a compact bucket."""
+
+    parts = [f"{metric[:4]} {amount:+d}" for metric, amount in sorted((effects or {}).items()) if amount]
+    return ", ".join(parts[:3]) if parts else "none"
+
+
+def _delta_tone(effects) -> str:
+    """Return a tone for a metric delta map."""
+
+    effects = effects or {}
+    if effects.get("risk", 0) > 0 or effects.get("unrest", 0) > 1:
+        return "bad"
+    if effects.get("risk", 0) < 0 or effects.get("prosperity", 0) > 0 or effects.get("culture", 0) > 0:
+        return "good"
+    if any(value for value in effects.values()):
+        return "watch"
+    return "neutral"
+
+
+def _risk_tone(risk) -> str:
+    """Return the dashboard tone for an inspection risk band."""
+
+    if risk == "high":
+        return "bad"
+    if risk == "medium":
+        return "watch"
+    if risk == "low":
+        return "good"
+    return "neutral"
+
+
+def _strongest_group(profiles, groups) -> str:
+    """Return the strongest configured group across target profiles."""
+
+    scores = []
+    for group in groups:
+        score = sum(profile.population_mix.get(group, 0) for profile in profiles)
+        if score > 0:
+            scores.append((score, group))
+    return sorted(scores, key=lambda row: (-row[0], row[1]))[0][1] if scores else ""
+
+
+def _top_grievance(profiles) -> tuple[str, int]:
+    """Return the highest dissatisfaction band across target profiles."""
+
+    totals = {group: 0 for group in rules.CITIZEN_GROUPS}
+    for profile in profiles:
+        for group, band in (profile.dissatisfaction or {}).items():
+            if group in totals:
+                totals[group] += int(band or 0)
+    return sorted(totals.items(), key=lambda row: (-row[1], row[0]))[0]
+
+
+def _join_labels(groups) -> str:
+    """Join group labels for a compact bucket value."""
+
+    labels = [_group_label(group) for group in groups if group]
+    if not labels:
+        return "none"
+    return "/".join(labels[:2])
+
+
+def _group_label(group) -> str:
+    """Return a display label for a citizen or stakeholder group id."""
+
+    return rules.GROUP_LABELS.get(group, str(group).replace("_", " "))
 
 
 def _ledger_rows(state, districts) -> tuple[LedgerRow, ...]:
@@ -631,6 +822,30 @@ def _draw_ruled_block(c, x0, y0, x1, y1, label, text, accent, font_factory):
     for yy in range(y0 + 38, y1 - 6, 18):
         c.create_line(x0 + 8, yy, x1 - 8, yy, fill="#e3d7bd")
     c.create_text(x0 + 10, y0 + 28, text=text, anchor="nw", width=max(80, x1 - x0 - 20), fill=Palette.INK, font=font_factory(9))
+
+
+def _draw_impact_buckets(c, x, y, width, buckets, font_factory):
+    """Draw compact impact buckets in a two-column grid."""
+
+    if not buckets:
+        return 0
+    gap = 8
+    bucket_h = 38
+    col_w = max(118, (width - gap) // 2)
+    for idx, bucket in enumerate(buckets):
+        col = idx % 2
+        row = idx // 2
+        bx0 = x + col * (col_w + gap)
+        by0 = y + row * (bucket_h + 7)
+        bx1 = min(x + width, bx0 + col_w)
+        by1 = by0 + bucket_h
+        tone = _tone_color(bucket.tone)
+        c.create_rectangle(bx0, by0, bx1, by1, fill="#f6edd6", outline="#d4c7aa")
+        c.create_rectangle(bx0, by0, bx0 + 5, by1, fill=tone, outline="")
+        c.create_text(bx0 + 11, by0 + 5, text=bucket.label.upper(), anchor="nw", fill=Palette.MUTED, font=font_factory(6, "bold"))
+        c.create_text(bx0 + 11, by0 + 18, text=_clip(bucket.value, max(18, (bx1 - bx0 - 22) // 6)), anchor="nw", fill=Palette.INK, font=font_factory(8, "bold"), width=bx1 - bx0 - 18)
+    rows = (len(buckets) + 1) // 2
+    return rows * bucket_h + max(0, rows - 1) * 7
 
 
 def _shadow_rect(c, x0, y0, x1, y1):
