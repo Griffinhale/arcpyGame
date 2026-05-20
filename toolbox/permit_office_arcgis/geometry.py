@@ -606,7 +606,16 @@ def apply_simple_symbology(layer, key, messages):
             return
         sym = layer.symbology
         sym.updateRenderer("UniqueValueRenderer")
-        sym.renderer.fields = ["display_state"]
+        field_set, last_error = _set_unique_value_renderer_field(sym.renderer, "display_state")
+        if not field_set:
+            _warn(
+                messages,
+                "SYM",
+                "unique-value symbology skipped for "
+                f"{getattr(layer, 'name', key)}: renderer field API unavailable"
+                f" ({last_error})",
+            )
+            return
         try:
             sym.renderer.useDefaultSymbol = True
         except Exception:
@@ -614,3 +623,31 @@ def apply_simple_symbology(layer, key, messages):
         layer.symbology = sym
     except Exception as exc:
         _warn(messages, "SYM", f"symbology setup skipped for {getattr(layer, 'name', key)}: {exc}")
+
+
+def _set_unique_value_renderer_field(renderer, field_name):
+    """Set a unique-value renderer field across ArcGIS Pro API variants."""
+
+    last_error = None
+    attempts = (
+        ("fields", [field_name]),
+        ("field", field_name),
+        ("fields", (field_name,)),
+    )
+    for attr, value in attempts:
+        if attr == "field" and not _renderer_has_attr(renderer, attr):
+            continue
+        try:
+            setattr(renderer, attr, value)
+            return True, None
+        except Exception as exc:
+            last_error = exc
+    return False, last_error or "no supported field setter"
+
+
+def _renderer_has_attr(renderer, attr):
+    try:
+        getattr(renderer, attr)
+    except Exception:
+        return False
+    return True
