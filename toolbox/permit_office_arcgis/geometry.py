@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import random
 import uuid
 
 import arcpy
@@ -10,7 +11,7 @@ import arcpy
 from .messages import _log, _warn
 from .rules_loader import rules
 from .schema import DISTRICTS, LINES, POINTS, SUPPORT_FIELDS, ZONES
-from .store import encode_json, write_docket_item
+from .store import decode_json, encode_json, read_districts, write_docket_item
 
 
 def _summary_map(value):
@@ -62,12 +63,12 @@ def district_geometry_lookup(paths):
 def insert_or_replace_proposal(paths, item, target_ids, messages):
     """Create the proposed point, line, or polygon feature for a docket item."""
 
-    # Only one proposed exhibit should exist at a time; the active docket item
-    # owns the preview geometry the dashboard will later approve or deny.
+    # Each docket item owns one proposed exhibit. Other open docket proposals
+    # stay visible so the map reads as a real in-tray instead of a single preview.
     for fc in (paths["points"], paths["lines"], paths["zones"]):
         with arcpy.da.UpdateCursor(fc, ["item_id", "status"]) as cursor:
             for row in cursor:
-                if row[1] == "proposed":
+                if row[0] == item.item_id and row[1] == "proposed":
                     cursor.deleteRow()
 
     template = rules.TEMPLATES[item.template_id]
@@ -82,10 +83,151 @@ def insert_or_replace_proposal(paths, item, target_ids, messages):
     if item.geometry_type == "POLYGON" and not valid:
         raise ValueError("Zone permits require one or more selected districts.")
 
-    # The proposed ArcGIS row carries a normalized FeatureInstance payload so
-    # lifecycle systems can read the same fields after approval.
+    attrs = _support_attrs(
+        item=item,
+        template=template,
+        archetype=archetype,
+        target_ids=valid,
+        status="proposed",
+        display_state="proposed",
+        report=template.preview,
+        metadata=metadata,
+    )
+    if item.geometry_type == "POINT":
+        geom = arcpy.PointGeometry(geoms[valid[0]].centroid, geoms[valid[0]].spatialReference)
+        fc = paths["points"]
+    elif item.geometry_type == "LINE":
+        p1 = geoms[valid[0]].centroid
+        p2 = geoms[valid[1]].centroid
+        geom = arcpy.Polyline(arcpy.Array([p1, p2]), geoms[valid[0]].spatialReference)
+        fc = paths["lines"]
+    else:
+        # Zone proposals use a smaller display polygon within the first selected
+        # district because the gameplay target list carries the full selection.
+        geom = inset_polygon(geoms[valid[0]])
+        fc = paths["zones"]
+
+    with arcpy.da.InsertCursor(fc, ["SHAPE@"] + [field[0] for field in SUPPORT_FIELDS]) as cursor:
+        cursor.insertRow([geom] + attrs)
+    item.target_cell_ids = valid
+    write_docket_item(paths, item)
+    _log(messages, "PREVIEW", f"created proposed {item.geometry_type.lower()} for {item.item_id}: {','.join(valid)}")
+    return valid
+
+
+def seed_docket_proposals(paths, items, seed, messages):
+    """Create a deterministic proposed map exhibit for each open docket item."""
+
+    purge_proposed_features(paths)
+    districts = _district_records(paths)
+    for item in items:
+        if item.status not in ("open", "inspected", "carried"):
+            continue
+        target_ids = item.target_cell_ids or _suggest_targets(item, districts, seed)
+        try:
+            insert_or_replace_proposal(paths, item, target_ids, messages)
+        except Exception as exc:
+            _warn(messages, "PREVIEW", f"could not seed proposal for {item.item_id}: {exc}")
+
+
+def purge_proposed_features(paths):
+    """Remove unresolved proposed features without touching active city rows."""
+
+    for fc in (paths["points"], paths["lines"], paths["zones"]):
+        with arcpy.da.UpdateCursor(fc, ["status"]) as cursor:
+            for row in cursor:
+                if row[0] == "proposed":
+                    cursor.deleteRow()
+
+
+def seed_city_features(paths, seed, messages):
+    """Seed deterministic baseline city detail so the map starts populated."""
+
+    if any(_feature_count(paths[key]) for key in ("points", "lines", "zones")):
+        return
+    districts = read_districts(paths)
+    descriptors = rules.generate_city_detail_features(districts, seed=seed)
+    inserted = 0
+    for descriptor in descriptors:
+        try:
+            _insert_city_detail_feature(paths, descriptor)
+            inserted += 1
+        except Exception as exc:
+            _warn(messages, "CITY", f"could not seed {descriptor.name}: {exc}")
+    if inserted:
+        active = sum(1 for feature in descriptors if feature.status == "active")
+        context = sum(1 for feature in descriptors if feature.status == "context")
+        _log(messages, "CITY", f"seeded {inserted} city detail feature(s): {active} active, {context} context")
+
+
+def _district_records(paths):
+    """Read district geometry and placement hints used for generated exhibits."""
+
+    records = {}
+    fields = ["cell_id", "district_type", "SHAPE@"]
+    with arcpy.da.SearchCursor(paths["districts"], fields) as cursor:
+        for cell_id, district_type, geom in cursor:
+            records[cell_id] = {"district_type": district_type or "", "geom": geom}
+    return records
+
+
+def _suggest_targets(item, districts, seed):
+    """Choose deterministic target districts matching the docket geometry."""
+
+    template = rules.TEMPLATES[item.template_id]
+    archetype = rules.feature_archetype_for_template(template)
+    rng = random.Random(f"{seed}:{item.item_id}:proposal")
+    scored = []
+    for cell_id, record in districts.items():
+        district_type = record["district_type"]
+        score = 0
+        if district_type in template.good_fit_types:
+            score += 4
+        if district_type in archetype.allowed_district_types:
+            score += 3
+        if district_type in template.bad_fit_types:
+            score -= 4
+        if district_type in archetype.conflict_district_types:
+            score -= 3
+        scored.append((-score, rng.random(), cell_id))
+    ordered = [cell_id for _score, _tie, cell_id in sorted(scored)]
+    if item.geometry_type == "POINT":
+        return ordered[:1]
+    if item.geometry_type == "LINE":
+        if not ordered:
+            return []
+        first = ordered[0]
+        adjacent = _adjacent_ids(first, districts)
+        for cell_id in ordered[1:]:
+            if cell_id in adjacent:
+                return [first, cell_id]
+        return ordered[:2]
+    count = 2 if len(ordered) > 1 else 1
+    return ordered[:count]
+
+
+def _adjacent_ids(cell_id, districts):
+    """Return generated-grid four-way neighbors present in the current board."""
+
+    try:
+        row = int(cell_id[1:3])
+        col = int(cell_id[3:5])
+    except Exception:
+        return set()
+    candidates = (
+        f"D{row - 1:02d}{col:02d}",
+        f"D{row + 1:02d}{col:02d}",
+        f"D{row:02d}{col - 1:02d}",
+        f"D{row:02d}{col + 1:02d}",
+    )
+    return {candidate for candidate in candidates if candidate in districts}
+
+
+def _support_attrs(item, template, archetype, target_ids, status, display_state, report, metadata):
+    """Build the shared support-feature attribute payload."""
+
     feature_id = str(uuid.uuid4())
-    target_text = ",".join(valid)
+    target_text = ",".join(target_ids)
     expires_turn = item.turn + template.expires_after if template.expires_after else -1
     feature_state = rules.FeatureInstance(
         feature_id=feature_id,
@@ -96,21 +238,21 @@ def insert_or_replace_proposal(paths, item, target_ids, messages):
         service_type=archetype.service_type,
         network_type=archetype.network_type or archetype.service_type,
         owner_group=item.stakeholder or template.stakeholder,
-        target_cell_ids=valid,
+        target_cell_ids=list(target_ids),
         capacity=archetype.capacity,
         intensity=max(1, archetype.capacity or 1),
-        status="proposed",
+        status=status,
         turn_created=item.turn,
         expires_turn=expires_turn,
-        display_state="proposed",
+        display_state=display_state,
         project_id=item.project_id,
         chain_step_id=item.chain_step_id,
         metadata=metadata,
     )
     rules.normalize_feature_instance(feature_state, item.turn)
-    feature_state.status = "proposed"
-    feature_state.display_state = "proposed"
-    attrs = [
+    feature_state.status = status
+    feature_state.display_state = display_state
+    return [
         feature_id,
         item.item_id,
         item.template_id,
@@ -131,37 +273,202 @@ def insert_or_replace_proposal(paths, item, target_ids, messages):
         json.dumps(metadata, sort_keys=True)[:2048],
         _summary_map(metadata.get("hazard_effects")),
         _summary_map(metadata.get("mitigation_effects")),
-        "proposed",
+        status,
         item.turn,
         expires_turn,
         target_text,
-        "proposed",
-        template.preview,
+        display_state,
+        report,
         feature_state.condition,
         feature_state.maintenance_due_turn,
         feature_state.last_maintained_turn,
         encode_json(feature_state.state_json),
     ]
-    if item.geometry_type == "POINT":
-        geom = arcpy.PointGeometry(geoms[valid[0]].centroid, geoms[valid[0]].spatialReference)
+
+
+def _insert_baseline_feature(paths, archetype_id, target_ids, name):
+    """Insert one active baseline feature using an existing archetype shape."""
+
+    archetype = rules.FEATURE_ARCHETYPES[archetype_id]
+    template_id = _template_for_archetype(archetype_id)
+    template = rules.TEMPLATES[template_id]
+    item = rules.DocketItem(
+        item_id=f"BASE-{archetype_id}",
+        template_id=template_id,
+        title=name,
+        geometry_type=archetype.geometry_type,
+        turn=0,
+        status="active",
+        target_cell_ids=list(target_ids),
+        stakeholder="city",
+    )
+    geoms = district_geometry_lookup(paths)
+    metadata = rules.feature_metadata_for_template(template)
+    attrs = _support_attrs(
+        item=item,
+        template=template,
+        archetype=archetype,
+        target_ids=target_ids,
+        status="active",
+        display_state=archetype.display_state or "active",
+        report="Existing city feature.",
+        metadata=metadata,
+    )
+    if archetype.geometry_type == "POINT":
+        geom = arcpy.PointGeometry(geoms[target_ids[0]].centroid, geoms[target_ids[0]].spatialReference)
         fc = paths["points"]
-    elif item.geometry_type == "LINE":
-        p1 = geoms[valid[0]].centroid
-        p2 = geoms[valid[1]].centroid
-        geom = arcpy.Polyline(arcpy.Array([p1, p2]), geoms[valid[0]].spatialReference)
+    elif archetype.geometry_type == "LINE":
+        p1 = geoms[target_ids[0]].centroid
+        p2 = geoms[target_ids[-1]].centroid
+        geom = arcpy.Polyline(arcpy.Array([p1, p2]), geoms[target_ids[0]].spatialReference)
         fc = paths["lines"]
     else:
-        # Zone proposals use a smaller display polygon within the first selected
-        # district because the gameplay target list carries the full selection.
-        geom = inset_polygon(geoms[valid[0]])
+        geom = inset_polygon(geoms[target_ids[0]])
         fc = paths["zones"]
-
     with arcpy.da.InsertCursor(fc, ["SHAPE@"] + [field[0] for field in SUPPORT_FIELDS]) as cursor:
         cursor.insertRow([geom] + attrs)
-    item.target_cell_ids = valid
-    write_docket_item(paths, item)
-    _log(messages, "PREVIEW", f"created proposed {item.geometry_type.lower()} for {item.item_id}: {target_text}")
-    return valid
+
+
+def _insert_city_detail_feature(paths, descriptor):
+    """Insert one generated city-detail descriptor into a support layer."""
+
+    geoms = district_geometry_lookup(paths)
+    targets = [cid for cid in descriptor.target_cell_ids if cid in geoms]
+    if not targets:
+        raise ValueError("city detail descriptor has no valid target district")
+    archetype = rules.FEATURE_ARCHETYPES.get(descriptor.archetype_id)
+    metadata = {
+        "archetype_id": descriptor.archetype_id,
+        "seeded_city_detail": True,
+        **dict(descriptor.metadata or {}),
+    }
+    feature_state = rules.FeatureInstance(
+        feature_id=descriptor.feature_id,
+        item_id="",
+        template_id="",
+        archetype_id=descriptor.archetype_id,
+        family=archetype.family if archetype else "",
+        service_type=archetype.service_type if archetype else "",
+        network_type=(archetype.network_type or archetype.service_type) if archetype else "",
+        owner_group=descriptor.owner_group,
+        target_cell_ids=targets,
+        capacity=descriptor.capacity,
+        intensity=descriptor.intensity,
+        status=descriptor.status,
+        turn_created=0,
+        expires_turn=-1,
+        display_state=descriptor.display_state,
+        metadata=metadata,
+        state_json=dict(descriptor.state or {}),
+    )
+    rules.normalize_feature_instance(feature_state, 0)
+    feature_state.status = descriptor.status
+    feature_state.display_state = descriptor.display_state
+    if descriptor.geometry_type == "POINT":
+        geom = _point_from_hint(geoms[targets[0]], descriptor.geometry_hint)
+        fc = paths["points"]
+    elif descriptor.geometry_type == "LINE":
+        geom = _line_from_hint([geoms[cid] for cid in targets], descriptor.geometry_hint)
+        fc = paths["lines"]
+    else:
+        geom = _rect_from_hint(geoms[targets[0]], descriptor.geometry_hint)
+        fc = paths["zones"]
+    attrs = [
+        descriptor.feature_id,
+        "",
+        "",
+        "",
+        "",
+        descriptor.name,
+        "city_context",
+        descriptor.archetype_id,
+        feature_state.family,
+        feature_state.service_type,
+        feature_state.network_type,
+        float(archetype.coverage_radius_m if archetype else 0),
+        feature_state.capacity,
+        archetype.land_use if archetype else "",
+        archetype.incident_type if archetype else "",
+        descriptor.owner_group,
+        feature_state.intensity,
+        encode_json(feature_state.metadata, limit=2048),
+        _summary_map(archetype.hazard_effects if archetype else {}),
+        _summary_map(archetype.mitigation_effects if archetype else {}),
+        feature_state.status,
+        feature_state.turn_created,
+        feature_state.expires_turn,
+        ",".join(targets),
+        feature_state.display_state,
+        "Seeded city detail.",
+        feature_state.condition,
+        feature_state.maintenance_due_turn,
+        feature_state.last_maintained_turn,
+        encode_json(feature_state.state_json),
+    ]
+    with arcpy.da.InsertCursor(fc, ["SHAPE@"] + [field[0] for field in SUPPORT_FIELDS]) as cursor:
+        cursor.insertRow([geom] + attrs)
+
+
+def _point_from_hint(geom, hint):
+    """Create a point inside a district from normalized offsets."""
+
+    extent = geom.extent
+    x = extent.XMin + (extent.XMax - extent.XMin) * float(hint.get("x", 0.5))
+    y = extent.YMin + (extent.YMax - extent.YMin) * float(hint.get("y", 0.5))
+    return arcpy.PointGeometry(arcpy.Point(x, y), geom.spatialReference)
+
+
+def _line_from_hint(geoms, hint):
+    """Create a corridor or short street line from district geometry hints."""
+
+    if len(geoms) == 1 and hint.get("shape") == "stub":
+        extent = geoms[0].extent
+        orientation = hint.get("orientation", "horizontal")
+        offset = float(hint.get("offset", 0.5))
+        if orientation == "vertical":
+            x = extent.XMin + (extent.XMax - extent.XMin) * offset
+            points = [arcpy.Point(x, extent.YMin + (extent.YMax - extent.YMin) * 0.18), arcpy.Point(x, extent.YMax - (extent.YMax - extent.YMin) * 0.18)]
+        else:
+            y = extent.YMin + (extent.YMax - extent.YMin) * offset
+            points = [arcpy.Point(extent.XMin + (extent.XMax - extent.XMin) * 0.18, y), arcpy.Point(extent.XMax - (extent.XMax - extent.XMin) * 0.18, y)]
+        return arcpy.Polyline(arcpy.Array(points), geoms[0].spatialReference)
+    points = [geom.centroid for geom in geoms]
+    return arcpy.Polyline(arcpy.Array(points), geoms[0].spatialReference)
+
+
+def _rect_from_hint(geom, hint):
+    """Create a rectangle inside a district from normalized center and size."""
+
+    extent = geom.extent
+    width = max(8.0, (extent.XMax - extent.XMin) * float(hint.get("w", 0.25)))
+    height = max(8.0, (extent.YMax - extent.YMin) * float(hint.get("h", 0.20)))
+    cx = extent.XMin + (extent.XMax - extent.XMin) * float(hint.get("cx", 0.5))
+    cy = extent.YMin + (extent.YMax - extent.YMin) * float(hint.get("cy", 0.5))
+    x0 = max(extent.XMin + 2.0, min(extent.XMax - width - 2.0, cx - width / 2))
+    y0 = max(extent.YMin + 2.0, min(extent.YMax - height - 2.0, cy - height / 2))
+    arr = arcpy.Array([
+        arcpy.Point(x0, y0),
+        arcpy.Point(x0 + width, y0),
+        arcpy.Point(x0 + width, y0 + height),
+        arcpy.Point(x0, y0 + height),
+        arcpy.Point(x0, y0),
+    ])
+    return arcpy.Polygon(arr, geom.spatialReference)
+
+
+def _template_for_archetype(archetype_id):
+    """Return a docket template that spawns the requested archetype."""
+
+    for template in rules.TEMPLATES.values():
+        if template.spawn_archetype_id == archetype_id:
+            return template.template_id
+    raise KeyError(archetype_id)
+
+
+def _feature_count(path):
+    """Return the row count for an ArcGIS feature class."""
+
+    return int(arcpy.management.GetCount(path)[0])
 
 
 def inset_polygon(geom):

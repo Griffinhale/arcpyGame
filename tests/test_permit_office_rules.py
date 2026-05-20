@@ -913,6 +913,56 @@ def test_audit_findings_include_money_features_services_and_violations():
     assert any(finding.source == "inspection" for finding in audit.findings)
 
 
+def test_seeded_city_detail_descriptors_are_deterministic_and_moderate():
+    """Verify New Game city texture can be planned without ArcPy."""
+    profiles = {profile.cell_id: profile for profile in rules.generate_district_profiles(seed=2026)}
+
+    first = rules.generate_city_detail_features(profiles, seed=2026)
+    second = rules.generate_city_detail_features(profiles, seed=2026)
+
+    assert first == second
+    assert len(first) >= 70
+    assert {feature.geometry_type for feature in first} == {"POINT", "LINE", "POLYGON"}
+    assert {feature.status for feature in first} == {"active", "context"}
+    assert sum(1 for feature in first if feature.status == "active") <= 5
+    assert {"arterial_road", "utility_backbone", "neighborhood_park"} <= {feature.archetype_id for feature in first}
+    assert {"residential_block", "commercial_block", "civic_building", "industrial_yard", "academic_block", "natural_patch"} <= {feature.archetype_id for feature in first}
+    assert any(feature.capacity > 0 and feature.metadata.get("occupancy") for feature in first if feature.status == "context")
+
+
+def test_context_city_detail_does_not_participate_in_lifecycle_or_followups():
+    """Verify visual-only context rows stay inert even when read as features."""
+    profile = rules.DistrictProfile("D0000", "Context Row", 1800, 45, 20, 30, 25, 45, "residential", population_mix={"families": 3})
+    rules.normalize_profile(profile)
+    context = rules.FeatureInstance(
+        "CITY-context",
+        "residential_block",
+        status="context",
+        display_state="housing",
+        condition=5,
+        target_cell_ids=["D0000"],
+        capacity=900,
+        metadata={"occupancy": 900},
+    )
+    active = rules.FeatureInstance(
+        "CITY-active",
+        "arterial_road",
+        status="active",
+        display_state="road",
+        condition=100,
+        target_cell_ids=["D0000"],
+    )
+    state = rules.CityState(turn=1)
+
+    result = rules.advance_turn_result(state, [], {profile.cell_id: profile}, [context, active])
+    docket = rules.generate_docket(state.turn, active_features=[context], count=1)
+
+    assert context.status == "context"
+    assert context.display_state == "housing"
+    assert context.feature_id not in result.feature_updates
+    assert all(item.template_id != rules.MAINTENANCE_TEMPLATE_ID for item in docket)
+
+
 def test_arcpy_toolbox_schema_declares_governance_fields_without_new_feature_classes():
     """Verify governance fields are declared without adding new map feature classes."""
     toolbox_dir = Path(__file__).parents[1] / "toolbox"

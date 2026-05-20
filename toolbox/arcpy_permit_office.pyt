@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import os
 import sys
+import importlib
 
 import arcpy
 
@@ -17,8 +18,21 @@ _HERE = os.path.dirname(__file__)
 if _HERE not in sys.path:
     sys.path.insert(0, _HERE)
 
+for _module_name in (
+    "permit_office_arcgis.rules_loader",
+    "permit_office_arcgis.schema",
+    "permit_office_arcgis.messages",
+    "permit_office_arcgis.store",
+    "permit_office_arcgis.geometry",
+    "permit_office_arcgis.desk_view",
+    "permit_office_arcgis.dashboard",
+):
+    _module = sys.modules.get(_module_name)
+    if _module is not None:
+        importlib.reload(_module)
+
 from permit_office_arcgis.dashboard import DashboardController
-from permit_office_arcgis.geometry import add_outputs_to_map, refresh_all
+from permit_office_arcgis.geometry import add_outputs_to_map, refresh_all, seed_city_features
 from permit_office_arcgis.messages import _err, _log
 from permit_office_arcgis.rules_loader import rules
 from permit_office_arcgis.schema import (
@@ -69,15 +83,45 @@ class PermitOfficePrototype(object):
     def getParameterInfo(self):
         """Declare ArcGIS tool parameters and their value-list constraints."""
 
-        p_workspace = arcpy.Parameter("Game Workspace (optional)", "game_workspace", "DEWorkspace", "Optional", "Input")
-        p_districts = arcpy.Parameter("District Layer", "district_layer", "GPFeatureLayer", "Optional", "Input")
-        p_action = arcpy.Parameter("Action", "action", "GPString", "Required", "Input")
+        p_workspace = arcpy.Parameter(
+            displayName="Game Workspace (optional)",
+            name="game_workspace",
+            datatype="DEWorkspace",
+            parameterType="Optional",
+            direction="Input",
+        )
+        p_districts = arcpy.Parameter(
+            displayName="District Layer",
+            name="district_layer",
+            datatype="GPFeatureLayer",
+            parameterType="Optional",
+            direction="Input",
+        )
+        p_action = arcpy.Parameter(
+            displayName="Action",
+            name="action",
+            datatype="GPString",
+            parameterType="Required",
+            direction="Input",
+        )
         p_action.filter.type = "ValueList"
         p_action.filter.list = list(ACTIONS)
         p_action.value = "Ping Environment"
-        p_seed = arcpy.Parameter("Random Seed", "random_seed", "GPLong", "Optional", "Input")
+        p_seed = arcpy.Parameter(
+            displayName="Random Seed",
+            name="random_seed",
+            datatype="GPLong",
+            parameterType="Optional",
+            direction="Input",
+        )
         p_seed.value = 2026
-        p_output = arcpy.Parameter("Output District Layer", "output_district_layer", "GPFeatureLayer", "Derived", "Output")
+        p_output = arcpy.Parameter(
+            displayName="Output District Layer",
+            name="output_district_layer",
+            datatype="GPFeatureLayer",
+            parameterType="Derived",
+            direction="Output",
+        )
         return [p_workspace, p_districts, p_action, p_seed, p_output]
 
     def updateParameters(self, parameters):
@@ -103,6 +147,7 @@ class PermitOfficePrototype(object):
         if action == "New Game":
             clear_game_rows(paths)
             create_district_board(paths, seed, messages)
+            seed_city_features(paths, seed, messages)
             write_state(paths, rules.CityState())
             generate_docket_rows(paths, seed, messages)
             add_outputs_to_map(paths, messages)
