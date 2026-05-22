@@ -12,6 +12,7 @@ from .messages import _log, _warn
 from .rules_loader import rules
 from .schema import DISTRICTS, LINES, POINTS, SUPPORT_FIELDS, ZONES
 from .store import decode_json, encode_json, read_districts, write_docket_item
+from .symbology_config import LAYER_TRANSPARENCY, RENDER_FIELD_BY_LAYER_KEY, SYMBOLS_BY_FIELD
 
 
 def _summary_map(value):
@@ -720,20 +721,49 @@ def add_outputs_to_map(paths, messages):
                 lyr.name = name
                 existing[name] = lyr
                 _log(messages, "MAP", f"added {name}")
+            _tune_layer_visibility(existing[name], key)
+            _configure_labels(existing[name], key)
             apply_simple_symbology(existing[name], key, messages)
+        _order_output_layers(active_map, existing)
     except Exception as exc:
         _warn(messages, "MAP", f"add outputs failed: {exc}")
 
 
+def remove_outputs_from_map(messages):
+    """Remove stale Permit Office layers before rebuilding map presentation."""
+    try:
+        aprx = arcpy.mp.ArcGISProject("CURRENT")
+        active_map = aprx.activeMap
+        if active_map is None:
+            return
+        output_names = {DISTRICTS, POINTS, LINES, ZONES}
+        removed = 0
+        for layer in list(active_map.listLayers()):
+            if getattr(layer, "name", None) in output_names:
+                active_map.removeLayer(layer)
+                removed += 1
+        if removed:
+            _log(messages, "MAP", f"removed {removed} stale Permit Office layer(s)")
+    except Exception as exc:
+        _warn(messages, "MAP", f"remove stale outputs failed: {exc}")
+
+
 def apply_simple_symbology(layer, key, messages):
-    """Apply display-state unique-value symbology when the layer supports it."""
+    """Apply unique-value symbology when the layer supports it."""
 
     try:
         if not layer.supports("SYMBOLOGY"):
             return
+        field_name = RENDER_FIELD_BY_LAYER_KEY.get(key, "display_state")
         sym = layer.symbology
         sym.updateRenderer("UniqueValueRenderer")
-        field_set, last_error = _set_unique_value_renderer_field(sym.renderer, "display_state")
+        field_set_via_cim = False
+        field_set, last_error = _set_unique_value_renderer_field(sym.renderer, field_name)
+        if not field_set:
+            direct_error = last_error
+            field_set, cim_error = _set_unique_value_renderer_field_with_cim(layer, sym, field_name)
+            field_set_via_cim = field_set
+            last_error = cim_error if field_set else direct_error or cim_error
         if not field_set:
             _warn(
                 messages,
@@ -747,7 +777,12 @@ def apply_simple_symbology(layer, key, messages):
             sym.renderer.useDefaultSymbol = True
         except Exception:
             pass
-        layer.symbology = sym
+        if not field_set_via_cim:
+            _configure_unique_value_renderer(sym.renderer, field_name)
+            layer.symbology = sym
+        else:
+            _try_configure_layer_unique_value_items(layer, field_name)
+        _log(messages, "SYM", f"set {field_name} unique-value symbology on {getattr(layer, 'name', key)}")
     except Exception as exc:
         _warn(messages, "SYM", f"symbology setup skipped for {getattr(layer, 'name', key)}: {exc}")
 
@@ -778,3 +813,186 @@ def _renderer_has_attr(renderer, attr):
     except Exception:
         return False
     return True
+
+
+def _set_unique_value_renderer_field_with_cim(layer, sym, field_name):
+    """Fallback through CIM when arcpy.mp renderer properties are unavailable."""
+    last_error = None
+    if not hasattr(layer, "getDefinition") or not hasattr(layer, "setDefinition"):
+        return False, "CIM definition API unavailable"
+    try:
+        layer.symbology = sym
+    except Exception as exc:
+        last_error = exc
+    for cim_version in ("V3", "V2"):
+        try:
+            definition = layer.getDefinition(cim_version)
+            renderer = getattr(definition, "renderer", None)
+            if renderer is None:
+                last_error = "CIM renderer unavailable"
+                continue
+            _set_cim_attr(renderer, ("fields", "Fields"), [field_name])
+            _try_set_cim_attr(renderer, ("useDefaultSymbol", "UseDefaultSymbol"), True)
+            _try_set_cim_attr(renderer, ("isDefaultSymbolVisible", "IsDefaultSymbolVisible"), True)
+            layer.setDefinition(definition)
+            return True, None
+        except Exception as exc:
+            last_error = exc
+    return False, last_error or "CIM renderer field setter unavailable"
+
+
+def _set_cim_attr(target, names, value):
+    """Set the first matching CIM attribute, or the first name as a fallback."""
+
+    for name in names:
+        try:
+            getattr(target, name)
+            setattr(target, name, value)
+            return
+        except AttributeError:
+            continue
+    setattr(target, names[0], value)
+
+
+def _try_set_cim_attr(target, names, value):
+    try:
+        _set_cim_attr(target, names, value)
+    except Exception:
+        pass
+
+
+def _try_configure_layer_unique_value_items(layer, field_name):
+    try:
+        sym = layer.symbology
+        if not _renderer_uses_field(sym.renderer, field_name):
+            return
+        _configure_unique_value_renderer(sym.renderer, field_name)
+        layer.symbology = sym
+    except Exception:
+        pass
+
+
+def _configure_unique_value_renderer(renderer, field_name):
+    """Seed and style known unique-value classes when ArcGIS exposes item APIs."""
+    try:
+        renderer.useDefaultSymbol = True
+    except Exception:
+        pass
+    _add_unique_values(renderer, field_name)
+    _style_unique_value_items(renderer, field_name)
+
+
+def _add_unique_values(renderer, field_name):
+    if not hasattr(renderer, "addValues"):
+        return
+    heading = field_name
+    try:
+        groups = getattr(renderer, "groups", None)
+        if groups:
+            heading = groups[0].heading or heading
+    except Exception:
+        pass
+    try:
+        renderer.addValues({heading: list(SYMBOLS_BY_FIELD.get(field_name, {}))})
+    except Exception:
+        pass
+
+
+def _style_unique_value_items(renderer, field_name):
+    symbol_map = SYMBOLS_BY_FIELD.get(field_name, {})
+    try:
+        groups = renderer.groups
+    except Exception:
+        return
+    for group in groups or []:
+        for item in getattr(group, "items", []) or []:
+            value = _unique_value_item_value(item)
+            if value not in symbol_map:
+                continue
+            color, label = symbol_map[value]
+            try:
+                item.label = label
+            except Exception:
+                pass
+            try:
+                item.symbol.color = {"RGB": color}
+            except Exception:
+                pass
+            _style_symbol_outline(item.symbol)
+
+
+def _unique_value_item_value(item):
+    try:
+        values = item.values
+        if values and values[0]:
+            return str(values[0][0])
+    except Exception:
+        pass
+    return ""
+
+
+def _renderer_uses_field(renderer, field_name):
+    try:
+        fields = renderer.fields
+        return field_name in list(fields or [])
+    except Exception:
+        pass
+    try:
+        return renderer.field == field_name
+    except Exception:
+        return False
+
+
+def _style_symbol_outline(symbol):
+    try:
+        symbol.outlineColor = {"RGB": [86, 98, 92, 100]}
+    except Exception:
+        pass
+    try:
+        symbol.outlineWidth = 1.2
+    except Exception:
+        pass
+
+
+def _tune_layer_visibility(layer, key):
+    try:
+        layer.transparency = LAYER_TRANSPARENCY[key]
+    except Exception:
+        pass
+
+
+def _configure_labels(layer, key):
+    if key != "districts":
+        return
+    try:
+        layer.showLabels = True
+    except Exception:
+        pass
+    try:
+        label_classes = layer.listLabelClasses()
+    except Exception:
+        return
+    for label_class in label_classes or []:
+        try:
+            label_class.expression = "$feature.cell_id"
+        except Exception:
+            pass
+        try:
+            label_class.visible = True
+        except Exception:
+            pass
+
+
+def _order_output_layers(active_map, existing):
+    """Keep support geometry from hiding the playable district board."""
+
+    ordered_names = [ZONES, DISTRICTS, LINES, POINTS]
+    layers = {name: existing.get(name) for name in ordered_names}
+    if not all(layers.values()):
+        return
+    try:
+        active_map.moveLayer(layers[ZONES], layers[DISTRICTS], "BEFORE")
+        active_map.moveLayer(layers[DISTRICTS], layers[LINES], "BEFORE")
+        active_map.moveLayer(layers[LINES], layers[POINTS], "BEFORE")
+    except Exception:
+        pass
