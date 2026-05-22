@@ -274,7 +274,9 @@ class DashboardController:
                 return
             if result.feature_updates:
                 write_active_features(self.paths, active_features)
-            activate_proposal(self.paths, item, result.report)
+            activated = activate_proposal(self.paths, item, result.report)
+            if not activated:
+                _warn(self.messages, "DASH", f"approved {item.item_id} but no proposed map feature was activated")
             self._finish_decision(command_id, item, state, districts, projects, result)
         except Exception as exc:
             if command_id:
@@ -349,6 +351,7 @@ class DashboardController:
                 write_docket_item(self.paths, item)
             generate_docket_rows(self.paths, self.seed, self.messages)
             command_finish(self.paths, command_id, "applied", report)
+            add_outputs_to_map(self.paths, self.messages)
             refresh_all(self.paths, self.messages)
             self.status_var.set(report)
         except Exception as exc:

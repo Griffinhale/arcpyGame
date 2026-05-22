@@ -158,6 +158,7 @@ class PermitOfficePrototype(object):
             return
         if action == "Generate Docket":
             generate_docket_rows(paths, seed, messages)
+            add_outputs_to_map(paths, messages)
             refresh_all(paths, messages)
             return
         if action == "Show Scorecard":
