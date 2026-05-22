@@ -792,7 +792,7 @@ def _action_note(template) -> str:
 def _draw_receipt_canvas(c, width, height, title, report, affected, state):
     """Draw the filed-report receipt in a modal canvas."""
 
-    report_lines = _fit_lines(report, 82, 16)
+    report_lines = _fit_lines(report, 58, 6)
     affected_text = ", ".join(affected) if affected else "(none)"
     c.create_rectangle(0, 0, width, height, fill=Palette.DESK, outline="")
     _shadow_rect(c, 50, 30, width - 44, height - 28)
@@ -802,13 +802,13 @@ def _draw_receipt_canvas(c, width, height, title, report, affected, state):
     c.create_text(72, 108, text=_clip(title, 76), anchor="nw", fill=Palette.INK, font=("Segoe UI", 13, "bold"))
     c.create_line(72, 137, width - 82, 137, fill="#c4b798", dash=(4, 4))
     c.create_text(72, 154, text="\n".join(report_lines), anchor="nw", width=width - 150, fill=Palette.INK, font=("Segoe UI", 10))
-    affected_y = 168 + len(report_lines) * 22
-    c.create_text(72, affected_y, text=f"Affected districts: {_clip(affected_text, 100)}", anchor="nw", fill=Palette.BLUE, font=("Segoe UI", 9, "bold"))
+    affected_y = 170 + len(report_lines) * 18
+    c.create_text(72, affected_y, text=f"Affected districts: {_clip(affected_text, 84)}", anchor="nw", width=width - 160, fill=Palette.BLUE, font=("Segoe UI", 9, "bold"))
     metrics = (
         f"AP {state.ap}/{state.max_ap} | ${state.money} | Prosperity {state.prosperity} | "
         f"Unrest {state.unrest} | Culture {state.culture} | Risk {state.risk} | Heat {rules.heat_summary(state)}"
     )
-    c.create_text(72, affected_y + 38, text=_clip(metrics, 140), anchor="nw", width=width - 160, fill=Palette.MUTED, font=("Segoe UI", 9))
+    c.create_text(72, affected_y + 46, text=_clip(metrics, 120), anchor="nw", width=width - 160, fill=Palette.MUTED, font=("Segoe UI", 9))
     c.create_line(72, height - 78, width - 190, height - 78, fill="#c4b798")
     c.create_text(72, height - 62, text="Clerk initials", anchor="nw", fill=Palette.MUTED, font=("Segoe UI", 7, "bold"))
 
