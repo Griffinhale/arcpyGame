@@ -128,13 +128,12 @@ def test_successful_decision_reapplies_map_presentation_before_refresh(monkeypat
     monkeypatch.setattr(dashboard, "write_docket_item", lambda *args, **kwargs: order.append("docket"))
     monkeypatch.setattr(dashboard, "action_log", lambda *args, **kwargs: order.append("log"))
     monkeypatch.setattr(dashboard, "command_finish", lambda *args, **kwargs: order.append("command"))
-    monkeypatch.setattr(dashboard, "clear_output_selections", lambda *args, **kwargs: order.append("clear"))
-    monkeypatch.setattr(dashboard, "add_outputs_to_map", lambda *args, **kwargs: order.append("map"))
-    monkeypatch.setattr(dashboard, "refresh_all", lambda *args, **kwargs: order.append("refresh"))
+    monkeypatch.setattr(dashboard, "rebuild_output_layers", lambda *args, **kwargs: order.extend(["clear", "remove", "map", "refresh"]))
     monkeypatch.setattr(dashboard, "open_effect_report", lambda *args, **kwargs: order.append("receipt"))
 
     result = rules.DecisionResult(True, "approve", item.item_id, "approved", affected_cell_ids=["D0000"])
 
     controller._finish_decision("CMD-1", item, state, districts, {}, result)
 
-    assert order[-4:] == ["clear", "map", "refresh", "receipt"]
+    assert controller.district_layer == dashboard.DISTRICTS
+    assert order[-5:] == ["clear", "remove", "map", "refresh", "receipt"]

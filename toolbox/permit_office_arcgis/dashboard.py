@@ -16,6 +16,7 @@ from .geometry import (
     mark_proposals,
     proposal_spillover,
     refresh_all,
+    remove_outputs_from_map,
     select_case_context,
     selected_cell_ids,
 )
@@ -327,9 +328,8 @@ class DashboardController:
         write_docket_item(self.paths, item)
         action_log(self.paths, state, result)
         command_finish(self.paths, command_id, result.command_status, result.report)
-        clear_output_selections(self.paths)
-        add_outputs_to_map(self.paths, self.messages)
-        refresh_all(self.paths, self.messages)
+        rebuild_output_layers(self.paths, self.messages)
+        self.district_layer = DISTRICTS
         self.status_var.set(result.report)
         open_effect_report(item.title, result.report, result.affected_cell_ids, state)
 
@@ -355,8 +355,8 @@ class DashboardController:
                 write_docket_item(self.paths, item)
             generate_docket_rows(self.paths, self.seed, self.messages)
             command_finish(self.paths, command_id, "applied", report)
-            add_outputs_to_map(self.paths, self.messages)
-            refresh_all(self.paths, self.messages)
+            rebuild_output_layers(self.paths, self.messages)
+            self.district_layer = DISTRICTS
             self.status_var.set(report)
         except Exception as exc:
             command_finish(self.paths, command_id, "error", error=str(exc))
@@ -375,3 +375,12 @@ def clear_output_selections(paths):
                 arcpy.management.SelectLayerByAttribute(paths[key], "CLEAR_SELECTION")
             except Exception:
                 pass
+
+
+def rebuild_output_layers(paths, messages):
+    """Recreate map layers after GDB edits to avoid stale ArcGIS draw state."""
+
+    clear_output_selections(paths)
+    remove_outputs_from_map(messages)
+    add_outputs_to_map(paths, messages)
+    refresh_all(paths, messages)
