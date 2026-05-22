@@ -128,6 +128,7 @@ def test_successful_decision_reapplies_map_presentation_before_refresh(monkeypat
     monkeypatch.setattr(dashboard, "write_docket_item", lambda *args, **kwargs: order.append("docket"))
     monkeypatch.setattr(dashboard, "action_log", lambda *args, **kwargs: order.append("log"))
     monkeypatch.setattr(dashboard, "command_finish", lambda *args, **kwargs: order.append("command"))
+    monkeypatch.setattr(dashboard, "clear_output_selections", lambda *args, **kwargs: order.append("clear"))
     monkeypatch.setattr(dashboard, "add_outputs_to_map", lambda *args, **kwargs: order.append("map"))
     monkeypatch.setattr(dashboard, "refresh_all", lambda *args, **kwargs: order.append("refresh"))
     monkeypatch.setattr(dashboard, "open_effect_report", lambda *args, **kwargs: order.append("receipt"))
@@ -136,4 +137,4 @@ def test_successful_decision_reapplies_map_presentation_before_refresh(monkeypat
 
     controller._finish_decision("CMD-1", item, state, districts, {}, result)
 
-    assert order[-3:] == ["map", "refresh", "receipt"]
+    assert order[-4:] == ["clear", "map", "refresh", "receipt"]

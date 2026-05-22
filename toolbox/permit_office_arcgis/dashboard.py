@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import traceback
 
+import arcpy
+
 from .geometry import (
     add_outputs_to_map,
     activate_proposal,
@@ -19,6 +21,7 @@ from .geometry import (
 )
 from .messages import _warn
 from .rules_loader import rules
+from .schema import DISTRICTS, LINES, POINTS, ZONES
 from .store import (
     action_log,
     command_finish,
@@ -324,6 +327,7 @@ class DashboardController:
         write_docket_item(self.paths, item)
         action_log(self.paths, state, result)
         command_finish(self.paths, command_id, result.command_status, result.report)
+        clear_output_selections(self.paths)
         add_outputs_to_map(self.paths, self.messages)
         refresh_all(self.paths, self.messages)
         self.status_var.set(result.report)
@@ -358,3 +362,16 @@ class DashboardController:
             command_finish(self.paths, command_id, "error", error=str(exc))
             self.status_var.set(f"Advance failed: {exc}")
         self.reload()
+
+
+def clear_output_selections(paths):
+    """Clear lingering dashboard selections from output layers and feature classes."""
+
+    for name, key in ((DISTRICTS, "districts"), (POINTS, "points"), (LINES, "lines"), (ZONES, "zones")):
+        try:
+            arcpy.management.SelectLayerByAttribute(name, "CLEAR_SELECTION")
+        except Exception:
+            try:
+                arcpy.management.SelectLayerByAttribute(paths[key], "CLEAR_SELECTION")
+            except Exception:
+                pass
