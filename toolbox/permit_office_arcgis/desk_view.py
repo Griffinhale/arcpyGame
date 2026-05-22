@@ -391,12 +391,12 @@ class PermitDeskView:
         y = y0 + 116
         # Header fields stay compact; impact buckets carry the decision math so
         # the case packet does not become a wall of permit prose.
-        for field in case.fields[:4]:
+        for field in case.fields[:3]:
             c.create_text(content_x, y, text=field.label.upper(), anchor="nw", fill=Palette.BLUE, font=self._font(6, "bold"))
             c.create_text(content_x + 108, y, text=_clip(field.value, 56), anchor="nw", fill=Palette.INK, font=self._font(8), width=content_w - 108)
             y += 23
 
-        y += 6
+        y += 4
         paper_bottom = y1 - 42
         _draw_ruled_block(c, content_x, y, content_x + content_w, y + 44, "SELECTED DISTRICTS", case.districts, Palette.BLUE, self._font)
         y += 56
@@ -540,10 +540,10 @@ def _case_summary(state, districts, item) -> CaseSummary:
         preview = f"{preview} {population_hint}"
     cost = f"{template.ap_cost} AP / ${template.money_cost}; conditions +${template.mitigation_cost}"
     fields = (
-        CaseField("Contact", template.contact_name or "not assigned"),
         CaseField("Applicant", f"{_display(stakeholder)}; heat {heat}"),
         CaseField("Category", f"{_display(template.category)} / {item.geometry_type}"),
         CaseField("Feature", f"{archetype.label} ({_display(archetype.family)})"),
+        CaseField("Contact", template.contact_name or "not assigned"),
         CaseField("Service", _display(archetype.service_type or "none")),
         CaseField("Cost", cost),
         CaseField("Target Rule", target_rule or "No targeting rule filed."),
@@ -575,38 +575,84 @@ def _impact_buckets(state, districts, item, template) -> tuple[ImpactBucket, ...
     inspection = (item.case_json or {}).get("inspection") if isinstance(item.case_json, dict) else None
     total_money = template.money_cost + template.mitigation_cost
     cost_tone = "bad" if state.ap < template.ap_cost or state.money < template.money_cost else "watch" if state.money < total_money else "neutral"
-    cost = f"{template.ap_cost} AP / ${template.money_cost}; conditions +${template.mitigation_cost}"
-    city = _city_bucket_value(template)
+    cost = _cost_bucket_value(template)
+    city = _city_forecast_bucket(template, targets, mitigated=False)
     city_tone = _delta_tone(template.base_effects | template.spillover_effects)
     target = _target_bucket_value(item, targets)
     target_tone = "neutral" if targets else "watch"
+    recurring = _recurring_bucket_value(template)
+    recurring_tone = _recurring_tone(template)
 
     if inspection:
-        people, people_tone = _inspected_people_bucket(template, targets)
-        follow_up, follow_tone = _inspection_followup_bucket(inspection, item)
+        risk, risk_tone = _inspection_followup_bucket(inspection, item)
     else:
-        people = _qualitative_people_bucket(template)
-        people_tone = "neutral"
-        follow_up = _qualitative_followup_bucket(template)
-        follow_tone = "watch" if template.failure_mode else "neutral"
+        risk = _qualitative_followup_bucket(template)
+        risk_tone = "watch" if template.failure_mode else "neutral"
 
     return (
         ImpactBucket("Cost", cost, cost_tone),
-        ImpactBucket("City", city, city_tone),
-        ImpactBucket("Target", target, target_tone),
-        ImpactBucket("People", people, people_tone),
-        ImpactBucket("Follow-up", follow_up, follow_tone),
+        ImpactBucket("City Effect", city, city_tone),
+        ImpactBucket("Budget", recurring, recurring_tone),
+        ImpactBucket("Risk", risk, risk_tone),
     )
 
 
-def _city_bucket_value(template) -> str:
-    """Format city and spillover effects as one compact bucket value."""
+def _cost_bucket_value(template) -> str:
+    """Format direct decision costs for all stamp choices."""
 
-    base = _format_effects(template.base_effects)
-    spill = _format_effects(template.spillover_effects)
-    if spill and spill != "none":
-        return f"target {base}; spill {spill}"
-    return f"target {base}"
+    return f"Issue {template.ap_cost}AP/${template.money_cost}; conditions +${template.mitigation_cost}; deny 1AP"
+
+
+def _city_forecast_bucket(template, targets, mitigated: bool) -> str:
+    """Forecast likely immediate metric effects before a decision is filed."""
+
+    if not targets:
+        base = rules._mitigate(template.base_effects) if mitigated else template.base_effects
+        spill = rules._mitigate(template.spillover_effects) if mitigated else template.spillover_effects
+        base_text = _format_effects(base)
+        spill_text = _format_effects(spill)
+        if spill_text != "none":
+            return f"target {base_text}; spill {spill_text}"
+        return f"target {base_text}"
+
+    archetype = rules.feature_archetype_for_template(template)
+    total = {metric: 0 for metric in rules.CORE_METRICS}
+    for profile in targets:
+        delta = rules._district_adjusted_effects(template.base_effects, profile.district_type, template.category)
+        delta = rules._land_use_adjusted_effects(delta, profile, archetype)
+        rules._merge_delta(delta, rules._service_coverage_effect(archetype, profile, "target"))
+        if mitigated:
+            delta = rules._mitigate(delta)
+        for metric in rules.CORE_METRICS:
+            total[metric] = total.get(metric, 0) + delta.get(metric, 0)
+    averaged = {metric: round(value / max(1, len(targets))) for metric, value in total.items()}
+    return _format_effects(averaged)
+
+
+def _recurring_bucket_value(template) -> str:
+    """Format recurring feature revenue and upkeep forecast."""
+
+    archetype = rules.feature_archetype_for_template(template)
+    operating = rules.operating_rule_for_feature(archetype.archetype_id)
+    revenue = operating.revenue_per_turn
+    upkeep = operating.upkeep_per_turn
+    net = revenue - upkeep
+    if revenue or upkeep:
+        return f"rev ${revenue}/turn, upkeep ${upkeep}/turn, net ${net:+d}"
+    return "no recurring budget"
+
+
+def _recurring_tone(template) -> str:
+    """Return dashboard tone for recurring budget forecast."""
+
+    archetype = rules.feature_archetype_for_template(template)
+    operating = rules.operating_rule_for_feature(archetype.archetype_id)
+    net = operating.revenue_per_turn - operating.upkeep_per_turn
+    if net > 0:
+        return "good"
+    if net < 0:
+        return "watch"
+    return "neutral"
 
 
 def _target_bucket_value(item, targets) -> str:
@@ -664,7 +710,8 @@ def _inspection_followup_bucket(inspection, item) -> tuple[str, str]:
     evidence = inspection.get("evidence") or []
     violations = inspection.get("violations") or []
     risk = str(inspection.get("risk_band") or item.risk_band or "unknown").lower()
-    value = f"{risk} risk; {len(evidence)} evidence; {len(violations)} violation(s)"
+    warnings = sum(1 for record in evidence if isinstance(record, dict) and record.get("severity") in ("warning", "critical"))
+    value = f"{risk} risk; {warnings}/{len(evidence)} flagged evidence; {len(violations)} violation(s)"
     return value, _risk_tone(risk)
 
 
@@ -792,8 +839,9 @@ def _action_note(template) -> str:
 def _draw_receipt_canvas(c, width, height, title, report, affected, state):
     """Draw the filed-report receipt in a modal canvas."""
 
-    report_lines = _fit_lines(report, 58, 6)
+    report_lines = _fit_lines(report, 74, 8)
     affected_text = ", ".join(affected) if affected else "(none)"
+    affected_lines = _fit_lines(f"Affected districts: {affected_text}", 82, 3)
     c.create_rectangle(0, 0, width, height, fill=Palette.DESK, outline="")
     _shadow_rect(c, 50, 30, width - 44, height - 28)
     c.create_rectangle(42, 22, width - 52, height - 38, fill=Palette.PAPER, outline="#9b8f76", width=2)
@@ -802,13 +850,14 @@ def _draw_receipt_canvas(c, width, height, title, report, affected, state):
     c.create_text(72, 108, text=_clip(title, 76), anchor="nw", fill=Palette.INK, font=("Segoe UI", 13, "bold"))
     c.create_line(72, 137, width - 82, 137, fill="#c4b798", dash=(4, 4))
     c.create_text(72, 154, text="\n".join(report_lines), anchor="nw", width=width - 150, fill=Palette.INK, font=("Segoe UI", 10))
-    affected_y = 170 + len(report_lines) * 18
-    c.create_text(72, affected_y, text=f"Affected districts: {_clip(affected_text, 84)}", anchor="nw", width=width - 160, fill=Palette.BLUE, font=("Segoe UI", 9, "bold"))
+    affected_y = 166 + len(report_lines) * 18
+    c.create_text(72, affected_y, text="\n".join(affected_lines), anchor="nw", width=width - 160, fill=Palette.BLUE, font=("Segoe UI", 9, "bold"))
     metrics = (
         f"AP {state.ap}/{state.max_ap} | ${state.money} | Prosperity {state.prosperity} | "
         f"Unrest {state.unrest} | Culture {state.culture} | Risk {state.risk} | Heat {rules.heat_summary(state)}"
     )
-    c.create_text(72, affected_y + 46, text=_clip(metrics, 120), anchor="nw", width=width - 160, fill=Palette.MUTED, font=("Segoe UI", 9))
+    metrics_y = affected_y + 22 + len(affected_lines) * 16
+    c.create_text(72, metrics_y, text=_clip(metrics, 120), anchor="nw", width=width - 160, fill=Palette.MUTED, font=("Segoe UI", 9))
     c.create_line(72, height - 78, width - 190, height - 78, fill="#c4b798")
     c.create_text(72, height - 62, text="Clerk initials", anchor="nw", fill=Palette.MUTED, font=("Segoe UI", 7, "bold"))
 
@@ -830,7 +879,7 @@ def _draw_impact_buckets(c, x, y, width, buckets, font_factory):
     if not buckets:
         return 0
     gap = 8
-    bucket_h = 38
+    bucket_h = 46
     col_w = max(118, (width - gap) // 2)
     for idx, bucket in enumerate(buckets):
         col = idx % 2
@@ -843,7 +892,7 @@ def _draw_impact_buckets(c, x, y, width, buckets, font_factory):
         c.create_rectangle(bx0, by0, bx1, by1, fill="#f6edd6", outline="#d4c7aa")
         c.create_rectangle(bx0, by0, bx0 + 5, by1, fill=tone, outline="")
         c.create_text(bx0 + 11, by0 + 5, text=bucket.label.upper(), anchor="nw", fill=Palette.MUTED, font=font_factory(6, "bold"))
-        c.create_text(bx0 + 11, by0 + 18, text=_clip(bucket.value, max(18, (bx1 - bx0 - 22) // 6)), anchor="nw", fill=Palette.INK, font=font_factory(8, "bold"), width=bx1 - bx0 - 18)
+        c.create_text(bx0 + 11, by0 + 18, text=_clip(bucket.value, max(24, (bx1 - bx0 - 22) // 6)), anchor="nw", fill=Palette.INK, font=font_factory(8, "bold"), width=bx1 - bx0 - 18)
     rows = (len(buckets) + 1) // 2
     return rows * bucket_h + max(0, rows - 1) * 7
 

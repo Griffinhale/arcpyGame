@@ -25,7 +25,7 @@ def test_generate_district_profiles_is_deterministic_and_named():
 
 def test_demo_template_catalog_has_case_file_metadata():
     """Verify demo templates include the metadata needed for case files."""
-    assert len(rules.DEMO_TEMPLATE_IDS) == 10
+    assert len(rules.DEMO_TEMPLATE_IDS) == 12
     assert set(rules.DEMO_TEMPLATE_IDS) < set(rules.TEMPLATES)
     for template_id in rules.DEMO_TEMPLATE_IDS:
         template = rules.TEMPLATES[template_id]
@@ -68,11 +68,11 @@ def test_six_turn_demo_sequence_covers_shortlist():
     """Verify the deterministic demo schedule covers every shortlist case."""
     expected = {
         1: ["connector_corridor", "procession_route", "street_vendor_compact"],
-        2: ["utility_expansion_trench", "contractor_renovation_waiver", "public_art_museum_grant"],
+        2: ["utility_expansion_trench", "business_license_fee_sweep", "contractor_renovation_waiver"],
         3: ["natural_reserve_conversion", "mixed_use_rezoning", "fire_budget_escalation"],
         4: ["child_development_park_annex", "street_vendor_compact", "utility_expansion_trench"],
-        5: ["connector_corridor", "mixed_use_rezoning", "public_art_museum_grant"],
-        6: ["natural_reserve_conversion", "fire_budget_escalation", "procession_route"],
+        5: ["connector_corridor", "compliance_settlement_drive", "mixed_use_rezoning"],
+        6: ["natural_reserve_conversion", "fire_budget_escalation", "public_art_museum_grant"],
     }
     seen = set()
     for turn in range(1, 7):
@@ -133,11 +133,11 @@ def test_seed_2026_golden_route_produces_stable_conditional_scorecard():
     }
     expected_route_dockets = {
         1: ["connector_corridor", "procession_route", "street_vendor_compact"],
-        2: ["utility_expansion_trench", "contractor_renovation_waiver", "public_art_museum_grant"],
+        2: ["utility_expansion_trench", "business_license_fee_sweep", "contractor_renovation_waiver"],
         3: [rules.MAINTENANCE_TEMPLATE_ID, "natural_reserve_conversion", "mixed_use_rezoning"],
         4: [rules.CIVIC_INCIDENT_TEMPLATE_ID, "child_development_park_annex", "street_vendor_compact"],
-        5: [rules.MAINTENANCE_TEMPLATE_ID, rules.CIVIC_INCIDENT_TEMPLATE_ID, "connector_corridor"],
-        6: [rules.MAINTENANCE_TEMPLATE_ID, rules.CIVIC_INCIDENT_TEMPLATE_ID, rules.CIVIC_INCIDENT_TEMPLATE_ID],
+        5: [rules.MAINTENANCE_TEMPLATE_ID, rules.CIVIC_INCIDENT_TEMPLATE_ID, rules.ENFORCEMENT_TEMPLATE_ID],
+        6: [rules.MAINTENANCE_TEMPLATE_ID, rules.CIVIC_INCIDENT_TEMPLATE_ID, rules.ENFORCEMENT_TEMPLATE_ID],
     }
 
     # Each turn regenerates the visible docket from current state, then applies
@@ -203,9 +203,9 @@ def test_seed_2026_golden_route_produces_stable_conditional_scorecard():
     assert generated_followup_seen is True
     assert {"vendor_market", "connector_corridor", "utility_trench", "protected_reserve"} <= archetypes
     assert grade == "CONDITIONAL"
-    assert state.money == 15
+    assert 20 <= state.money <= 35
     assert (state.prosperity, state.unrest, state.culture, state.risk) == (60, 21, 46, 7)
-    assert "score=56" in report
+    assert "score=68" in report
     assert "4 finding(s), 0 critical" in report
 
 
@@ -219,6 +219,8 @@ def test_inspect_item_marks_item_and_adds_risk_band_hint():
     assert item.inspected is True
     assert item.risk_band in {"low", "medium", "high"}
     assert "Inspection:" in item.preview_text
+    assert "Certain effects if approved:" in item.preview_text
+    assert "Risk/side effects:" in item.preview_text
 
 
 def test_inspect_item_adds_target_population_context_when_available():
@@ -280,6 +282,11 @@ def test_approve_applies_costs_district_deltas_and_city_delta():
     assert state.money == 48
     assert result.affected_cell_ids == ["D0000", "D0001", "D0100"]
     assert "Approved" in result.report
+    assert "Certain effects:" in result.report
+    assert "immediate city delta" in result.report
+    assert "spillover D0001, D0100 gets" in result.report
+    assert "Risk/side effects:" in result.report
+    assert "recurring budget" in result.report
     assert result.city_delta
     assert profiles["D0000"].display_state in rules.DISPLAY_STATES
 
@@ -318,6 +325,53 @@ def test_approval_adjusts_population_pressure_and_local_grievance():
     assert profile.population_mix["families"] == 3
     assert profile.dissatisfaction["families"] == 1
     assert "Population file:" in result.report
+
+
+def test_budget_recovery_approval_creates_positive_recurring_economy():
+    """Verify revenue-oriented cases give the player a visible recovery lever."""
+    profile = rules.DistrictProfile("D0000", "License Row", 1500, 55, 20, 35, 25, 50, "mercantile")
+    rules.normalize_profile(profile)
+    profiles = {profile.cell_id: profile}
+    state = rules.CityState(ap=3, money=60)
+    item = rules.DocketItem(
+        "fee-sweep",
+        "business_license_fee_sweep",
+        rules.TEMPLATES["business_license_fee_sweep"].title,
+        "POINT",
+        1,
+        risk_band="low",
+    )
+
+    result = rules.resolve_decision(state, item, profiles, "approve", ["D0000"], seed=2)
+    feature = _active_feature_from_route_item(item, state.turn)
+    turn = rules.advance_turn_result(state, [], profiles, [feature])
+
+    assert result.ok is True
+    assert item.status == "active"
+    assert "helps the budget later" in result.report
+    assert turn.net > 0
+    assert state.money > 60 - rules.TEMPLATES["business_license_fee_sweep"].money_cost
+
+
+def test_approval_report_calls_out_maintenance_burden():
+    """Verify costly service approvals tell the player about future upkeep."""
+    profile = rules.DistrictProfile("D0000", "Coverage Row", 1200, 45, 20, 30, 45, 35, "civic")
+    rules.normalize_profile(profile)
+    state = rules.CityState(ap=3, money=80)
+    item = rules.DocketItem(
+        "fire-coverage",
+        "fire_budget_escalation",
+        rules.TEMPLATES["fire_budget_escalation"].title,
+        "POLYGON",
+        1,
+        risk_band="low",
+    )
+
+    result = rules.resolve_decision(state, item, {profile.cell_id: profile}, "approve", ["D0000"], seed=4)
+
+    assert result.ok is True
+    assert item.status == "active"
+    assert "creates maintenance burden" in result.report
 
 
 def test_service_archetype_updates_services_and_land_use_overlay():
@@ -429,6 +483,8 @@ def test_deny_costs_ap_and_adds_small_city_friction():
     assert state.prosperity == 49
     assert state.stakeholder_heat["fire_department"] == 3
     assert "Denied" in result.report
+    assert "Certain effects:" in result.report
+    assert "Risk/side effects:" in result.report
 
 
 def test_ignored_items_add_heat_and_heat_generates_enforcement_followup():
@@ -871,6 +927,9 @@ def test_feature_lifecycle_economy_and_maintenance_followup_are_deterministic():
     assert state.last_revenue >= 0
     assert state.last_upkeep > 0
     assert state.money == 30 + state.last_net
+    assert "Economy: start $30, permit spend $0" in result.report
+    assert f"revenue ${state.last_revenue}, upkeep ${state.last_upkeep}" in result.report
+    assert f"end ${state.money}" in result.report
     assert feature.status == "degraded"
     assert feature.feature_id in result.feature_updates
     assert docket[0].template_id == rules.MAINTENANCE_TEMPLATE_ID

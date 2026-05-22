@@ -408,6 +408,32 @@ FEATURE_ARCHETYPES: dict[str, FeatureArchetype] = {
         incident_type="sanitation",
         display_state="incident",
     ),
+    "license_fee_counter": FeatureArchetype(
+        "license_fee_counter",
+        "License Fee Counter",
+        "business",
+        "POINT",
+        coverage_radius_m=70,
+        capacity=1,
+        land_use="commerce",
+        coverage_effects={"prosperity": 1},
+        allowed_district_types=("mercantile", "civic", "industrial"),
+        conflict_district_types=("natural",),
+        display_state="case",
+    ),
+    "settlement_agreement": FeatureArchetype(
+        "settlement_agreement",
+        "Compliance Settlement Agreement",
+        "compliance",
+        "POINT",
+        coverage_radius_m=75,
+        capacity=1,
+        land_use="settlement_case",
+        coverage_effects={"risk": -1, "unrest": -1},
+        allowed_district_types=("mercantile", "industrial", "residential"),
+        incident_type="noncompliance",
+        display_state="case",
+    ),
 }
 
 
@@ -557,7 +583,7 @@ FEATURE_OPERATING_RULES: dict[str, FeatureOperatingRule] = {
     "connector_corridor": FeatureOperatingRule("connector_corridor", revenue_per_turn=1, upkeep_per_turn=3, decay_per_turn=4, maintenance_interval=5, maintenance_cost=9, repair_amount=45, failure_effects={"risk": 4, "unrest": 2}),
     "licensed_procession": FeatureOperatingRule("licensed_procession", revenue_per_turn=2, upkeep_per_turn=1, lifespan_turns=1, decay_per_turn=100, failure_effects={"unrest": 2, "risk": 1}),
     "utility_trench": FeatureOperatingRule("utility_trench", upkeep_per_turn=4, decay_per_turn=5, maintenance_interval=5, maintenance_cost=10, repair_amount=50, failure_effects={"risk": 5, "unrest": 2}),
-    "protected_reserve": FeatureOperatingRule("protected_reserve", upkeep_per_turn=2, decay_per_turn=2, maintenance_interval=6, maintenance_cost=6, repair_amount=40, failure_effects={"risk": 3, "culture": -2}),
+    "protected_reserve": FeatureOperatingRule("protected_reserve", revenue_per_turn=1, upkeep_per_turn=1, decay_per_turn=2, maintenance_interval=6, maintenance_cost=5, repair_amount=40, failure_effects={"risk": 3, "culture": -2}),
     "mixed_use_overlay": FeatureOperatingRule("mixed_use_overlay", revenue_per_turn=5, upkeep_per_turn=1, decay_per_turn=1, maintenance_interval=6, maintenance_cost=7, repair_amount=35, failure_effects={"prosperity": -3, "unrest": 2}),
     "child_service_annex": FeatureOperatingRule("child_service_annex", upkeep_per_turn=4, decay_per_turn=3, maintenance_interval=6, maintenance_cost=8, repair_amount=55, failure_effects={"risk": 4, "unrest": 2, "culture": -2}),
     "vendor_market": FeatureOperatingRule("vendor_market", revenue_per_turn=4, upkeep_per_turn=1, decay_per_turn=5, maintenance_interval=2, maintenance_cost=5, repair_amount=35, failure_effects={"unrest": 3, "risk": 2, "prosperity": -1}),
@@ -574,6 +600,8 @@ FEATURE_OPERATING_RULES: dict[str, FeatureOperatingRule] = {
     "inspection_order": FeatureOperatingRule("inspection_order", upkeep_per_turn=1, lifespan_turns=1, decay_per_turn=100, failure_effects={"risk": 2, "unrest": 1}),
     "occupancy_certificate": FeatureOperatingRule("occupancy_certificate", revenue_per_turn=4, decay_per_turn=1, maintenance_interval=5, maintenance_cost=6, repair_amount=30, failure_effects={"unrest": 2, "risk": 1}),
     "vendor_sanitation_complaint": FeatureOperatingRule("vendor_sanitation_complaint", upkeep_per_turn=1, lifespan_turns=2, decay_per_turn=30, failure_effects={"unrest": 3, "risk": 2}),
+    "license_fee_counter": FeatureOperatingRule("license_fee_counter", revenue_per_turn=2, lifespan_turns=2, decay_per_turn=40, failure_effects={"unrest": 1}),
+    "settlement_agreement": FeatureOperatingRule("settlement_agreement", revenue_per_turn=2, lifespan_turns=2, decay_per_turn=35, failure_effects={"unrest": 2, "risk": 1}),
 }
 
 VIOLATION_CODES = {
@@ -590,6 +618,8 @@ INSPECTION_RULES: dict[str, InspectionRule] = {
     "street_vendor_compact": InspectionRule("street_vendor_compact", ("public_nuisance", "service_gap", "paperwork_gap"), ("public_nuisance",), deadline_turns=1),
     "utility_expansion_trench": InspectionRule("utility_expansion_trench", ("service_gap", "unsafe_work"), ("unsafe_work",), deadline_turns=2),
     "fire_budget_escalation": InspectionRule("fire_budget_escalation", ("service_gap", "paperwork_gap"), ("service_gap",), deadline_turns=2),
+    "business_license_fee_sweep": InspectionRule("business_license_fee_sweep", ("paperwork_gap", "public_nuisance"), ("paperwork_gap",), deadline_turns=1),
+    "compliance_settlement_drive": InspectionRule("compliance_settlement_drive", ("paperwork_gap", "unsafe_work"), ("paperwork_gap",), deadline_turns=1),
     MAINTENANCE_TEMPLATE_ID: InspectionRule(MAINTENANCE_TEMPLATE_ID, ("maintenance_overdue", "service_gap"), ("maintenance_overdue",), deadline_turns=1),
 }
 
