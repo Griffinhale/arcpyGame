@@ -12,7 +12,7 @@ from .messages import _log, _warn
 from .rules_loader import rules
 from .schema import DISTRICTS, LINES, POINTS, SUPPORT_FIELDS, ZONES
 from .store import decode_json, encode_json, read_districts, write_docket_item
-from .symbology_config import LAYER_TRANSPARENCY, RENDER_FIELD_BY_LAYER_KEY, SYMBOLS_BY_FIELD, apply_symbol_style
+from .symbology_config import LAYER_TRANSPARENCY, RENDER_FIELD_BY_LAYER_KEY, SYMBOLS_BY_FIELD, apply_default_symbol_style, apply_symbol_style
 
 
 def _summary_map(value):
@@ -879,6 +879,7 @@ def _configure_unique_value_renderer(renderer, field_name, key=None):
     except Exception:
         pass
     _add_unique_values(renderer, field_name)
+    _style_default_symbol(renderer, key)
     _style_unique_value_items(renderer, field_name, key)
 
 
@@ -896,6 +897,17 @@ def _add_unique_values(renderer, field_name):
         renderer.addValues({heading: list(SYMBOLS_BY_FIELD.get(field_name, {}))})
     except Exception:
         pass
+
+
+def _style_default_symbol(renderer, key):
+    for attr in ("defaultSymbol", "default_symbol"):
+        try:
+            symbol = getattr(renderer, attr)
+        except Exception:
+            continue
+        if symbol is not None:
+            apply_default_symbol_style(symbol, key)
+            return
 
 
 def _style_unique_value_items(renderer, field_name, key=None):
