@@ -928,6 +928,36 @@ def test_seeded_city_detail_descriptors_are_deterministic_and_moderate():
     assert {"arterial_road", "utility_backbone", "neighborhood_park"} <= {feature.archetype_id for feature in first}
     assert {"residential_block", "commercial_block", "civic_building", "industrial_yard", "academic_block", "natural_patch"} <= {feature.archetype_id for feature in first}
     assert any(feature.capacity > 0 and feature.metadata.get("occupancy") for feature in first if feature.status == "context")
+    assert any(feature.metadata.get("seed_role") == "point_of_interest" for feature in first if feature.geometry_type == "POINT")
+    _assert_city_detail_rects_clear_road_lanes(first)
+
+
+def _assert_city_detail_rects_clear_road_lanes(features):
+    lanes_by_cell: dict[str, set[tuple[str, float]]] = {}
+    for feature in features:
+        if feature.geometry_type != "LINE":
+            continue
+        orientation = feature.geometry_hint.get("orientation")
+        offset = float(feature.geometry_hint.get("offset", 0.50))
+        if feature.geometry_hint.get("shape") == "corridor":
+            offset = 0.50
+        axis = "x" if orientation == "vertical" else "y"
+        for cell_id in feature.target_cell_ids:
+            lanes_by_cell.setdefault(cell_id, set()).add((axis, offset))
+
+    for feature in features:
+        if feature.geometry_type != "POLYGON" or feature.geometry_hint.get("shape") != "rect":
+            continue
+        hint = feature.geometry_hint
+        x0 = float(hint["cx"]) - float(hint["w"]) / 2
+        x1 = float(hint["cx"]) + float(hint["w"]) / 2
+        y0 = float(hint["cy"]) - float(hint["h"]) / 2
+        y1 = float(hint["cy"]) + float(hint["h"]) / 2
+        for axis, offset in lanes_by_cell.get(feature.target_cell_ids[0], set()):
+            if axis == "x":
+                assert not x0 < offset < x1
+            else:
+                assert not y0 < offset < y1
 
 
 def test_context_city_detail_does_not_participate_in_lifecycle_or_followups():
