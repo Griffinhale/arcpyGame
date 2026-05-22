@@ -5,6 +5,7 @@ from __future__ import annotations
 import traceback
 
 from .geometry import (
+    add_outputs_to_map,
     activate_proposal,
     case_proposal_visible,
     ensure_case_proposal,
@@ -321,6 +322,7 @@ class DashboardController:
         write_docket_item(self.paths, item)
         action_log(self.paths, state, result)
         command_finish(self.paths, command_id, result.command_status, result.report)
+        add_outputs_to_map(self.paths, self.messages)
         refresh_all(self.paths, self.messages)
         self.status_var.set(result.report)
         open_effect_report(item.title, result.report, result.affected_cell_ids, state)

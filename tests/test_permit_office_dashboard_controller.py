@@ -107,3 +107,29 @@ def test_approval_restores_missing_proposal_before_spillover(monkeypatch):
     controller.apply_decision("approve", False)
 
     assert order == ["ensure", "spillover", "activate", "finish"]
+
+
+def test_successful_decision_reapplies_map_presentation_before_refresh(monkeypatch):
+    item = rules.DocketItem("CASE-finish", "procession_route", "Procession Route", "LINE", 1)
+    state = rules.CityState()
+    districts = {"D0000": _profile("D0000")}
+    controller = dashboard.DashboardController({"districts": "districts"}, "district_layer", 2026, object())
+    controller.status_text = ""
+    controller.status_var = dashboard._StatusProxy(controller)
+    order = []
+
+    monkeypatch.setattr(dashboard, "write_district_updates", lambda *args, **kwargs: order.append("districts"))
+    monkeypatch.setattr(dashboard, "write_state", lambda *args, **kwargs: order.append("state"))
+    monkeypatch.setattr(dashboard, "write_projects", lambda *args, **kwargs: order.append("projects"))
+    monkeypatch.setattr(dashboard, "write_docket_item", lambda *args, **kwargs: order.append("docket"))
+    monkeypatch.setattr(dashboard, "action_log", lambda *args, **kwargs: order.append("log"))
+    monkeypatch.setattr(dashboard, "command_finish", lambda *args, **kwargs: order.append("command"))
+    monkeypatch.setattr(dashboard, "add_outputs_to_map", lambda *args, **kwargs: order.append("map"))
+    monkeypatch.setattr(dashboard, "refresh_all", lambda *args, **kwargs: order.append("refresh"))
+    monkeypatch.setattr(dashboard, "open_effect_report", lambda *args, **kwargs: order.append("receipt"))
+
+    result = rules.DecisionResult(True, "approve", item.item_id, "approved", affected_cell_ids=["D0000"])
+
+    controller._finish_decision("CMD-1", item, state, districts, {}, result)
+
+    assert order[-3:] == ["map", "refresh", "receipt"]
