@@ -16,6 +16,8 @@ from .systems import (
     recompute_network_access,
 )
 
+TURN_PERMIT_SPEND_KEY = "_turn_permit_spend"
+
 def _scenario_score(
     state: CityState,
     profiles: list[DistrictProfile],
@@ -84,6 +86,8 @@ def advance_turn_result(
     overdue_violations = 0
     feature_updates: dict[str, dict[str, object]] = {}
     district_deltas: dict[str, dict[str, int]] = {}
+    money_before_recurring = state.money
+    permit_spend = int(state.stakeholder_memory.pop(TURN_PERMIT_SPEND_KEY, 0) or 0)
     # Unresolved docket work creates heat, local grievances, carryover state,
     # and project delay before long-running systems advance.
     for item in items:
@@ -142,7 +146,12 @@ def advance_turn_result(
     grievance_text = f" Local grievance files updated for {local_grievances} unresolved target(s)." if local_grievances else ""
     violation_text = f" Overdue violation(s): {overdue_violations}." if overdue_violations else ""
     feature_text = f" Feature updates: {len(feature_updates)}." if feature_updates else ""
-    economy_text = f" Economy net {net:+d} (revenue {revenue}, upkeep {upkeep})." if revenue or upkeep else ""
+    starting_money = money_before_recurring + permit_spend
+    turn_net = state.money - starting_money
+    economy_text = (
+        f" Economy: start ${starting_money}, permit spend ${permit_spend}, "
+        f"revenue ${revenue}, upkeep ${upkeep}, net {turn_net:+d}, end ${state.money}."
+    )
     population_text = f" Population drift {population_delta:+d}." if population_delta else ""
     incident_text = f" New civic incident file(s): {new_incidents}." if new_incidents else ""
     system_text = f" {' '.join(system_notes)}" if system_notes else ""

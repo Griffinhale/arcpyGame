@@ -254,9 +254,11 @@ def inspect_item(item: DocketItem, seed: int = 2026, target_profiles: Iterable[D
     failure_text = f" Failure mode on file: {template.failure_mode}." if template.failure_mode else ""
     population_text = inspection_population_note(template, profiles)
     evidence_text = _inspection_summary_text(inspection_case)
+    consequence_text = _inspection_consequence_text(template, inspection_case)
     item.preview_text = (
-        f"{template.preview} Inspection: {item.risk_band.upper()} side-effect risk. "
-        f"{template.inspect_hint}{failure_text} {population_text} {evidence_text}"
+        f"Inspection: filed {item.risk_band.upper()} side-effect risk. Certain effects if approved: "
+        f"{_format_delta(template.base_effects)}. Risk/side effects: {consequence_text}{failure_text} "
+        f"{template.inspect_hint} {population_text} {evidence_text}"
     ).strip()
     return item
 
@@ -370,6 +372,24 @@ def _inspection_summary_text(inspection_case: dict[str, object]) -> str:
             worst = "warning"
     violation_text = f" Violations opened: {len(violations)}." if violations else ""
     return f"Evidence filed: {len(evidence)} item(s), highest severity {worst}.{violation_text}"
+
+
+def _inspection_consequence_text(template: DocketTemplate, inspection_case: dict[str, object]) -> str:
+    """Format sharper post-inspection consequence hints for previews."""
+
+    risk = str(inspection_case.get("risk_band") or "unknown").lower()
+    violations = inspection_case.get("violations", [])
+    if risk == "high":
+        base = f"{template.failure_mode or 'approval failure'} is a live risk"
+    elif risk == "medium":
+        base = f"{template.failure_mode or 'side effects'} should be watched"
+    elif risk == "low":
+        base = "no acute side-effect flag"
+    else:
+        base = "side-effect file remains incomplete"
+    if violations:
+        return f"{base}; {len(violations)} compliance deadline(s) may follow."
+    return f"{base}; no compliance deadline opened."
 
 
 __all__ = [name for name in globals() if not name.startswith("__")]

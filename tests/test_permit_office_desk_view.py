@@ -44,12 +44,15 @@ def test_uninspected_case_uses_qualitative_impact_buckets():
     )
     buckets = {bucket.label: bucket for bucket in model.case.impact_buckets}
 
-    assert list(buckets) == ["Cost", "City", "Target", "People", "Follow-up"]
+    assert list(buckets) == ["Cost", "City Effect", "Budget", "Risk"]
     assert model.exhibit_visible is True
-    assert "1 AP / $12" in buckets["Cost"].value
-    assert "vendors" in buckets["People"].value
-    assert "inspect for unlicensed spillover" == buckets["Follow-up"].value
-    assert "evidence" not in buckets["Follow-up"].value
+    assert "Issue 1AP/$12" in buckets["Cost"].value
+    assert "conditions +$6" in buckets["Cost"].value
+    assert "pros" in buckets["City Effect"].value
+    assert "rev $4/turn" in buckets["Budget"].value
+    assert "upkeep $1/turn" in buckets["Budget"].value
+    assert "inspect for unlicensed spillover" == buckets["Risk"].value
+    assert "evidence" not in buckets["Risk"].value
 
 
 def test_inspected_case_buckets_surface_evidence_and_population_context():
@@ -67,8 +70,5 @@ def test_inspected_case_buckets_surface_evidence_and_population_context():
     model = build_desk_model(rules.CityState(), districts, [item], item.item_id)
     buckets = {bucket.label: bucket for bucket in model.case.impact_buckets}
 
-    assert buckets["Follow-up"].value == "high risk; 2 evidence; 1 violation(s)"
-    assert buckets["Follow-up"].tone == "bad"
-    assert "vendors support" in buckets["People"].value
-    assert "homeowners object" in buckets["People"].value
-    assert "homeowners aggrieved" in buckets["People"].value
+    assert buckets["Risk"].value == "high risk; 2/2 flagged evidence; 1 violation(s)"
+    assert buckets["Risk"].tone == "bad"

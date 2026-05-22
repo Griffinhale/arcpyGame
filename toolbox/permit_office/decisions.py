@@ -18,6 +18,8 @@ from .systems import (
 )
 from .turns import _settle_item_violations
 
+TURN_PERMIT_SPEND_KEY = "_turn_permit_spend"
+
 
 def resolve_decision(
     state: CityState,
@@ -120,8 +122,9 @@ def resolve_decision(
             if project:
                 project_note = f" Project {project.project_id} delayed."
         report = (
-            f"Denied {item.title}. Project risk avoided; {item.stakeholder.replace('_', ' ')} heat "
-            f"{heat_delta:+d} entered the public record.{project_note} {_population_report_fragment([districts[cid] for cid in targets])}"
+            f"Denied {item.title}. Certain effects: project risk avoided; city delta {_format_delta(delta)}. "
+            f"Risk/side effects: {item.stakeholder.replace('_', ' ')} heat {heat_delta:+d} entered the public record."
+            f"{project_note} {_population_report_fragment([districts[cid] for cid in targets])}"
         )
         return DecisionResult(
             True,
@@ -221,9 +224,9 @@ def resolve_decision(
     affected = targets + spillovers
     _settle_item_violations(item, mitigated)
     mitigation_text = " with mitigation" if mitigated else ""
-    failure_text = ""
-    if failure_triggered:
-        failure_text = f" Outcome failed: {template.failure_mode}; corrective delta {_format_delta(failure_delta)}."
+    failure_text = _approval_risk_report(template, failure_triggered, failure_delta, side, item.risk_band, mitigated, [districts[cid] for cid in targets])
+    spillover_text = _spillover_report_fragment(spillovers, template, mitigated)
+    recurring_text = "no new active feature because the approval failed" if failure_triggered else _recurring_budget_report(archetype)
     project_text = ""
     if projects is not None and not failure_triggered:
         # Project records are either opened from a new approval or advanced when
@@ -242,8 +245,9 @@ def resolve_decision(
         if project:
             project_text = f" Project {project.project_id} status {project.status}."
     report = (
-        f"Approved {item.title}{mitigation_text}. Affected {len(affected)} district(s): "
-        f"{', '.join(affected)}. City delta: {_format_delta(averaged)}.{failure_text} "
+        f"Approved {item.title}{mitigation_text}. Certain effects: affected {len(affected)} district(s): "
+        f"{_district_list_fragment(affected)}; immediate city delta {_format_delta(averaged)}; {spillover_text}; recurring budget {recurring_text}. "
+        f"Risk/side effects: {failure_text} "
         f"{_population_report_fragment([districts[cid] for cid in targets])}{project_text}"
     )
     return DecisionResult(
@@ -437,12 +441,14 @@ def _resolve_enforcement_decision(
     if mitigated:
         report = (
             f"Settled {item.title} through a retroactive permit and compliance schedule. "
-            f"City delta: {_format_delta(averaged)}. {item.stakeholder.replace('_', ' ')} heat {heat_delta:+d}.{project_note}"
+            f"Certain effects: city delta {_format_delta(averaged)}. "
+            f"Risk/side effects: {item.stakeholder.replace('_', ' ')} heat {heat_delta:+d}.{project_note}"
         )
     else:
         report = (
-            f"Enforced {item.title}. The record is clearer and several people are louder. "
-            f"City delta: {_format_delta(averaged)}. {item.stakeholder.replace('_', ' ')} heat {heat_delta:+d}.{project_note}"
+            f"Enforced {item.title}. Certain effects: city delta {_format_delta(averaged)}. "
+            f"Risk/side effects: the record is clearer and several people are louder; "
+            f"{item.stakeholder.replace('_', ' ')} heat {heat_delta:+d}.{project_note}"
         )
     return DecisionResult(
         True,
@@ -554,8 +560,9 @@ def _resolve_incident_decision(
         if project:
             project_note = f" Project {project.project_id} status {project.status}."
     report = (
-        f"{item.title} {mode_text}. Target group: {_group_label(group)}. "
-        f"City delta: {_format_delta(averaged)}. {_population_report_fragment([districts[cid] for cid in targets])}{project_note}"
+        f"{item.title} {mode_text}. Certain effects: Target group: {_group_label(group)}; "
+        f"city delta {_format_delta(averaged)}. Risk/side effects: local grievance file may keep moving. "
+        f"{_population_report_fragment([districts[cid] for cid in targets])}{project_note}"
     )
     return DecisionResult(
         True,
@@ -595,7 +602,17 @@ def _spend_resources(
         return _blocked(action, item_id, f"{label} requires ${money_cost}.")
     state.ap -= ap_cost
     state.money -= money_cost
+    _record_permit_spend(state, money_cost)
     return None
+
+
+def _record_permit_spend(state: CityState, amount: int) -> None:
+    """Accumulate same-turn approval spending for the next economy report."""
+
+    if amount <= 0:
+        return
+    current = int(state.stakeholder_memory.get(TURN_PERMIT_SPEND_KEY, 0) or 0)
+    state.stakeholder_memory[TURN_PERMIT_SPEND_KEY] = current + int(amount)
 
 
 def _average_city_delta(city_delta: dict[str, int], targets: list[str], spillovers: list[str]) -> dict[str, int]:
@@ -603,6 +620,61 @@ def _average_city_delta(city_delta: dict[str, int], targets: list[str], spillove
 
     divisor = max(1, len(targets) + len(spillovers))
     return {metric: round(value / divisor) for metric, value in city_delta.items()}
+
+
+def _approval_risk_report(
+    template: DocketTemplate,
+    failure_triggered: bool,
+    failure_delta: dict[str, int],
+    side_delta: dict[str, int],
+    risk_band: str,
+    mitigated: bool,
+    targets: list[DistrictProfile],
+) -> str:
+    """Explain approval uncertainty separately from certain effects."""
+
+    if failure_triggered:
+        return f"Outcome failed: {template.failure_mode}; corrective delta {_format_delta(failure_delta)}."
+    chance = round(_failure_chance(template, targets, risk_band or "unknown", mitigated) * 100)
+    side_text = f" Side-effect delta {_format_delta(side_delta)}." if side_delta else ""
+    if template.failure_mode:
+        return f"{template.failure_mode} did not trigger; estimated failure chance was {chance}%.{side_text}"
+    return f"no failure mode triggered; estimated side-effect chance was {chance}%.{side_text}"
+
+
+def _recurring_budget_report(archetype: FeatureArchetype) -> str:
+    """Format expected recurring feature economy after approval."""
+
+    operating = operating_rule_for_feature(archetype.archetype_id)
+    intensity = max(1, int(archetype.capacity or 1))
+    revenue = operating.revenue_per_turn * intensity
+    upkeep = operating.upkeep_per_turn * intensity
+    net = revenue - upkeep
+    if not revenue and not upkeep:
+        return "no recurring revenue or upkeep"
+    if net > 0:
+        return f"helps the budget later: revenue ${revenue}/turn, upkeep ${upkeep}/turn, net ${net:+d}"
+    if net < 0:
+        return f"creates maintenance burden: revenue ${revenue}/turn, upkeep ${upkeep}/turn, net ${net:+d}"
+    return f"budget neutral: revenue ${revenue}/turn, upkeep ${upkeep}/turn, net ${net:+d}"
+
+
+def _spillover_report_fragment(spillovers: list[str], template: DocketTemplate, mitigated: bool) -> str:
+    """Format spillover effects separately from target and city effects."""
+
+    if not spillovers:
+        return "spillover none"
+    delta = _mitigate(template.spillover_effects) if mitigated else dict(template.spillover_effects)
+    return f"spillover {_district_list_fragment(spillovers)} gets {_format_delta(delta)}"
+
+
+def _district_list_fragment(cell_ids: list[str]) -> str:
+    """Keep report prose readable when many districts are affected."""
+
+    if len(cell_ids) <= 4:
+        return ", ".join(cell_ids)
+    shown = ", ".join(cell_ids[:3])
+    return f"{shown}, +{len(cell_ids) - 3} more"
 
 
 __all__ = [name for name in globals() if not name.startswith("__")]
