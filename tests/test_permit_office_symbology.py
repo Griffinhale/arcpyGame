@@ -15,7 +15,7 @@ sys.modules.setdefault(
     ),
 )
 
-from toolbox.permit_office_arcgis.geometry import apply_simple_symbology, remove_outputs_from_map, _configure_labels, _tune_layer_visibility
+from toolbox.permit_office_arcgis.geometry import apply_simple_symbology, remove_outputs_from_map, _configure_labels, _order_output_layers, _tune_layer_visibility
 
 
 class FakeMessages:
@@ -77,6 +77,12 @@ class FakeMap:
     def removeLayer(self, layer) -> None:
         self.removed.append(layer.name)
         self.layers.remove(layer)
+
+    def moveLayer(self, reference_layer, move_layer, insert_position) -> None:
+        self.layers.remove(move_layer)
+        reference_index = self.layers.index(reference_layer)
+        insert_index = reference_index if insert_position == "BEFORE" else reference_index + 1
+        self.layers.insert(insert_index, move_layer)
 
 
 class FakeCimLayer(FakeLayer):
@@ -339,3 +345,20 @@ def test_remove_outputs_from_map_removes_stale_permit_layers(monkeypatch):
     assert fake_map.removed == ["PermitDistricts", "PermitPoints", "PermitLines", "PermitZones"]
     assert [layer.name for layer in fake_map.layers] == ["OtherLayer"]
     assert messages.messages == ["[MAP] removed 4 stale Permit Office layer(s)"]
+
+
+def test_order_output_layers_keeps_lines_on_top_and_districts_on_bottom():
+    layers = [FakeLayer(FieldsListRenderer()) for _ in range(4)]
+    for layer, name in zip(layers, ["PermitDistricts", "PermitZones", "PermitPoints", "PermitLines"]):
+        layer.name = name
+    existing = {layer.name: layer for layer in layers}
+    fake_map = FakeMap(layers)
+
+    _order_output_layers(fake_map, existing)
+
+    assert [layer.name for layer in fake_map.layers] == [
+        "PermitLines",
+        "PermitPoints",
+        "PermitZones",
+        "PermitDistricts",
+    ]
