@@ -64,13 +64,15 @@ def generate_city_detail_features(
         orientation = "vertical" if utility_targets == vertical else "horizontal"
         out.append(_line_feature(seed, "utility", "utility_backbone", utility_targets, "utility", "Existing Utility Backbone", orientation, active=True))
 
+    park_profiles = _park_profiles(profiles, rng)
+    park_slots = {profile.cell_id: _park_slot(idx) for idx, profile in enumerate(park_profiles, start=1)}
     for profile in profiles:
-        out.extend(_district_block_features(profile, seed, rng))
+        out.extend(_district_block_features(profile, seed, rng, reserved_slots={park_slots.get(profile.cell_id)}))
         if profile.cell_id not in set(horizontal + vertical):
             out.append(_local_street_stub(profile, seed, rng))
 
-    park_profiles = _park_profiles(profiles, rng)
     for idx, profile in enumerate(park_profiles, start=1):
+        cx, cy = park_slots[profile.cell_id]
         out.append(
             _zone_feature(
                 seed,
@@ -81,7 +83,7 @@ def generate_city_detail_features(
                 f"{profile.name} Neighborhood Park",
                 status="active",
                 capacity=2,
-                geometry_hint={"shape": "rect", "cx": 0.30 + 0.35 * (idx % 2), "cy": 0.30, "w": 0.34, "h": 0.26},
+                geometry_hint={"shape": "rect", "cx": cx, "cy": cy, "w": 0.30, "h": 0.24},
                 metadata={"seed_role": "neighborhood_park"},
             )
         )
@@ -116,7 +118,7 @@ def _best_corridor(vertical, horizontal, by_id, prefer):
     return vertical if score(vertical) >= score(horizontal) else horizontal
 
 
-def _district_block_features(profile: DistrictProfile, seed: int, rng: random.Random) -> list[CityDetailFeature]:
+def _district_block_features(profile: DistrictProfile, seed: int, rng: random.Random, reserved_slots=None) -> list[CityDetailFeature]:
     block_count = {"natural": 1, "industrial": 2, "civic": 2, "academic": 3, "mercantile": 4, "residential": 4}.get(profile.district_type, 3)
     archetype_id = {
         "residential": "residential_block",
@@ -136,10 +138,9 @@ def _district_block_features(profile: DistrictProfile, seed: int, rng: random.Ra
     }.get(profile.district_type, "building")
     features = []
     occupancy_budget = _occupancy_budget(profile, block_count)
-    positions = ((0.25, 0.25), (0.70, 0.27), (0.28, 0.70), (0.70, 0.70))
-    for idx in range(block_count):
-        cx, cy = positions[idx % len(positions)]
-        jitter = rng.randrange(-5, 6) / 100.0
+    positions = [slot for slot in _BUILDING_SLOTS if slot not in set(reserved_slots or ())]
+    for idx, (cx, cy) in enumerate(positions[:block_count]):
+        jitter = rng.randrange(-2, 3) / 100.0
         occupancy = occupancy_budget[idx] if idx < len(occupancy_budget) else 0
         features.append(
             _zone_feature(
@@ -151,7 +152,7 @@ def _district_block_features(profile: DistrictProfile, seed: int, rng: random.Ra
                 f"{profile.name} Block {idx + 1}",
                 status="context",
                 capacity=occupancy,
-                geometry_hint={"shape": "rect", "cx": cx + jitter, "cy": cy - jitter, "w": 0.24, "h": 0.20},
+                geometry_hint={"shape": "rect", "cx": cx + jitter, "cy": cy - jitter, "w": 0.19, "h": 0.17},
                 metadata={
                     "seed_role": "city_block",
                     "generated_subtype": archetype_id,
@@ -197,7 +198,7 @@ def _local_street_stub(profile, seed, rng):
         name=f"{profile.name} Local Street",
         metadata={"district_id": profile.cell_id, "seed_role": "local_street_hint", "generated_subtype": orientation},
         state={"seeded_city_detail": True},
-        geometry_hint={"shape": "stub", "orientation": orientation, "offset": 0.35 + rng.randrange(0, 31) / 100.0},
+        geometry_hint={"shape": "stub", "orientation": orientation, "offset": 0.50},
     )
 
 
@@ -229,6 +230,7 @@ def _anchor_point(profile, seed, idx):
         "mercantile": "commercial_block",
     }.get(profile.district_type, "civic_building")
     display_state = "civic" if profile.district_type == "civic" else "commerce" if profile.district_type == "mercantile" else "campus"
+    x, y = _POI_SLOTS[(idx - 1) % len(_POI_SLOTS)]
     return CityDetailFeature(
         feature_id=f"CITY-{seed}-anchor-{idx}-{profile.cell_id}",
         archetype_id=archetype_id,
@@ -240,14 +242,22 @@ def _anchor_point(profile, seed, idx):
         capacity=max(1, profile.population // 12),
         metadata={
             "district_id": profile.cell_id,
-            "seed_role": "anchor",
+            "seed_role": "point_of_interest",
             "generated_subtype": archetype_id,
             "occupancy": max(1, profile.population // 12),
             "top_population_groups": _top_groups(profile, limit=2),
         },
         state={"seeded_city_detail": True},
-        geometry_hint={"shape": "point", "x": 0.50, "y": 0.50},
+        geometry_hint={"shape": "point", "x": x, "y": y},
     )
+
+
+_BUILDING_SLOTS = ((0.24, 0.24), (0.76, 0.24), (0.24, 0.76), (0.76, 0.76))
+_POI_SLOTS = ((0.38, 0.24), (0.76, 0.38), (0.62, 0.76), (0.24, 0.62))
+
+
+def _park_slot(idx):
+    return _BUILDING_SLOTS[(idx - 1) % len(_BUILDING_SLOTS)]
 
 
 def _occupancy_budget(profile, block_count):
