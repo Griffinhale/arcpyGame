@@ -23,6 +23,7 @@ for _module_name in (
     "permit_office_arcgis.schema",
     "permit_office_arcgis.messages",
     "permit_office_arcgis.store",
+    "permit_office_arcgis.symbology_config",
     "permit_office_arcgis.geometry",
     "permit_office_arcgis.desk_view",
     "permit_office_arcgis.dashboard",

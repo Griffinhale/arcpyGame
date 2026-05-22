@@ -2,44 +2,44 @@
 
 DISPLAY_STATE_SYMBOLS = {
     "stable": ([226, 232, 222, 100], "Stable"),
-    "prosperous": ([96, 157, 108, 100], "Prosperous"),
-    "restless": ([222, 165, 92, 100], "Restless"),
-    "cultured": ([132, 119, 190, 100], "Cultured"),
-    "at_risk": ([206, 94, 78, 100], "At Risk"),
-    "strained": ([213, 139, 86, 100], "Strained"),
-    "aggrieved": ([154, 73, 91, 100], "Aggrieved"),
-    "incident": ([209, 58, 58, 100], "Incident"),
-    "proposed": ([55, 139, 214, 100], "Proposed"),
-    "active": ([47, 145, 99, 100], "Active"),
-    "denied": ([120, 120, 120, 100], "Denied"),
-    "deferred": ([159, 137, 86, 100], "Deferred"),
-    "failed": ([173, 70, 70, 100], "Failed"),
-    "settled": ([70, 141, 158, 100], "Settled"),
-    "enforced": ([104, 90, 162, 100], "Enforced"),
-    "responded": ([74, 130, 181, 100], "Responded"),
-    "maintained": ([74, 151, 124, 100], "Maintained"),
-    "maintenance_due": ([219, 140, 66, 100], "Maintenance Due"),
-    "degraded": ([158, 95, 77, 100], "Degraded"),
-    "road": ([100, 100, 100, 100], "Road"),
-    "utility": ([67, 127, 190, 100], "Utility"),
-    "park": ([97, 160, 100, 100], "Park"),
-    "housing": ([193, 136, 101, 100], "Housing"),
-    "commerce": ([197, 160, 76, 100], "Commerce"),
-    "civic": ([100, 132, 181, 100], "Civic"),
-    "industry": ([139, 130, 121, 100], "Industry"),
-    "campus": ([138, 113, 176, 100], "Campus"),
-    "temporary": ([216, 151, 78, 100], "Temporary"),
-    "overlay": ([82, 161, 151, 100], "Overlay"),
-    "case": ([201, 88, 101, 100], "Case"),
+    "prosperous": ([106, 162, 114, 100], "Prosperous"),
+    "restless": ([216, 159, 84, 100], "Restless"),
+    "cultured": ([140, 126, 188, 100], "Cultured"),
+    "at_risk": ([196, 90, 74, 100], "At Risk"),
+    "strained": ([205, 132, 78, 100], "Strained"),
+    "aggrieved": ([150, 72, 90, 100], "Aggrieved"),
+    "incident": ([206, 54, 52, 100], "Incident"),
+    "proposed": ([45, 196, 199, 100], "Proposed"),
+    "active": ([52, 150, 100, 100], "Active"),
+    "denied": ([112, 112, 112, 100], "Denied"),
+    "deferred": ([158, 135, 82, 100], "Deferred"),
+    "failed": ([170, 66, 66, 100], "Failed"),
+    "settled": ([68, 140, 156, 100], "Settled"),
+    "enforced": ([100, 88, 158, 100], "Enforced"),
+    "responded": ([70, 128, 178, 100], "Responded"),
+    "maintained": ([74, 150, 122, 100], "Maintained"),
+    "maintenance_due": ([218, 138, 62, 100], "Maintenance Due"),
+    "degraded": ([155, 92, 74, 100], "Degraded"),
+    "road": ([58, 62, 60, 100], "Road"),
+    "utility": ([54, 126, 185, 100], "Utility"),
+    "park": ([82, 150, 88, 100], "Park"),
+    "housing": ([177, 126, 88, 100], "Housing"),
+    "commerce": ([188, 146, 58, 100], "Commerce"),
+    "civic": ([82, 120, 172, 100], "Civic"),
+    "industry": ([124, 118, 110, 100], "Industry"),
+    "campus": ([130, 112, 174, 100], "Campus"),
+    "temporary": ([216, 145, 68, 100], "Temporary"),
+    "overlay": ([63, 168, 159, 100], "Overlay"),
+    "case": ([199, 82, 96, 100], "Case"),
 }
 
 DISTRICT_TYPE_SYMBOLS = {
-    "residential": ([194, 137, 98, 100], "Residential"),
-    "mercantile": ([207, 166, 71, 100], "Mercantile"),
-    "industrial": ([142, 132, 120, 100], "Industrial"),
-    "civic": ([92, 132, 184, 100], "Civic"),
-    "academic": ([139, 118, 185, 100], "Academic"),
-    "natural": ([101, 163, 102, 100], "Natural"),
+    "residential": ([222, 190, 160, 100], "Residential"),
+    "mercantile": ([225, 194, 124, 100], "Mercantile"),
+    "industrial": ([174, 166, 154, 100], "Industrial"),
+    "civic": ([151, 178, 210, 100], "Civic"),
+    "academic": ([176, 160, 211, 100], "Academic"),
+    "natural": ([153, 194, 148, 100], "Natural"),
 }
 
 SYMBOLS_BY_FIELD = {
@@ -55,8 +55,69 @@ RENDER_FIELD_BY_LAYER_KEY = {
 }
 
 LAYER_TRANSPARENCY = {
-    "districts": 0,
+    "districts": 10,
     "points": 0,
     "lines": 0,
-    "zones": 70,
+    "zones": 35,
 }
+
+DISTRICT_OUTLINE_COLOR = [242, 238, 226, 100]
+FEATURE_OUTLINE_COLOR = [78, 82, 78, 100]
+
+SYMBOL_STYLE_BY_LAYER = {
+    "districts": {
+        "outline_color": DISTRICT_OUTLINE_COLOR,
+        "outline_width": 3.0,
+    },
+    "zones": {
+        "outline_color": FEATURE_OUTLINE_COLOR,
+        "outline_width": 1.1,
+    },
+    "lines": {
+        "outline_color": FEATURE_OUTLINE_COLOR,
+        "outline_width": 3.0,
+    },
+    "points": {
+        "outline_color": [245, 241, 231, 100],
+        "outline_width": 0.9,
+        "size": 9.0,
+    },
+}
+
+
+def symbol_style_for(layer_key, value):
+    """Return ArcGIS symbol hints for a layer/value pair."""
+
+    style = SYMBOL_STYLE_BY_LAYER.get(layer_key or "", {})
+    outline_color = style.get("outline_color", [86, 98, 92, 100])
+    outline_width = float(style.get("outline_width", 1.2))
+    if value == "proposed":
+        outline_color = [31, 220, 222, 100]
+        outline_width = max(outline_width, 3.2)
+    elif value in ("incident", "failed", "at_risk", "aggrieved"):
+        outline_color = [93, 48, 48, 100]
+    elif value in ("road", "utility"):
+        outline_width = max(outline_width, 2.8)
+    return {
+        "outline_color": outline_color,
+        "outline_width": outline_width,
+        "size": style.get("size"),
+    }
+
+
+def apply_symbol_style(symbol, layer_key, value):
+    """Best-effort ArcGIS symbol styling across geometry types."""
+
+    style = symbol_style_for(layer_key, value)
+    assignments = [
+        ("outlineColor", {"RGB": style["outline_color"]}),
+        ("outlineWidth", style["outline_width"]),
+        ("width", style["outline_width"]),
+    ]
+    if style["size"] is not None:
+        assignments.append(("size", style["size"]))
+    for attr, attr_value in assignments:
+        try:
+            setattr(symbol, attr, attr_value)
+        except Exception:
+            pass

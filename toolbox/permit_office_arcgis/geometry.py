@@ -12,7 +12,7 @@ from .messages import _log, _warn
 from .rules_loader import rules
 from .schema import DISTRICTS, LINES, POINTS, SUPPORT_FIELDS, ZONES
 from .store import decode_json, encode_json, read_districts, write_docket_item
-from .symbology_config import LAYER_TRANSPARENCY, RENDER_FIELD_BY_LAYER_KEY, SYMBOLS_BY_FIELD
+from .symbology_config import LAYER_TRANSPARENCY, RENDER_FIELD_BY_LAYER_KEY, SYMBOLS_BY_FIELD, apply_symbol_style
 
 
 def _summary_map(value):
@@ -778,10 +778,10 @@ def apply_simple_symbology(layer, key, messages):
         except Exception:
             pass
         if not field_set_via_cim:
-            _configure_unique_value_renderer(sym.renderer, field_name)
+            _configure_unique_value_renderer(sym.renderer, field_name, key)
             layer.symbology = sym
         else:
-            _try_configure_layer_unique_value_items(layer, field_name)
+            _try_configure_layer_unique_value_items(layer, field_name, key)
         _log(messages, "SYM", f"set {field_name} unique-value symbology on {getattr(layer, 'name', key)}")
     except Exception as exc:
         _warn(messages, "SYM", f"symbology setup skipped for {getattr(layer, 'name', key)}: {exc}")
@@ -861,25 +861,25 @@ def _try_set_cim_attr(target, names, value):
         pass
 
 
-def _try_configure_layer_unique_value_items(layer, field_name):
+def _try_configure_layer_unique_value_items(layer, field_name, key):
     try:
         sym = layer.symbology
         if not _renderer_uses_field(sym.renderer, field_name):
             return
-        _configure_unique_value_renderer(sym.renderer, field_name)
+        _configure_unique_value_renderer(sym.renderer, field_name, key)
         layer.symbology = sym
     except Exception:
         pass
 
 
-def _configure_unique_value_renderer(renderer, field_name):
+def _configure_unique_value_renderer(renderer, field_name, key=None):
     """Seed and style known unique-value classes when ArcGIS exposes item APIs."""
     try:
         renderer.useDefaultSymbol = True
     except Exception:
         pass
     _add_unique_values(renderer, field_name)
-    _style_unique_value_items(renderer, field_name)
+    _style_unique_value_items(renderer, field_name, key)
 
 
 def _add_unique_values(renderer, field_name):
@@ -898,7 +898,7 @@ def _add_unique_values(renderer, field_name):
         pass
 
 
-def _style_unique_value_items(renderer, field_name):
+def _style_unique_value_items(renderer, field_name, key=None):
     symbol_map = SYMBOLS_BY_FIELD.get(field_name, {})
     try:
         groups = renderer.groups
@@ -918,7 +918,7 @@ def _style_unique_value_items(renderer, field_name):
                 item.symbol.color = {"RGB": color}
             except Exception:
                 pass
-            _style_symbol_outline(item.symbol)
+            apply_symbol_style(item.symbol, key, value)
 
 
 def _unique_value_item_value(item):
@@ -941,17 +941,6 @@ def _renderer_uses_field(renderer, field_name):
         return renderer.field == field_name
     except Exception:
         return False
-
-
-def _style_symbol_outline(symbol):
-    try:
-        symbol.outlineColor = {"RGB": [86, 98, 92, 100]}
-    except Exception:
-        pass
-    try:
-        symbol.outlineWidth = 1.2
-    except Exception:
-        pass
 
 
 def _tune_layer_visibility(layer, key):
