@@ -645,10 +645,10 @@ def proposal_spillover(paths, item):
 
 def activate_proposal(paths, item, report):
     """Convert a proposed support feature into its resolved gameplay status."""
-
     fc = {"POINT": paths["points"], "LINE": paths["lines"], "POLYGON": paths["zones"]}[item.geometry_type]
     fields = ["item_id", "feature_id", "archetype_id", "project_id", "chain_step_id", "turn_created", "expires_turn", "status", "display_state", "report", "condition", "maintenance_due_turn", "last_maintained_turn", "state_json"]
     status = item.status if item.status in ("active", "failed", "enforced", "settled", "responded", "maintained") else "active"
+    activated = 0
     with arcpy.da.UpdateCursor(fc, fields) as cursor:
         for row in cursor:
             if row[0] == item.item_id and row[7] == "proposed":
@@ -680,6 +680,8 @@ def activate_proposal(paths, item, report):
                 row[12] = feature.last_maintained_turn
                 row[13] = encode_json(feature.state_json)
                 cursor.updateRow(row)
+                activated += 1
+    return activated
 
 
 def mark_proposals(paths, item_id, status, report=""):
@@ -697,7 +699,6 @@ def mark_proposals(paths, item_id, status, report=""):
 
 def refresh_all(paths, messages):
     """Refresh all known map layers after persisted game changes."""
-
     for name in (DISTRICTS, POINTS, LINES, ZONES):
         try:
             arcpy.RefreshLayer(name)

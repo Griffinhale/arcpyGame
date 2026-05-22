@@ -81,7 +81,11 @@ def test_approval_restores_missing_proposal_before_spillover(monkeypatch):
     monkeypatch.setattr(dashboard, "read_active_features", lambda paths: [])
     monkeypatch.setattr(dashboard, "read_projects", lambda paths: {})
     monkeypatch.setattr(dashboard, "write_active_features", lambda paths, active_features: None)
-    monkeypatch.setattr(dashboard, "activate_proposal", lambda paths, docket_item, report: order.append("activate"))
+    def activate(paths, docket_item, report):
+        order.append("activate")
+        return 1
+
+    monkeypatch.setattr(dashboard, "activate_proposal", activate)
     monkeypatch.setattr(controller, "_finish_decision", lambda *args: order.append("finish"))
 
     def ensure(paths, docket_item, seed, messages, target_ids=None):
