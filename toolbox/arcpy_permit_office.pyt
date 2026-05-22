@@ -32,7 +32,7 @@ for _module_name in (
         importlib.reload(_module)
 
 from permit_office_arcgis.dashboard import DashboardController
-from permit_office_arcgis.geometry import add_outputs_to_map, refresh_all, seed_city_features
+from permit_office_arcgis.geometry import add_outputs_to_map, refresh_all, remove_outputs_from_map, seed_city_features
 from permit_office_arcgis.messages import _err, _log
 from permit_office_arcgis.rules_loader import rules
 from permit_office_arcgis.schema import (
@@ -150,6 +150,7 @@ class PermitOfficePrototype(object):
             seed_city_features(paths, seed, messages)
             write_state(paths, rules.CityState())
             generate_docket_rows(paths, seed, messages)
+            remove_outputs_from_map(messages)
             add_outputs_to_map(paths, messages)
             refresh_all(paths, messages)
             arcpy.SetParameterAsText(P_OUTPUT, paths["districts"])
