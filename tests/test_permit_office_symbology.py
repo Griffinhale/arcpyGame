@@ -234,9 +234,9 @@ def test_apply_simple_symbology_seeds_and_styles_display_state_classes():
     assert "academic" in items
     assert "natural" in items
     assert items["residential"].label == "Residential"
-    assert items["academic"].symbol.color == {"RGB": [139, 118, 185, 100]}
-    assert items["residential"].symbol.outlineColor == {"RGB": [86, 98, 92, 100]}
-    assert items["residential"].symbol.outlineWidth == 1.2
+    assert items["academic"].symbol.color == {"RGB": [176, 160, 211, 100]}
+    assert items["residential"].symbol.outlineColor == {"RGB": [242, 238, 226, 100]}
+    assert items["residential"].symbol.outlineWidth == 3.0
     assert renderer.useDefaultSymbol is True
     assert layer.assigned_symbology is layer.symbology
     assert messages.warnings == []
@@ -311,7 +311,7 @@ def test_tune_layer_visibility_makes_zones_transparent():
 
     _tune_layer_visibility(layer, "zones")
 
-    assert layer.transparency == 70
+    assert layer.transparency == 35
 
 
 def test_configure_labels_turns_on_district_cell_labels():
