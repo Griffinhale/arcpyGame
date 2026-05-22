@@ -984,15 +984,14 @@ def _configure_labels(layer, key):
 
 
 def _order_output_layers(active_map, existing):
-    """Keep support geometry from hiding the playable district board."""
-
-    ordered_names = [ZONES, DISTRICTS, LINES, POINTS]
+    """Draw district colors as the base, with feature lines on top."""
+    ordered_names = [LINES, POINTS, ZONES, DISTRICTS]
     layers = {name: existing.get(name) for name in ordered_names}
     if not all(layers.values()):
         return
     try:
-        active_map.moveLayer(layers[ZONES], layers[DISTRICTS], "BEFORE")
-        active_map.moveLayer(layers[DISTRICTS], layers[LINES], "BEFORE")
-        active_map.moveLayer(layers[LINES], layers[POINTS], "BEFORE")
+        active_map.moveLayer(layers[LINES], layers[POINTS], "AFTER")
+        active_map.moveLayer(layers[POINTS], layers[ZONES], "AFTER")
+        active_map.moveLayer(layers[ZONES], layers[DISTRICTS], "AFTER")
     except Exception:
         pass
