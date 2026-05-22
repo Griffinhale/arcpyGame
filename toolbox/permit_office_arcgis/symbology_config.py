@@ -31,6 +31,7 @@ DISPLAY_STATE_SYMBOLS = {
     "temporary": ([216, 145, 68, 100], "Temporary"),
     "overlay": ([63, 168, 159, 100], "Overlay"),
     "case": ([199, 82, 96, 100], "Case"),
+    "context": ([146, 139, 128, 100], "Context"),
 }
 
 DISTRICT_TYPE_SYMBOLS = {
@@ -117,6 +118,27 @@ def apply_symbol_style(symbol, layer_key, value):
     if style["size"] is not None:
         assignments.append(("size", style["size"]))
     for attr, attr_value in assignments:
+        try:
+            setattr(symbol, attr, attr_value)
+        except Exception:
+            pass
+
+
+def apply_default_symbol_style(symbol, layer_key):
+    """Give unique-value renderer fallbacks a visible symbol."""
+
+    fallback = {
+        "districts": ([220, 220, 208, 100], [242, 238, 226, 100], 3.0),
+        "zones": ([190, 184, 170, 70], [78, 82, 78, 100], 1.1),
+        "lines": ([78, 82, 78, 100], [78, 82, 78, 100], 3.0),
+        "points": ([78, 82, 78, 100], [245, 241, 231, 100], 0.9),
+    }.get(layer_key or "", ([190, 184, 170, 100], [86, 98, 92, 100], 1.2))
+    for attr, attr_value in (
+        ("color", {"RGB": fallback[0]}),
+        ("outlineColor", {"RGB": fallback[1]}),
+        ("outlineWidth", fallback[2]),
+        ("width", fallback[2]),
+    ):
         try:
             setattr(symbol, attr, attr_value)
         except Exception:

@@ -130,6 +130,7 @@ class StyledRenderer(FieldsListRenderer):
         super().__init__()
         self.groups = [FakeGroup()]
         self.added_values = None
+        self.defaultSymbol = FakeSymbol()
 
     def addValues(self, values_or_items) -> None:
         self.added_values = values_or_items
@@ -237,6 +238,9 @@ def test_apply_simple_symbology_seeds_and_styles_display_state_classes():
     assert items["academic"].symbol.color == {"RGB": [176, 160, 211, 100]}
     assert items["residential"].symbol.outlineColor == {"RGB": [242, 238, 226, 100]}
     assert items["residential"].symbol.outlineWidth == 3.0
+    assert renderer.defaultSymbol.color == {"RGB": [220, 220, 208, 100]}
+    assert renderer.defaultSymbol.outlineColor == {"RGB": [242, 238, 226, 100]}
+    assert renderer.defaultSymbol.outlineWidth == 3.0
     assert renderer.useDefaultSymbol is True
     assert layer.assigned_symbology is layer.symbology
     assert messages.warnings == []
