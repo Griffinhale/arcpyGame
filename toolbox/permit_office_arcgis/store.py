@@ -8,6 +8,7 @@ import uuid
 
 import arcpy
 
+from ._perf import perf_traced
 from .messages import _log
 from .rules_loader import rules
 from .schema import DOCKET_FIELDS, PROJECT_FIELDS
@@ -113,6 +114,7 @@ def create_district_board(paths, seed, messages):
     _log(messages, "NEW", f"inserted {len(profiles)} districts")
 
 
+@perf_traced("write_state")
 def write_state(paths, state):
     """Persist city state as key/value rows for ArcGIS-friendly storage."""
 
@@ -307,6 +309,7 @@ def read_districts(paths):
     return out
 
 
+@perf_traced("write_district_updates")
 def write_district_updates(paths, districts, report, affected_ids=None):
     """Write changed district profiles and per-district reports back to ArcGIS."""
 
@@ -437,6 +440,7 @@ def read_active_features(paths):
     return features
 
 
+@perf_traced("write_active_features")
 def write_active_features(paths, features):
     """Persist lifecycle fields for existing support features."""
 
@@ -509,6 +513,7 @@ def read_projects(paths):
     return projects
 
 
+@perf_traced("write_projects")
 def write_projects(paths, projects):
     """Replace persisted project rows with the current in-memory records."""
 
@@ -533,6 +538,7 @@ def write_projects(paths, projects):
             ])
 
 
+@perf_traced("generate_docket_rows")
 def generate_docket_rows(paths, seed, messages):
     """Generate the turn docket and replace the persisted docket table."""
 
@@ -608,6 +614,7 @@ def read_docket(paths):
     return items
 
 
+@perf_traced("write_docket_item")
 def write_docket_item(paths, item):
     """Persist mutable fields for one docket item."""
 
@@ -635,6 +642,7 @@ def write_docket_item(paths, item):
             return
 
 
+@perf_traced("command_insert")
 def command_insert(paths, action, item_id, target_ids, payload=None):
     """Create a command row before a dashboard action begins."""
 
@@ -645,6 +653,7 @@ def command_insert(paths, action, item_id, target_ids, payload=None):
     return command_id
 
 
+@perf_traced("command_finish")
 def command_finish(paths, command_id, status, message="", error=""):
     """Mark a command row finished with status and diagnostic text."""
 
@@ -662,6 +671,7 @@ def command_finish(paths, command_id, status, message="", error=""):
             return
 
 
+@perf_traced("action_log")
 def action_log(paths, state, result):
     """Append a compact audit trail entry for a resolved decision."""
 

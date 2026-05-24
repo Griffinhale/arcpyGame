@@ -6,6 +6,7 @@ import traceback
 
 import arcpy
 
+from ._perf import perf_block, perf_session
 from .geometry import (
     add_outputs_to_map,
     activate_proposal,
@@ -221,22 +222,25 @@ class DashboardController:
         if not item:
             return
         command_id = command_insert(self.paths, "inspect", item.item_id, item.target_cell_ids)
-        try:
-            # Inspection reads the live state, lets pure rules attach evidence,
-            # then persists both the changed docket item and the command log.
-            state = read_state(self.paths)
-            districts = read_districts(self.paths)
-            active_features = read_active_features(self.paths)
-            result = rules.resolve_decision(state, item, districts, "inspect", item.target_cell_ids, seed=self.seed, active_features=active_features)
-            write_state(self.paths, state)
-            write_docket_item(self.paths, item)
-            action_log(self.paths, state, result)
-            command_finish(self.paths, command_id, result.command_status, result.report)
-            self.status_var.set(result.report)
-            open_effect_report(item.title, result.report, result.affected_cell_ids, state)
-        except Exception as exc:
-            command_finish(self.paths, command_id, "error", error=str(exc))
-            self.status_var.set(f"Inspect failed: {exc}")
+        with perf_session("turn=inspect", self.messages):
+            try:
+                # Inspection reads the live state, lets pure rules attach evidence,
+                # then persists both the changed docket item and the command log.
+                state = read_state(self.paths)
+                districts = read_districts(self.paths)
+                active_features = read_active_features(self.paths)
+                result = rules.resolve_decision(state, item, districts, "inspect", item.target_cell_ids, seed=self.seed, active_features=active_features)
+                with perf_block("writes"):
+                    write_state(self.paths, state)
+                    write_docket_item(self.paths, item)
+                    action_log(self.paths, state, result)
+                    command_finish(self.paths, command_id, result.command_status, result.report)
+                self.status_var.set(result.report)
+                with perf_block("receipt"):
+                    open_effect_report(item.title, result.report, result.affected_cell_ids, state)
+            except Exception as exc:
+                command_finish(self.paths, command_id, "error", error=str(exc))
+                self.status_var.set(f"Inspect failed: {exc}")
         self.reload()
 
     def apply_decision(self, action, mitigated):
@@ -246,47 +250,48 @@ class DashboardController:
         if not item:
             return
         command_id = None
-        try:
-            # Approvals need current map proposal context before pure rules can
-            # resolve target effects, spillover, active features, and projects.
-            target_ids = list(item.target_cell_ids or ())
-            if not target_ids:
-                target_ids = selected_cell_ids(self.district_layer)
-            target_ids = ensure_case_proposal(self.paths, item, self.seed, self.messages, target_ids or None)
-            command_id = command_insert(self.paths, action, item.item_id, target_ids)
-            spillover = [] if item.template_id == rules.MAINTENANCE_TEMPLATE_ID else proposal_spillover(self.paths, item)
-            state = read_state(self.paths)
-            districts = read_districts(self.paths)
-            active_features = read_active_features(self.paths)
-            projects = read_projects(self.paths)
-            result = rules.resolve_decision(
-                state,
-                item,
-                districts,
-                action,
-                item.target_cell_ids,
-                spillover,
-                seed=self.seed,
-                mitigated=mitigated,
-                active_features=active_features,
-                projects=projects,
-            )
-            if not result.ok:
-                command_finish(self.paths, command_id, "error", result.report, result.report)
-                self.status_var.set(result.report)
-                self.reload()
-                return
-            if result.feature_updates:
-                write_active_features(self.paths, active_features)
-            activated = activate_proposal(self.paths, item, result.report)
-            if not activated:
-                _warn(self.messages, "DASH", f"approved {item.item_id} but no proposed map feature was activated")
-            self._finish_decision(command_id, item, state, districts, projects, result)
-        except Exception as exc:
-            if command_id:
-                command_finish(self.paths, command_id, "error", error=str(exc))
-            self.status_var.set(f"Approve failed: {exc}")
-            _warn(self.messages, "DASH", traceback.format_exc().strip().splitlines()[-1])
+        with perf_session(f"turn={action}", self.messages):
+            try:
+                # Approvals need current map proposal context before pure rules can
+                # resolve target effects, spillover, active features, and projects.
+                target_ids = list(item.target_cell_ids or ())
+                if not target_ids:
+                    target_ids = selected_cell_ids(self.district_layer)
+                target_ids = ensure_case_proposal(self.paths, item, self.seed, self.messages, target_ids or None)
+                command_id = command_insert(self.paths, action, item.item_id, target_ids)
+                spillover = [] if item.template_id == rules.MAINTENANCE_TEMPLATE_ID else proposal_spillover(self.paths, item)
+                state = read_state(self.paths)
+                districts = read_districts(self.paths)
+                active_features = read_active_features(self.paths)
+                projects = read_projects(self.paths)
+                result = rules.resolve_decision(
+                    state,
+                    item,
+                    districts,
+                    action,
+                    item.target_cell_ids,
+                    spillover,
+                    seed=self.seed,
+                    mitigated=mitigated,
+                    active_features=active_features,
+                    projects=projects,
+                )
+                if not result.ok:
+                    command_finish(self.paths, command_id, "error", result.report, result.report)
+                    self.status_var.set(result.report)
+                    self.reload()
+                    return
+                if result.feature_updates:
+                    write_active_features(self.paths, active_features)
+                activated = activate_proposal(self.paths, item, result.report)
+                if not activated:
+                    _warn(self.messages, "DASH", f"approved {item.item_id} but no proposed map feature was activated")
+                self._finish_decision(command_id, item, state, districts, projects, result)
+            except Exception as exc:
+                if command_id:
+                    command_finish(self.paths, command_id, "error", error=str(exc))
+                self.status_var.set(f"Approve failed: {exc}")
+                _warn(self.messages, "DASH", traceback.format_exc().strip().splitlines()[-1])
         self.reload()
 
     def deny(self):
@@ -296,91 +301,101 @@ class DashboardController:
         if not item:
             return
         command_id = command_insert(self.paths, "deny", item.item_id, item.target_cell_ids)
-        try:
-            # Denials use the same pure-rule resolver, but proposal features are
-            # marked denied instead of activated on the map.
-            state = read_state(self.paths)
-            districts = read_districts(self.paths)
-            active_features = read_active_features(self.paths)
-            projects = read_projects(self.paths)
-            result = rules.resolve_decision(state, item, districts, "deny", item.target_cell_ids, seed=self.seed, active_features=active_features, projects=projects)
-            if not result.ok:
-                command_finish(self.paths, command_id, "error", result.report, result.report)
-                self.status_var.set(result.report)
-                self.reload()
-                return
-            if result.feature_updates:
-                write_active_features(self.paths, active_features)
-            proposal_status = item.status if item.status in ("denied", "deferred") else "denied"
-            mark_proposals(self.paths, item.item_id, proposal_status, result.report)
-            self._finish_decision(command_id, item, state, districts, projects, result)
-        except Exception as exc:
-            command_finish(self.paths, command_id, "error", error=str(exc))
-            self.status_var.set(f"Deny failed: {exc}")
+        with perf_session("turn=deny", self.messages):
+            try:
+                # Denials use the same pure-rule resolver, but proposal features are
+                # marked denied instead of activated on the map.
+                state = read_state(self.paths)
+                districts = read_districts(self.paths)
+                active_features = read_active_features(self.paths)
+                projects = read_projects(self.paths)
+                result = rules.resolve_decision(state, item, districts, "deny", item.target_cell_ids, seed=self.seed, active_features=active_features, projects=projects)
+                if not result.ok:
+                    command_finish(self.paths, command_id, "error", result.report, result.report)
+                    self.status_var.set(result.report)
+                    self.reload()
+                    return
+                if result.feature_updates:
+                    write_active_features(self.paths, active_features)
+                proposal_status = item.status if item.status in ("denied", "deferred") else "denied"
+                mark_proposals(self.paths, item.item_id, proposal_status, result.report)
+                self._finish_decision(command_id, item, state, districts, projects, result)
+            except Exception as exc:
+                command_finish(self.paths, command_id, "error", error=str(exc))
+                self.status_var.set(f"Deny failed: {exc}")
         self.reload()
 
     def _finish_decision(self, command_id, item, state, districts, projects, result):
         """Persist a successful decision result and show its filed report."""
 
-        write_district_updates(self.paths, districts, result.report, result.affected_cell_ids)
-        write_state(self.paths, state)
-        write_projects(self.paths, projects)
-        write_docket_item(self.paths, item)
-        action_log(self.paths, state, result)
-        command_finish(self.paths, command_id, result.command_status, result.report)
+        with perf_block("writes"):
+            write_district_updates(self.paths, districts, result.report, result.affected_cell_ids)
+            write_state(self.paths, state)
+            write_projects(self.paths, projects)
+            write_docket_item(self.paths, item)
+            action_log(self.paths, state, result)
+            command_finish(self.paths, command_id, result.command_status, result.report)
         rebuild_output_layers(self.paths, self.messages)
         self.district_layer = DISTRICTS
         self.status_var.set(result.report)
-        open_effect_report(item.title, result.report, result.affected_cell_ids, state)
+        with perf_block("receipt"):
+            open_effect_report(item.title, result.report, result.affected_cell_ids, state)
 
     def advance_turn(self):
         """Advance the saved game one turn and regenerate the docket."""
 
         command_id = command_insert(self.paths, "advance_turn", "", [])
-        try:
-            # Turn advancement mutates open docket items, city systems, active
-            # features, projects, and the next generated docket as one command.
-            state = read_state(self.paths)
-            items = read_docket(self.paths)
-            districts = read_districts(self.paths)
-            active_features = read_active_features(self.paths)
-            projects = read_projects(self.paths)
-            turn_result = rules.advance_turn_result(state, items, districts, active_features, projects)
-            report = turn_result.report
-            write_state(self.paths, state)
-            write_projects(self.paths, projects)
-            write_district_updates(self.paths, districts, report)
-            write_active_features(self.paths, active_features)
-            for item in items:
-                write_docket_item(self.paths, item)
-            generate_docket_rows(self.paths, self.seed, self.messages)
-            command_finish(self.paths, command_id, "applied", report)
-            rebuild_output_layers(self.paths, self.messages)
-            self.district_layer = DISTRICTS
-            self.status_var.set(report)
-        except Exception as exc:
-            command_finish(self.paths, command_id, "error", error=str(exc))
-            self.status_var.set(f"Advance failed: {exc}")
+        with perf_session("turn=advance", self.messages):
+            try:
+                # Turn advancement mutates open docket items, city systems, active
+                # features, projects, and the next generated docket as one command.
+                state = read_state(self.paths)
+                items = read_docket(self.paths)
+                districts = read_districts(self.paths)
+                active_features = read_active_features(self.paths)
+                projects = read_projects(self.paths)
+                turn_result = rules.advance_turn_result(state, items, districts, active_features, projects)
+                report = turn_result.report
+                with perf_block("writes"):
+                    write_state(self.paths, state)
+                    write_projects(self.paths, projects)
+                    write_district_updates(self.paths, districts, report)
+                    write_active_features(self.paths, active_features)
+                    for item in items:
+                        write_docket_item(self.paths, item)
+                    generate_docket_rows(self.paths, self.seed, self.messages)
+                    command_finish(self.paths, command_id, "applied", report)
+                rebuild_output_layers(self.paths, self.messages)
+                self.district_layer = DISTRICTS
+                self.status_var.set(report)
+            except Exception as exc:
+                command_finish(self.paths, command_id, "error", error=str(exc))
+                self.status_var.set(f"Advance failed: {exc}")
         self.reload()
 
 
 def clear_output_selections(paths):
     """Clear lingering dashboard selections from output layers and feature classes."""
 
-    for name, key in ((DISTRICTS, "districts"), (POINTS, "points"), (LINES, "lines"), (ZONES, "zones")):
-        try:
-            arcpy.management.SelectLayerByAttribute(name, "CLEAR_SELECTION")
-        except Exception:
+    with perf_block("sel"):
+        for name, key in ((DISTRICTS, "districts"), (POINTS, "points"), (LINES, "lines"), (ZONES, "zones")):
             try:
-                arcpy.management.SelectLayerByAttribute(paths[key], "CLEAR_SELECTION")
+                arcpy.management.SelectLayerByAttribute(name, "CLEAR_SELECTION")
             except Exception:
-                pass
+                try:
+                    arcpy.management.SelectLayerByAttribute(paths[key], "CLEAR_SELECTION")
+                except Exception:
+                    pass
 
 
 def rebuild_output_layers(paths, messages):
     """Recreate map layers after GDB edits to avoid stale ArcGIS draw state."""
 
-    clear_output_selections(paths)
-    remove_outputs_from_map(messages)
-    add_outputs_to_map(paths, messages)
-    refresh_all(paths, messages)
+    with perf_block("rebuild"):
+        clear_output_selections(paths)
+        with perf_block("remove"):
+            remove_outputs_from_map(messages)
+        with perf_block("add"):
+            add_outputs_to_map(paths, messages)
+        with perf_block("refresh"):
+            refresh_all(paths, messages)
