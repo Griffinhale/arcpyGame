@@ -22,6 +22,7 @@ for _module_name in (
     "permit_office_arcgis.rules_loader",
     "permit_office_arcgis.schema",
     "permit_office_arcgis.messages",
+    "permit_office_arcgis._perf",
     "permit_office_arcgis.store",
     "permit_office_arcgis.symbology_config",
     "permit_office_arcgis.geometry",
@@ -32,6 +33,7 @@ for _module_name in (
     if _module is not None:
         importlib.reload(_module)
 
+from permit_office_arcgis import _perf
 from permit_office_arcgis.dashboard import DashboardController
 from permit_office_arcgis.geometry import add_outputs_to_map, refresh_all, remove_outputs_from_map, seed_city_features
 from permit_office_arcgis.messages import _err, _log
@@ -41,6 +43,7 @@ from permit_office_arcgis.schema import (
     P_ACTION,
     P_DISTRICTS,
     P_OUTPUT,
+    P_PERF,
     P_SEED,
     P_WORKSPACE,
     TOOLBOX_ALIAS,
@@ -123,7 +126,15 @@ class PermitOfficePrototype(object):
             parameterType="Derived",
             direction="Output",
         )
-        return [p_workspace, p_districts, p_action, p_seed, p_output]
+        p_perf = arcpy.Parameter(
+            displayName="Log Refresh Timings",
+            name="enable_perf",
+            datatype="GPBoolean",
+            parameterType="Optional",
+            direction="Input",
+        )
+        p_perf.value = False
+        return [p_workspace, p_districts, p_action, p_seed, p_output, p_perf]
 
     def updateParameters(self, parameters):
         """Enable map-layer input only for dashboard actions."""
@@ -136,6 +147,7 @@ class PermitOfficePrototype(object):
 
         action = parameters[P_ACTION].valueAsText or "Ping Environment"
         seed = int(parameters[P_SEED].value or 2026)
+        _perf.set_enabled(bool(parameters[P_PERF].value))
         gdb_path = resolve_workspace(parameters[P_WORKSPACE].value, messages)
         paths = ensure_schema(gdb_path, messages)
 
