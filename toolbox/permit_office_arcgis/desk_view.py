@@ -285,15 +285,14 @@ class PermitDeskView:
         margin = 18
         gap = 14
         ledger_w = 230
-        status_h = 132
+        ledger_h = 158
 
         rail_x0 = width - margin - ledger_w
         rail_x1 = width - margin
         rail_y0 = banner_h + margin
         rail_y1 = height - margin
-        ledger_y1 = rail_y1 - status_h - 12
-        self._draw_ledger_rail(c, (rail_x0, rail_y0, rail_x1, ledger_y1))
-        self._draw_status_panel(c, (rail_x0, ledger_y1 + 12, rail_x1, rail_y1))
+        self._draw_ledger_rail(c, (rail_x0, rail_y0, rail_x1, rail_y0 + ledger_h))
+        self._draw_status_panel(c, (rail_x0, rail_y0 + ledger_h + 12, rail_x1, rail_y1))
 
         card_x0 = margin
         card_x1 = rail_x0 - gap
@@ -316,9 +315,10 @@ class PermitDeskView:
         c.create_text(22, h // 2, text="PERMIT OFFICE", anchor="w", fill=Palette.PAPER, font=self._font(13, "bold"))
         metrics = {row.label: row for row in self.model.ledger_rows}
         headlines = (("Turn", "DAY"), ("AP", "AP"), ("Money", "$"), ("Prosperity", "PROS"), ("Unrest", "UNREST"), ("Culture", "CULT"), ("Risk", "RISK"), ("Heat", "HEAT"))
-        avail = max(100, width - 200)
-        spacing = max(78, avail // len(headlines))
-        x = max(200, int(width * 0.22))
+        x_start = 200
+        right_pad = 30
+        spacing = max(82, (width - x_start - right_pad) // len(headlines))
+        x = x_start
         for key, display in headlines:
             row = metrics.get(key)
             if row is None:
@@ -474,39 +474,38 @@ class PermitDeskView:
         self._add_target("action", label, (x0, y0, x1, y1), callback)
 
     def _draw_ledger_rail(self, c, box):
-        """Draw the right-rail audit ledger in its narrow form."""
+        """Draw the right-rail city health panel (rows not surfaced in the banner)."""
 
         x0, y0, x1, y1 = box
         _shadow_rect(c, x0 + 4, y0 + 6, x1 + 4, y1 + 6)
         c.create_rectangle(x0, y0, x1, y1, fill=Palette.LEDGER, outline="#87987b", width=2)
-        c.create_rectangle(x0, y0, x1, y0 + 42, fill="#cad8c0", outline="#87987b")
-        c.create_text(x0 + 14, y0 + 14, text="AUDIT LEDGER", anchor="w", fill=Palette.INK, font=self._font(11, "bold"))
-        c.create_text(x0 + 14, y0 + 30, text="CITY", anchor="w", fill=Palette.GREEN, font=self._font(7, "bold"))
-        c.create_line(x0 + 10, y0 + 43, x1 - 10, y0 + 43, fill=Palette.LEDGER_LINE)
+        c.create_rectangle(x0, y0, x1, y0 + 32, fill="#cad8c0", outline="#87987b")
+        c.create_text(x0 + 14, y0 + 16, text="CITY HEALTH", anchor="w", fill=Palette.INK, font=self._font(10, "bold"))
+        c.create_line(x0 + 10, y0 + 33, x1 - 10, y0 + 33, fill=Palette.LEDGER_LINE)
 
-        y = y0 + 52
+        banner_labels = {"Turn", "AP", "Money", "Prosperity", "Unrest", "Culture", "Risk", "Heat"}
+        rows = [r for r in self.model.ledger_rows if r.label not in banner_labels]
+        y = y0 + 42
         label_x = x0 + 12
-        meter_x0 = x0 + 100
-        meter_x1 = x1 - 60
         value_x = x1 - 12
-        for idx, row in enumerate(self.model.ledger_rows):
+        for idx, row in enumerate(rows):
             long_value = _ledger_wraps(row)
-            row_h = 42 if long_value else 30
-            if y + row_h > y1 - 4:
+            row_h = 36 if long_value else 26
+            if y + row_h > y1 - 28:
                 break
             fill = "#d5e1ca" if idx % 2 else Palette.LEDGER
             c.create_rectangle(x0 + 8, y - 4, x1 - 8, y + row_h - 6, fill=fill, outline="")
-            c.create_text(label_x, y, text=row.label.upper(), anchor="nw", width=90, fill=Palette.MUTED, font=self._font(7, "bold"))
+            c.create_text(label_x, y, text=row.label.upper(), anchor="nw", width=110, fill=Palette.MUTED, font=self._font(7, "bold"))
             if long_value:
                 lines = _fit_lines(row.value, max(16, (x1 - x0 - 28) // 7), 2)
-                c.create_text(label_x, y + 14, text="\n".join(lines), anchor="nw", width=x1 - x0 - 24, fill=_tone_color(row.tone), font=self._font(8, "bold"))
+                c.create_text(label_x, y + 14, text="\n".join(lines), anchor="nw", fill=_tone_color(row.tone), font=self._font(8, "bold"))
             else:
                 c.create_text(value_x, y, text=_clip(row.value, 14), anchor="ne", fill=_tone_color(row.tone), font=self._font(9, "bold"))
-            if row.meter is not None and not long_value:
-                meter_y = y + 16
-                c.create_rectangle(meter_x0, meter_y, meter_x1, meter_y + 4, fill="#b8c9ad", outline="")
-                c.create_rectangle(meter_x0, meter_y, meter_x0 + int((meter_x1 - meter_x0) * max(0, min(100, row.meter)) / 100), meter_y + 4, fill=_tone_color(row.tone), outline="")
             y += row_h
+        c.create_text(x0 + 12, y1 - 22, text="Filed marks", anchor="w", fill=Palette.MUTED, font=self._font(7, "bold"))
+        for idx, color in enumerate((Palette.BLUE, Palette.GREEN, Palette.RED)):
+            sx = x0 + 86 + idx * 32
+            c.create_rectangle(sx, y1 - 26, sx + 22, y1 - 14, fill=color, outline="")
 
     def _draw_status_panel(self, c, box):
         """Draw the filed-report status panel and exhibit pill under the ledger."""
