@@ -257,33 +257,38 @@ class DashboardController:
                 target_ids = list(item.target_cell_ids or ())
                 if not target_ids:
                     target_ids = selected_cell_ids(self.district_layer)
-                target_ids = ensure_case_proposal(self.paths, item, self.seed, self.messages, target_ids or None)
+                with perf_block("ensure"):
+                    target_ids = ensure_case_proposal(self.paths, item, self.seed, self.messages, target_ids or None)
                 command_id = command_insert(self.paths, action, item.item_id, target_ids)
-                spillover = [] if item.template_id == rules.MAINTENANCE_TEMPLATE_ID else proposal_spillover(self.paths, item)
-                state = read_state(self.paths)
-                districts = read_districts(self.paths)
-                active_features = read_active_features(self.paths)
-                projects = read_projects(self.paths)
-                result = rules.resolve_decision(
-                    state,
-                    item,
-                    districts,
-                    action,
-                    item.target_cell_ids,
-                    spillover,
-                    seed=self.seed,
-                    mitigated=mitigated,
-                    active_features=active_features,
-                    projects=projects,
-                )
+                with perf_block("spillover"):
+                    spillover = [] if item.template_id == rules.MAINTENANCE_TEMPLATE_ID else proposal_spillover(self.paths, item)
+                with perf_block("reads"):
+                    state = read_state(self.paths)
+                    districts = read_districts(self.paths)
+                    active_features = read_active_features(self.paths)
+                    projects = read_projects(self.paths)
+                with perf_block("resolve"):
+                    result = rules.resolve_decision(
+                        state,
+                        item,
+                        districts,
+                        action,
+                        item.target_cell_ids,
+                        spillover,
+                        seed=self.seed,
+                        mitigated=mitigated,
+                        active_features=active_features,
+                        projects=projects,
+                    )
                 if not result.ok:
                     command_finish(self.paths, command_id, "error", result.report, result.report)
                     self.status_var.set(result.report)
-                    self.reload()
                     return
                 if result.feature_updates:
-                    write_active_features(self.paths, active_features)
-                activated = activate_proposal(self.paths, item, result.report)
+                    with perf_block("write_features"):
+                        write_active_features(self.paths, active_features)
+                with perf_block("activate"):
+                    activated = activate_proposal(self.paths, item, result.report)
                 if not activated:
                     _warn(self.messages, "DASH", f"approved {item.item_id} but no proposed map feature was activated")
                 self._finish_decision(command_id, item, state, districts, projects, result)
@@ -292,7 +297,9 @@ class DashboardController:
                     command_finish(self.paths, command_id, "error", error=str(exc))
                 self.status_var.set(f"Approve failed: {exc}")
                 _warn(self.messages, "DASH", traceback.format_exc().strip().splitlines()[-1])
-        self.reload()
+            finally:
+                with perf_block("reload"):
+                    self.reload()
 
     def deny(self):
         """Deny the active docket item and persist resulting state changes."""
@@ -305,25 +312,30 @@ class DashboardController:
             try:
                 # Denials use the same pure-rule resolver, but proposal features are
                 # marked denied instead of activated on the map.
-                state = read_state(self.paths)
-                districts = read_districts(self.paths)
-                active_features = read_active_features(self.paths)
-                projects = read_projects(self.paths)
-                result = rules.resolve_decision(state, item, districts, "deny", item.target_cell_ids, seed=self.seed, active_features=active_features, projects=projects)
+                with perf_block("reads"):
+                    state = read_state(self.paths)
+                    districts = read_districts(self.paths)
+                    active_features = read_active_features(self.paths)
+                    projects = read_projects(self.paths)
+                with perf_block("resolve"):
+                    result = rules.resolve_decision(state, item, districts, "deny", item.target_cell_ids, seed=self.seed, active_features=active_features, projects=projects)
                 if not result.ok:
                     command_finish(self.paths, command_id, "error", result.report, result.report)
                     self.status_var.set(result.report)
-                    self.reload()
                     return
                 if result.feature_updates:
-                    write_active_features(self.paths, active_features)
+                    with perf_block("write_features"):
+                        write_active_features(self.paths, active_features)
                 proposal_status = item.status if item.status in ("denied", "deferred") else "denied"
-                mark_proposals(self.paths, item.item_id, proposal_status, result.report)
+                with perf_block("mark"):
+                    mark_proposals(self.paths, item.item_id, proposal_status, result.report)
                 self._finish_decision(command_id, item, state, districts, projects, result)
             except Exception as exc:
                 command_finish(self.paths, command_id, "error", error=str(exc))
                 self.status_var.set(f"Deny failed: {exc}")
-        self.reload()
+            finally:
+                with perf_block("reload"):
+                    self.reload()
 
     def _finish_decision(self, command_id, item, state, districts, projects, result):
         """Persist a successful decision result and show its filed report."""
@@ -349,12 +361,14 @@ class DashboardController:
             try:
                 # Turn advancement mutates open docket items, city systems, active
                 # features, projects, and the next generated docket as one command.
-                state = read_state(self.paths)
-                items = read_docket(self.paths)
-                districts = read_districts(self.paths)
-                active_features = read_active_features(self.paths)
-                projects = read_projects(self.paths)
-                turn_result = rules.advance_turn_result(state, items, districts, active_features, projects)
+                with perf_block("reads"):
+                    state = read_state(self.paths)
+                    items = read_docket(self.paths)
+                    districts = read_districts(self.paths)
+                    active_features = read_active_features(self.paths)
+                    projects = read_projects(self.paths)
+                with perf_block("resolve"):
+                    turn_result = rules.advance_turn_result(state, items, districts, active_features, projects)
                 report = turn_result.report
                 with perf_block("writes"):
                     write_state(self.paths, state)
@@ -371,7 +385,9 @@ class DashboardController:
             except Exception as exc:
                 command_finish(self.paths, command_id, "error", error=str(exc))
                 self.status_var.set(f"Advance failed: {exc}")
-        self.reload()
+            finally:
+                with perf_block("reload"):
+                    self.reload()
 
 
 def clear_output_selections(paths):
