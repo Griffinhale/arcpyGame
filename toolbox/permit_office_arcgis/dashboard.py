@@ -21,7 +21,7 @@ from .geometry import (
     select_case_context,
     selected_cell_ids,
 )
-from .messages import _warn
+from .messages import _log, _warn
 from .rules_loader import rules
 from .schema import DISTRICTS, LINES, POINTS, ZONES
 from .store import (
@@ -291,7 +291,7 @@ class DashboardController:
                     activated = activate_proposal(self.paths, item, result.report)
                 if not activated:
                     _warn(self.messages, "DASH", f"approved {item.item_id} but no proposed map feature was activated")
-                self._finish_decision(command_id, item, state, districts, projects, result)
+                self._finish_decision(command_id, item, state, districts, projects, result, _decision_layer_names(item))
             except Exception as exc:
                 if command_id:
                     command_finish(self.paths, command_id, "error", error=str(exc))
@@ -329,7 +329,7 @@ class DashboardController:
                 proposal_status = item.status if item.status in ("denied", "deferred") else "denied"
                 with perf_block("mark"):
                     mark_proposals(self.paths, item.item_id, proposal_status, result.report)
-                self._finish_decision(command_id, item, state, districts, projects, result)
+                self._finish_decision(command_id, item, state, districts, projects, result, _decision_layer_names(item))
             except Exception as exc:
                 command_finish(self.paths, command_id, "error", error=str(exc))
                 self.status_var.set(f"Deny failed: {exc}")
@@ -337,7 +337,7 @@ class DashboardController:
                 with perf_block("reload"):
                     self.reload()
 
-    def _finish_decision(self, command_id, item, state, districts, projects, result):
+    def _finish_decision(self, command_id, item, state, districts, projects, result, layer_names=None):
         """Persist a successful decision result and show its filed report."""
 
         with perf_block("writes"):
@@ -347,7 +347,7 @@ class DashboardController:
             write_docket_item(self.paths, item)
             action_log(self.paths, state, result)
             command_finish(self.paths, command_id, result.command_status, result.report)
-        rebuild_output_layers(self.paths, self.messages)
+        rebuild_output_layers(self.paths, self.messages, layer_names=layer_names)
         self.district_layer = DISTRICTS
         self.status_var.set(result.report)
         with perf_block("receipt"):
@@ -404,14 +404,37 @@ def clear_output_selections(paths):
                     pass
 
 
-def rebuild_output_layers(paths, messages):
-    """Recreate map layers after GDB edits to avoid stale ArcGIS draw state."""
+_GEOM_TYPE_TO_LAYER = {"POINT": POINTS, "LINE": LINES, "POLYGON": ZONES}
+
+
+def _decision_layer_names(item):
+    """Return the layer set a decision on this item actually changes, or None.
+
+    None signals "rebuild all" so unknown geometry types fall back safely.
+    """
+
+    feature_layer = _GEOM_TYPE_TO_LAYER.get(getattr(item, "geometry_type", None))
+    if feature_layer is None:
+        return None
+    return {DISTRICTS, feature_layer}
+
+
+def rebuild_output_layers(paths, messages, layer_names=None):
+    """Recreate map layers after GDB edits to avoid stale ArcGIS draw state.
+
+    layer_names: optional iterable restricting remove/add/refresh to those names.
+    None rebuilds all four (current behavior). Unknown values pass through.
+    """
 
     with perf_block("rebuild"):
         clear_output_selections(paths)
+        if layer_names is None:
+            _log(messages, "REBUILD", "all")
+        else:
+            _log(messages, "REBUILD", f"targeted={sorted(layer_names)}")
         with perf_block("remove"):
-            remove_outputs_from_map(messages)
+            remove_outputs_from_map(messages, layer_names=layer_names)
         with perf_block("add"):
-            add_outputs_to_map(paths, messages)
+            add_outputs_to_map(paths, messages, layer_names=layer_names)
         with perf_block("refresh"):
-            refresh_all(paths, messages)
+            refresh_all(paths, messages, layer_names=layer_names)
