@@ -697,9 +697,10 @@ def mark_proposals(paths, item_id, status, report=""):
                     cursor.updateRow(row)
 
 
-def refresh_all(paths, messages):
-    """Refresh all known map layers after persisted game changes."""
-    for name in (DISTRICTS, POINTS, LINES, ZONES):
+def refresh_all(paths, messages, layer_names=None):
+    """Refresh known map layers; layer_names limits to a subset when given."""
+    targets = [n for n in (DISTRICTS, POINTS, LINES, ZONES) if layer_names is None or n in layer_names]
+    for name in targets:
         try:
             arcpy.RefreshLayer(name)
             _log(messages, "REFRESH", f"RefreshLayer({name!r}) OK")
@@ -707,16 +708,15 @@ def refresh_all(paths, messages):
             _warn(messages, "REFRESH", f"RefreshLayer({name!r}) failed: {exc}")
 
 
-def add_outputs_to_map(paths, messages):
-    """Add active game outputs to the current ArcGIS map when missing."""
-
+def add_outputs_to_map(paths, messages, layer_names=None):
+    """Add active game outputs to the map; layer_names limits to a subset when given."""
     try:
         aprx = arcpy.mp.ArcGISProject("CURRENT")
         active_map = aprx.activeMap
         if active_map is None:
             return
         existing = {lyr.name: lyr for lyr in active_map.listLayers()}
-        for name, key in ((DISTRICTS, "districts"), (POINTS, "points"), (LINES, "lines"), (ZONES, "zones")):
+        for name, key in [p for p in ((DISTRICTS, "districts"), (POINTS, "points"), (LINES, "lines"), (ZONES, "zones")) if layer_names is None or p[0] in layer_names]:
             if name not in existing:
                 lyr = active_map.addDataFromPath(paths[key])
                 lyr.name = name
@@ -730,14 +730,14 @@ def add_outputs_to_map(paths, messages):
         _warn(messages, "MAP", f"add outputs failed: {exc}")
 
 
-def remove_outputs_from_map(messages):
-    """Remove stale Permit Office layers before rebuilding map presentation."""
+def remove_outputs_from_map(messages, layer_names=None):
+    """Remove stale Permit Office layers; layer_names limits to a subset when given."""
     try:
         aprx = arcpy.mp.ArcGISProject("CURRENT")
         active_map = aprx.activeMap
         if active_map is None:
             return
-        output_names = {DISTRICTS, POINTS, LINES, ZONES}
+        output_names = {DISTRICTS, POINTS, LINES, ZONES} if layer_names is None else {DISTRICTS, POINTS, LINES, ZONES} & set(layer_names)
         removed = 0
         for layer in list(active_map.listLayers()):
             if getattr(layer, "name", None) in output_names:
