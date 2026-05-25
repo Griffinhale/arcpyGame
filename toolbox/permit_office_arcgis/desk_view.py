@@ -145,26 +145,26 @@ def open_filed_report(title, report, affected, state):
     except Exception:
         pass
 
-    width = 820
-    height = 620
+    width = 860
+    height = 600
     canvas = tk.Canvas(root, width=width, height=height, bg=Palette.DESK, highlightthickness=0)
     canvas.pack(fill="both", expand=True)
     _draw_receipt_canvas(canvas, width, height, title, report, affected, state)
 
     close = tk.Button(
         root,
-        text="File Receipt",
+        text="FILE RECEIPT",
         command=root.destroy,
         bg=Palette.INK,
         fg=Palette.PAPER,
         activebackground=Palette.BLUE,
         activeforeground=Palette.PAPER,
         relief="flat",
-        padx=18,
-        pady=7,
+        padx=22,
+        pady=9,
         font=("Segoe UI", 9, "bold"),
     )
-    canvas.create_window(width - 94, height - 36, window=close)
+    canvas.create_window(width - 110, height - 38, window=close)
     root.grab_set()
     root.wait_window()
 
@@ -273,12 +273,14 @@ class PermitDeskView:
             self._draw(width, height)
 
     def _draw(self, width, height):
-        """Lay out the rolodex stack, active card, ledger rail, and status panel."""
+        """Lay out top banner, rolodex stack, active card, ledger rail, and status panel."""
 
         c = self.canvas
         c.delete("all")
         self._click_targets = []
         self._draw_background(c, width, height)
+        banner_h = 54
+        self._draw_top_banner(c, width, banner_h)
 
         margin = 18
         gap = 14
@@ -287,7 +289,7 @@ class PermitDeskView:
 
         rail_x0 = width - margin - ledger_w
         rail_x1 = width - margin
-        rail_y0 = margin
+        rail_y0 = banner_h + margin
         rail_y1 = height - margin
         ledger_y1 = rail_y1 - status_h - 12
         self._draw_ledger_rail(c, (rail_x0, rail_y0, rail_x1, ledger_y1))
@@ -296,16 +298,32 @@ class PermitDeskView:
         card_x0 = margin
         card_x1 = rail_x0 - gap
         card_y1 = height - margin
-        card_h = min(484, max(360, height - 2 * margin - 70))
+        card_h = min(484, max(360, height - banner_h - 2 * margin - 70))
         card_y0 = card_y1 - card_h
-        self._draw_rolodex_stack(c, (card_x0, margin, card_x1, card_y0 - 10))
+        self._draw_rolodex_stack(c, (card_x0, banner_h + margin, card_x1, card_y0 - 10))
         self._draw_active_card(c, (card_x0, card_y0, card_x1, card_y1))
 
     def _draw_background(self, c, width, height):
-        """Paint the desk surface and the top desk-lip band."""
+        """Paint the desk surface (banner draws its own dark band on top)."""
 
         c.create_rectangle(0, 0, width, height, fill=Palette.DESK, outline="")
-        c.create_rectangle(0, 0, width, 8, fill=Palette.DESK_DARK, outline="")
+
+    def _draw_top_banner(self, c, width, h):
+        """Draw the headline-metrics banner across the desk lip."""
+
+        c.create_rectangle(0, 0, width, h, fill=Palette.DESK_DARK, outline="")
+        c.create_rectangle(0, h - 3, width, h, fill=Palette.CARD_SHADOW, outline="")
+        c.create_text(22, h // 2, text="PERMIT OFFICE", anchor="w", fill=Palette.PAPER, font=self._font(13, "bold"))
+        metrics = {row.label: row for row in self.model.ledger_rows}
+        headlines = (("Turn", "DAY"), ("AP", "AP"), ("Money", "MONEY"), ("Risk", "RISK"))
+        x = max(220, int(width * 0.30))
+        for key, display in headlines:
+            row = metrics.get(key)
+            if row is None:
+                continue
+            c.create_text(x, h // 2 - 9, text=display, anchor="w", fill=Palette.LEDGER_LINE, font=self._font(7, "bold"))
+            c.create_text(x, h // 2 + 8, text=_clip(row.value, 14), anchor="w", fill=Palette.PAPER, font=self._font(11, "bold"))
+            x += 118
 
     def _draw_rolodex_stack(self, c, box):
         """Draw the horizontal edge-tab stack of queued (non-active) docket items."""
@@ -845,29 +863,58 @@ def _action_note(template) -> str:
 
 
 def _draw_receipt_canvas(c, width, height, title, report, affected, state):
-    """Draw the filed-report receipt in a modal canvas."""
+    """Draw the filed-report receipt as a stamped permit card."""
 
-    report_lines = _fit_lines(report, 74, 8)
-    affected_text = ", ".join(affected) if affected else "(none)"
-    affected_lines = _fit_lines(f"Affected districts: {affected_text}", 82, 3)
+    accent = _receipt_accent(report)
+    margin = 28
     c.create_rectangle(0, 0, width, height, fill=Palette.DESK, outline="")
-    _shadow_rect(c, 50, 30, width - 44, height - 28)
-    c.create_rectangle(42, 22, width - 52, height - 38, fill=Palette.PAPER, outline="#9b8f76", width=2)
-    c.create_rectangle(68, 48, width - 78, 86, outline=Palette.RED, width=3)
-    c.create_text(width // 2, 67, text="FILED REPORT", anchor="center", fill=Palette.RED, font=("Segoe UI", 15, "bold"))
-    c.create_text(72, 108, text=_clip(title, 76), anchor="nw", fill=Palette.INK, font=("Segoe UI", 13, "bold"))
-    c.create_line(72, 137, width - 82, 137, fill="#c4b798", dash=(4, 4))
-    c.create_text(72, 154, text="\n".join(report_lines), anchor="nw", width=width - 150, fill=Palette.INK, font=("Segoe UI", 10))
-    affected_y = 166 + len(report_lines) * 18
-    c.create_text(72, affected_y, text="\n".join(affected_lines), anchor="nw", width=width - 160, fill=Palette.BLUE, font=("Segoe UI", 9, "bold"))
-    metrics = (
-        f"AP {state.ap}/{state.max_ap} | ${state.money} | Prosperity {state.prosperity} | "
-        f"Unrest {state.unrest} | Culture {state.culture} | Risk {state.risk} | Heat {rules.heat_summary(state)}"
-    )
-    metrics_y = affected_y + 22 + len(affected_lines) * 16
-    c.create_text(72, metrics_y, text=_clip(metrics, 120), anchor="nw", width=width - 160, fill=Palette.MUTED, font=("Segoe UI", 9))
-    c.create_line(72, height - 78, width - 190, height - 78, fill="#c4b798")
-    c.create_text(72, height - 62, text="Clerk initials", anchor="nw", fill=Palette.MUTED, font=("Segoe UI", 7, "bold"))
+    _shadow_rect(c, margin + 8, margin + 10, width - margin + 8, height - margin + 10)
+    c.create_rectangle(margin, margin, width - margin, height - margin, fill=Palette.PAPER, outline=Palette.LINE, width=2)
+    band_h = 56
+    c.create_rectangle(margin, margin, width - margin, margin + band_h, fill=accent, outline="")
+    c.create_text(margin + 22, margin + band_h // 2, text="FILED REPORT", anchor="w", fill=Palette.PAPER, font=("Segoe UI", 14, "bold"))
+    stamp_x1 = width - margin - 22
+    stamp_x0 = stamp_x1 - 104
+    stamp_y0 = margin + (band_h - 30) // 2
+    c.create_rectangle(stamp_x0, stamp_y0, stamp_x1, stamp_y0 + 30, outline=Palette.PAPER, width=2)
+    c.create_text((stamp_x0 + stamp_x1) // 2, stamp_y0 + 15, text="FILED", anchor="center", fill=Palette.PAPER, font=("Segoe UI", 10, "bold"))
+    body_x0 = margin + 24
+    body_x1 = width - margin - 24
+    y = margin + band_h + 20
+    c.create_text(body_x0, y, text=_clip(title, 72), anchor="nw", fill=Palette.INK, font=("Segoe UI", 14, "bold"))
+    y += 32
+    c.create_line(body_x0, y, body_x1, y, fill="#c4b798", dash=(4, 4))
+    y += 12
+    report_lines = _fit_lines(report, 88, 10)
+    c.create_text(body_x0, y, text="\n".join(report_lines), anchor="nw", width=body_x1 - body_x0, fill=Palette.INK, font=("Segoe UI", 10))
+    y += len(report_lines) * 18 + 14
+    affected_text = ", ".join(affected) if affected else "(none)"
+    affected_lines = _fit_lines(f"Affected districts: {affected_text}", 92, 3)
+    c.create_text(body_x0, y, text="\n".join(affected_lines), anchor="nw", width=body_x1 - body_x0, fill=Palette.BLUE, font=("Segoe UI", 9, "bold"))
+    metric_y = height - margin - 58
+    c.create_line(body_x0, metric_y - 10, body_x1, metric_y - 10, fill="#c4b798")
+    items = (("AP", f"{state.ap}/{state.max_ap}"), ("$", str(state.money)), ("PROS", str(state.prosperity)), ("UNREST", str(state.unrest)), ("CULT", str(state.culture)), ("RISK", str(state.risk)), ("HEAT", str(rules.heat_summary(state))))
+    mw = (body_x1 - body_x0 - 140) // len(items)
+    mx = body_x0
+    for label, value in items:
+        c.create_text(mx, metric_y, text=label, anchor="nw", fill=Palette.MUTED, font=("Segoe UI", 7, "bold"))
+        c.create_text(mx, metric_y + 12, text=_clip(value, 8), anchor="nw", fill=Palette.INK, font=("Segoe UI", 10, "bold"))
+        mx += mw
+
+
+def _receipt_accent(report):
+    """Map the result text to the filed-report title band color."""
+
+    lower = (report or "").lower()
+    if lower.startswith(("approved with", "approved (")):
+        return "#527d65"
+    if lower.startswith(("approved", "issued")):
+        return Palette.GREEN
+    if lower.startswith(("denied", "deny")):
+        return Palette.RED
+    if lower.startswith(("inspected", "inspection")):
+        return Palette.GOLD
+    return Palette.BLUE
 
 
 def _draw_ruled_block(c, x0, y0, x1, y1, label, text, accent, font_factory):
