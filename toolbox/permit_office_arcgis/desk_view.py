@@ -315,9 +315,9 @@ class PermitDeskView:
         c.create_text(22, h // 2, text="PERMIT OFFICE", anchor="w", fill=Palette.PAPER, font=self._font(13, "bold"))
         metrics = {row.label: row for row in self.model.ledger_rows}
         headlines = (("Turn", "DAY"), ("AP", "AP"), ("Money", "$"), ("Prosperity", "PROS"), ("Unrest", "UNREST"), ("Culture", "CULT"), ("Risk", "RISK"), ("Heat", "HEAT"))
-        x_start = 200
+        x_start = 280
         right_pad = 30
-        spacing = max(82, (width - x_start - right_pad) // len(headlines))
+        spacing = max(78, (width - x_start - right_pad) // len(headlines))
         x = x_start
         for key, display in headlines:
             row = metrics.get(key)
@@ -428,7 +428,7 @@ class PermitDeskView:
             y += 22
         y += 4
 
-        districts_h = 42
+        districts_h = 56
         _draw_ruled_block(c, body_x0, y, body_x1, y + districts_h, "SELECTED DISTRICTS", case.districts, Palette.BLUE, self._font)
         y += districts_h + 8
         y += _draw_impact_buckets(c, body_x0, y, body_x1 - body_x0, case.impact_buckets, self._font) + 8
@@ -447,10 +447,9 @@ class PermitDeskView:
             ("Update Map", Palette.TEAL, self.callbacks.update_from_map),
             ("Inspect File", Palette.GOLD, self.callbacks.inspect),
             ("Issue Permit", Palette.GREEN, self.callbacks.approve),
-            ("With Conditions", "#527d65", self.callbacks.approve_mitigated),
+            ("Conditions", "#527d65", self.callbacks.approve_mitigated),
             ("Deny", Palette.RED, self.callbacks.deny),
             ("End Day", Palette.INK, self.callbacks.advance_turn),
-            ("Close", Palette.MUTED, self.callbacks.close),
         )
         gap = 8
         inner_x0 = x0 + 22
