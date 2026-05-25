@@ -298,9 +298,9 @@ class PermitDeskView:
         card_x0 = margin
         card_x1 = rail_x0 - gap
         card_y1 = height - margin
-        card_h = min(484, max(360, height - banner_h - 2 * margin - 70))
+        card_h = min(580, max(360, height - banner_h - 2 * margin - 60))
         card_y0 = card_y1 - card_h
-        self._draw_rolodex_stack(c, (card_x0, banner_h + margin, card_x1, card_y0 - 10))
+        self._draw_rolodex_stack(c, (card_x0, banner_h + margin, card_x1, card_y0 - 8))
         self._draw_active_card(c, (card_x0, card_y0, card_x1, card_y1))
 
     def _draw_background(self, c, width, height):
@@ -315,15 +315,17 @@ class PermitDeskView:
         c.create_rectangle(0, h - 3, width, h, fill=Palette.CARD_SHADOW, outline="")
         c.create_text(22, h // 2, text="PERMIT OFFICE", anchor="w", fill=Palette.PAPER, font=self._font(13, "bold"))
         metrics = {row.label: row for row in self.model.ledger_rows}
-        headlines = (("Turn", "DAY"), ("AP", "AP"), ("Money", "MONEY"), ("Risk", "RISK"))
-        x = max(220, int(width * 0.30))
+        headlines = (("Turn", "DAY"), ("AP", "AP"), ("Money", "$"), ("Prosperity", "PROS"), ("Unrest", "UNREST"), ("Culture", "CULT"), ("Risk", "RISK"), ("Heat", "HEAT"))
+        avail = max(100, width - 200)
+        spacing = max(78, avail // len(headlines))
+        x = max(200, int(width * 0.22))
         for key, display in headlines:
             row = metrics.get(key)
             if row is None:
                 continue
             c.create_text(x, h // 2 - 9, text=display, anchor="w", fill=Palette.LEDGER_LINE, font=self._font(7, "bold"))
-            c.create_text(x, h // 2 + 8, text=_clip(row.value, 14), anchor="w", fill=Palette.PAPER, font=self._font(11, "bold"))
-            x += 118
+            c.create_text(x, h // 2 + 8, text=_clip(row.value, 12), anchor="w", fill=Palette.PAPER, font=self._font(11, "bold"))
+            x += spacing
 
     def _draw_rolodex_stack(self, c, box):
         """Draw the horizontal edge-tab stack of queued (non-active) docket items."""
@@ -350,7 +352,7 @@ class PermitDeskView:
 
         tab_count = len(visible)
         stack_h = tab_h + (tab_count - 1) * v_offset
-        stack_y_start = max(y0 + 20, y1 - stack_h - 4)
+        stack_y_start = y0 + 20  # top-anchor so tabs sit under the rolodex header
 
         # Draw deepest (oldest) first so newer tabs overlap them.
         for i, row in enumerate(reversed(visible)):
@@ -885,12 +887,12 @@ def _draw_receipt_canvas(c, width, height, title, report, affected, state):
     y += 32
     c.create_line(body_x0, y, body_x1, y, fill="#c4b798", dash=(4, 4))
     y += 12
-    report_lines = _fit_lines(report, 88, 10)
-    c.create_text(body_x0, y, text="\n".join(report_lines), anchor="nw", width=body_x1 - body_x0, fill=Palette.INK, font=("Segoe UI", 10))
-    y += len(report_lines) * 18 + 14
+    # Pre-wrap and let Tk respect newlines (passing width= triggers a double-wrap that shifts the layout).
+    rid = c.create_text(body_x0, y, text="\n".join(_fit_lines(report or "", 100, 14)), anchor="nw", fill=Palette.INK, font=("Segoe UI", 10))
+    y = (c.bbox(rid) or (0, 0, 0, y + 16))[3] + 14
     affected_text = ", ".join(affected) if affected else "(none)"
-    affected_lines = _fit_lines(f"Affected districts: {affected_text}", 92, 3)
-    c.create_text(body_x0, y, text="\n".join(affected_lines), anchor="nw", width=body_x1 - body_x0, fill=Palette.BLUE, font=("Segoe UI", 9, "bold"))
+    aid = c.create_text(body_x0, y, text="\n".join(_fit_lines(f"Affected districts: {affected_text}", 100, 3)), anchor="nw", fill=Palette.BLUE, font=("Segoe UI", 9, "bold"))
+    y = (c.bbox(aid) or (0, 0, 0, y + 14))[3] + 6
     metric_y = height - margin - 58
     c.create_line(body_x0, metric_y - 10, body_x1, metric_y - 10, fill="#c4b798")
     items = (("AP", f"{state.ap}/{state.max_ap}"), ("$", str(state.money)), ("PROS", str(state.prosperity)), ("UNREST", str(state.unrest)), ("CULT", str(state.culture)), ("RISK", str(state.risk)), ("HEAT", str(rules.heat_summary(state))))
