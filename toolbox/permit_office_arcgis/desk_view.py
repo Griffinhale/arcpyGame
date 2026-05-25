@@ -466,7 +466,7 @@ class PermitDeskView:
 
         y = y0 + 52
         label_x = x0 + 12
-        meter_x0 = x0 + 80
+        meter_x0 = x0 + 100
         meter_x1 = x1 - 60
         value_x = x1 - 12
         for idx, row in enumerate(self.model.ledger_rows):
@@ -476,7 +476,7 @@ class PermitDeskView:
                 break
             fill = "#d5e1ca" if idx % 2 else Palette.LEDGER
             c.create_rectangle(x0 + 8, y - 4, x1 - 8, y + row_h - 6, fill=fill, outline="")
-            c.create_text(label_x, y, text=row.label.upper(), anchor="nw", width=70, fill=Palette.MUTED, font=self._font(7, "bold"))
+            c.create_text(label_x, y, text=row.label.upper(), anchor="nw", width=90, fill=Palette.MUTED, font=self._font(7, "bold"))
             if long_value:
                 lines = _fit_lines(row.value, max(16, (x1 - x0 - 28) // 7), 2)
                 c.create_text(label_x, y + 14, text="\n".join(lines), anchor="nw", width=x1 - x0 - 24, fill=_tone_color(row.tone), font=self._font(8, "bold"))
