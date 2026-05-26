@@ -21,6 +21,7 @@ This file is the quick project status source for Permit Office. It separates the
 - Recorded live ArcGIS Pro smoke-test results from `docs/permit-office-prototype-smoke-test.md`.
 - Final cold-start demo instructions for a clean ArcGIS Pro project.
 - Confirmation that map refresh, layer addition, and Tkinter dashboard behavior are reliable on the target presentation machine.
+- Refresh/cache spike comparison results from `docs/permit-office-refresh-spike-benchmark.md`.
 
 ## Iterate Later
 
