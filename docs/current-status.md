@@ -1,10 +1,10 @@
 # Permit Office Current Status
 
-Date: 2026-05-16
+Date: 2026-05-27
 
 ## Purpose
 
-This file is the quick project status source for Permit Office. It separates the implemented prototype from the remaining validation and cleanup work so new sessions do not restart from the older Survey Sweeper / Containment direction.
+This file is the quick project status source for Permit Office. It separates the implemented prototype from the remaining validation and cleanup work so new sessions stay focused on the municipal permit office archetype.
 
 ## Implemented
 
@@ -15,19 +15,21 @@ This file is the quick project status source for Permit Office. It separates the
 - Thin ArcGIS toolbox entrypoint in `toolbox/arcpy_permit_office.pyt`.
 - Compatibility facade in `toolbox/arcpy_permit_office_rules.py` for tests and toolbox loading.
 - Active automated regression suite in `tests/test_permit_office_rules.py`.
+- Current turn/data-flow reference in `docs/permit-office-turn-data-flow.md`.
+- Refresh/cache spike interpretation in `docs/permit-office-refresh-spike-benchmark.md`: main and ArcPy refresh timings were close, while the SDK add-in strategy was slower.
 
 ## Missing
 
 - Recorded live ArcGIS Pro smoke-test results from `docs/permit-office-prototype-smoke-test.md`.
 - Final cold-start demo instructions for a clean ArcGIS Pro project.
 - Confirmation that map refresh, layer addition, and Tkinter dashboard behavior are reliable on the target presentation machine.
-- Refresh/cache spike comparison results from `docs/permit-office-refresh-spike-benchmark.md`.
 
 ## Iterate Later
 
 - Dashboard layout and copy polish after the live smoke test identifies real friction.
 - Docket template balance and report wording for a short demo rather than a broad simulation sandbox.
 - Symbology and map presentation polish for `PermitDistricts`, `PermitPoints`, `PermitLines`, and `PermitZones`.
+- If live display staleness remains, revisit the ArcPy refresh-only branch as a reliability fix, not as a confirmed speed improvement.
 - Possible `store.py` split if persistence grows beyond the current file-size budget.
 
 ## Validation
@@ -45,5 +47,3 @@ Manual ArcGIS validation should follow:
 ```text
 docs/permit-office-prototype-smoke-test.md
 ```
-
-The archived Survey Sweeper / Containment tests are historical and are not part of the active default validation path.

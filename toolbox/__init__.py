@@ -1,1 +1,1 @@
-"""ArcPy Game toolbox support modules."""
+"""Permit Office toolbox support modules."""

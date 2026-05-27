@@ -1093,7 +1093,7 @@ def test_arcpy_toolbox_schema_declares_governance_fields_without_new_feature_cla
 def test_active_permit_office_files_stay_under_line_budget():
     """Verify active source files remain below the reviewable line budget."""
     toolbox_dir = Path(__file__).parents[1] / "toolbox"
-    # Keep the active ArcGIS toolbox small enough to review without counting archive files.
+    # Keep the active ArcGIS toolbox small enough to review quickly.
     active_paths = [
         toolbox_dir / "arcpy_permit_office.pyt",
         toolbox_dir / "arcpy_permit_office_rules.py",
