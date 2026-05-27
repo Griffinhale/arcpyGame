@@ -25,7 +25,7 @@ See `docs/current-status.md` for the implemented/missing/iterate breakdown.
 Short version:
 
 - Implemented: deterministic Permit Office rules, generated districts, docket templates, inspections, population/grievance, incidents, projects, active features, maintenance, audit findings, ArcGIS schema/store coverage, and a dashboard-map loop.
-- Missing: recorded live ArcGIS Pro smoke-test results, polished setup instructions for a cold demo machine, and presentation-machine confirmation for refresh/dashboard behavior.
+- Missing: recorded live ArcGIS Pro smoke-test results, polished setup instructions for a cold demo machine, and presentation-machine confirmation for dashboard/map refresh behavior.
 - Current default check:
 
 ```bash
@@ -46,16 +46,7 @@ Add `toolbox/arcpy_permit_office.pyt` to ArcGIS Pro and run the `Permit Office P
 
 - `docs/permit-office-concept.md`: product concept and design direction.
 - `docs/permit-office-architecture.md`: module boundaries and file-size rule.
+- `docs/permit-office-turn-data-flow.md`: current per-turn logic and ArcGIS data flow.
 - `docs/permit-office-docket-design.md`: docket template and consequence model.
 - `docs/permit-office-population-design.md`: population, dissatisfaction, and incident model.
 - `docs/permit-office-prototype-smoke-test.md`: manual ArcGIS Pro validation sequence.
-
-## Archive
-
-The previous Survey Sweeper / Containment / GUI spike direction is preserved under:
-
-```text
-archive/survey-sweeper-containment/
-```
-
-Those files are historical reference material, not the active product surface.

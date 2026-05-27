@@ -1,6 +1,6 @@
 # Permit Office Architecture
 
-Date: 2026-05-15
+Date: 2026-05-27
 
 The Permit Office prototype is split into two layers: pure game rules and the ArcGIS adapter.
 
@@ -31,6 +31,10 @@ The Permit Office prototype is split into two layers: pure game rules and the Ar
 
 `toolbox/arcpy_permit_office.pyt` should stay small: parameter definitions, action dispatch, and ArcGIS toolbox class declarations only.
 
+## Turn Data Flow
+
+The current turn and dashboard callback flow is documented in `docs/permit-office-turn-data-flow.md`. That file is the canonical reference for how `CityState`, `DistrictProfile`, `DocketItem`, `FeatureInstance`, and `ProjectRecord` move between pure rules and ArcGIS feature classes during inspect, approve, deny, exhibit, and advance-turn actions.
+
 ## File Size Rule
 
-Active Permit Office Python files should stay under 1,000 lines. Legacy spike files can remain larger unless they become active development targets.
+Active Permit Office Python files should stay under 1,000 lines. Retired prototype code should not remain in the active tree; recover older explorations from git history when needed.
