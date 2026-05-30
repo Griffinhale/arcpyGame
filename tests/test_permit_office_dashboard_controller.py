@@ -137,3 +137,45 @@ def test_successful_decision_reapplies_map_presentation_before_refresh(monkeypat
 
     assert controller.district_layer == dashboard.DISTRICTS
     assert order[-5:] == ["clear", "remove", "map", "refresh", "receipt"]
+
+
+def test_start_new_game_replaces_rows_and_map_layers(monkeypatch):
+    controller = dashboard.DashboardController({"districts": "districts"}, "old_layer", 2026, object())
+    controller.selected_item_id = "CASE-old"
+    controller.status_text = ""
+    controller.status_var = dashboard._StatusProxy(controller)
+    controller.reload = lambda: None
+    order = []
+
+    monkeypatch.setattr(dashboard, "clear_game_rows", lambda paths: order.append("clear"))
+    monkeypatch.setattr(dashboard, "create_district_board", lambda paths, seed, messages: order.append(("districts", seed)))
+    monkeypatch.setattr(dashboard, "seed_city_features", lambda paths, seed, messages: order.append(("city", seed)))
+    monkeypatch.setattr(dashboard, "write_state", lambda paths, state: order.append(("state", state.turn)))
+    monkeypatch.setattr(dashboard, "generate_docket_rows", lambda paths, seed, messages: order.append(("docket", seed)))
+    monkeypatch.setattr(dashboard, "remove_outputs_from_map", lambda messages: order.append("remove"))
+    monkeypatch.setattr(dashboard, "add_outputs_to_map", lambda paths, messages: order.append("map"))
+    monkeypatch.setattr(dashboard, "refresh_all", lambda paths, messages: order.append("refresh"))
+
+    controller.start_new_game(99)
+
+    assert order == ["clear", ("districts", 99), ("city", 99), ("state", 1), ("docket", 99), "remove", "map", "refresh"]
+    assert controller.seed == 99
+    assert controller.district_layer == dashboard.DISTRICTS
+    assert controller.selected_item_id == ""
+    assert controller.status_text == "New game started with seed 99."
+
+
+def test_prepare_dashboard_session_regenerates_missing_docket_for_saved_game(monkeypatch):
+    counts = {"districts": 25, "state": 1, "docket": 0}
+    order = []
+
+    monkeypatch.setattr(dashboard, "_row_count", lambda path: counts[path])
+    monkeypatch.setattr(dashboard, "add_outputs_to_map", lambda paths, messages: order.append("map"))
+    monkeypatch.setattr(dashboard, "generate_docket_rows", lambda paths, seed, messages: order.append(("docket", seed)))
+    monkeypatch.setattr(dashboard, "refresh_all", lambda paths, messages: order.append("refresh"))
+    monkeypatch.setattr(dashboard, "_log", lambda *args: None)
+
+    seed = dashboard.prepare_dashboard_session({"districts": "districts", "state": "state", "docket": "docket"}, 2026, object())
+
+    assert seed == 2026
+    assert order == ["map", ("docket", 2026), "refresh"]

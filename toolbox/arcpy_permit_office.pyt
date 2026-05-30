@@ -34,32 +34,17 @@ for _module_name in (
         importlib.reload(_module)
 
 from permit_office_arcgis import _perf
-from permit_office_arcgis.dashboard import DashboardController
-from permit_office_arcgis.geometry import add_outputs_to_map, refresh_all, remove_outputs_from_map, seed_city_features
-from permit_office_arcgis.messages import _err, _log
-from permit_office_arcgis.rules_loader import rules
+from permit_office_arcgis.dashboard import DashboardController, prepare_dashboard_session
+from permit_office_arcgis.geometry import add_outputs_to_map
 from permit_office_arcgis.schema import (
-    ACTIONS,
-    P_ACTION,
-    P_DISTRICTS,
     P_OUTPUT,
     P_PERF,
-    P_SEED,
     P_WORKSPACE,
+    DISTRICTS,
     TOOLBOX_ALIAS,
     TOOLBOX_LABEL,
-    clear_game_rows,
     ensure_schema,
     resolve_workspace,
-)
-from permit_office_arcgis.store import (
-    create_district_board,
-    generate_docket_rows,
-    read_active_features,
-    read_districts,
-    read_docket,
-    read_state,
-    write_state,
 )
 
 
@@ -85,7 +70,7 @@ class PermitOfficePrototype(object):
         self.canRunInBackground = False
 
     def getParameterInfo(self):
-        """Declare ArcGIS tool parameters and their value-list constraints."""
+        """Declare ArcGIS tool parameters for launching the dashboard."""
 
         p_workspace = arcpy.Parameter(
             displayName="Game Workspace (optional)",
@@ -94,31 +79,6 @@ class PermitOfficePrototype(object):
             parameterType="Optional",
             direction="Input",
         )
-        p_districts = arcpy.Parameter(
-            displayName="District Layer",
-            name="district_layer",
-            datatype="GPFeatureLayer",
-            parameterType="Optional",
-            direction="Input",
-        )
-        p_action = arcpy.Parameter(
-            displayName="Action",
-            name="action",
-            datatype="GPString",
-            parameterType="Required",
-            direction="Input",
-        )
-        p_action.filter.type = "ValueList"
-        p_action.filter.list = list(ACTIONS)
-        p_action.value = "Ping Environment"
-        p_seed = arcpy.Parameter(
-            displayName="Random Seed",
-            name="random_seed",
-            datatype="GPLong",
-            parameterType="Optional",
-            direction="Input",
-        )
-        p_seed.value = 2026
         p_output = arcpy.Parameter(
             displayName="Output District Layer",
             name="output_district_layer",
@@ -134,66 +94,15 @@ class PermitOfficePrototype(object):
             direction="Input",
         )
         p_perf.value = False
-        return [p_workspace, p_districts, p_action, p_seed, p_output, p_perf]
-
-    def updateParameters(self, parameters):
-        """Enable map-layer input only for dashboard actions."""
-
-        action = parameters[P_ACTION].valueAsText
-        parameters[P_DISTRICTS].enabled = action == "Open Dashboard"
+        return [p_workspace, p_output, p_perf]
 
     def execute(self, parameters, messages):
-        """Dispatch the selected ArcGIS tool action against game state."""
+        """Open the dashboard against the resolved saved-game geodatabase."""
 
-        action = parameters[P_ACTION].valueAsText or "Ping Environment"
-        seed = int(parameters[P_SEED].value or 2026)
         _perf.set_enabled(bool(parameters[P_PERF].value))
         gdb_path = resolve_workspace(parameters[P_WORKSPACE].value, messages)
         paths = ensure_schema(gdb_path, messages)
-
-        # Lightweight actions either report environment state or populate the
-        # geodatabase without opening the dashboard event loop.
-        if action == "Ping Environment":
-            _log(messages, "PING", f"workspace = {gdb_path}")
-            _log(messages, "PING", f"templates = {', '.join(sorted(rules.TEMPLATES))}")
-            return
-        if action == "New Game":
-            clear_game_rows(paths)
-            create_district_board(paths, seed, messages)
-            seed_city_features(paths, seed, messages)
-            write_state(paths, rules.CityState())
-            generate_docket_rows(paths, seed, messages)
-            remove_outputs_from_map(messages)
-            add_outputs_to_map(paths, messages)
-            refresh_all(paths, messages)
-            arcpy.SetParameterAsText(P_OUTPUT, paths["districts"])
-            return
-        if action == "Generate Docket":
-            generate_docket_rows(paths, seed, messages)
-            add_outputs_to_map(paths, messages)
-            refresh_all(paths, messages)
-            return
-        if action == "Show Scorecard":
-            # Scorecards read persisted rows and pure rules data without
-            # mutating the game so they are safe as a quick audit check.
-            state = read_state(paths)
-            districts = read_districts(paths)
-            active_features = read_active_features(paths)
-            items = read_docket(paths)
-            grade, report = rules.scorecard(state, districts, active_features, items)
-            _log(messages, "AUDIT", f"{report} {rules.population_city_summary(districts)}; incidents={rules.incident_summary(districts)}.")
-            return
-        if action == "Open Dashboard":
-            # Dashboard startup requires map outputs and seeded rows because
-            # Tkinter callbacks rely on persisted ArcGIS feature classes.
-            district_layer = parameters[P_DISTRICTS].value or paths["districts"]
-            add_outputs_to_map(paths, messages)
-            if int(arcpy.management.GetCount(paths["districts"])[0]) == 0:
-                _err(messages, "DASH", "Run New Game before opening the dashboard.")
-                return
-            if int(arcpy.management.GetCount(paths["docket"])[0]) == 0:
-                generate_docket_rows(paths, seed, messages)
-            DashboardController(paths, district_layer, seed, messages).open()
-            arcpy.SetParameterAsText(P_OUTPUT, paths["districts"])
-            return
-        _err(messages, "DISPATCH", f"unknown action: {action}")
+        add_outputs_to_map(paths, messages)
+        seed = prepare_dashboard_session(paths, 2026, messages)
+        DashboardController(paths, DISTRICTS, seed, messages).open()
+        arcpy.SetParameterAsText(P_OUTPUT, paths["districts"])

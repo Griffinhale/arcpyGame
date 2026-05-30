@@ -20,14 +20,16 @@ from .geometry import (
     remove_outputs_from_map,
     select_case_context,
     selected_cell_ids,
+    seed_city_features,
 )
 from .messages import _log, _warn
 from .rules_loader import rules
-from .schema import DISTRICTS, LINES, POINTS, ZONES
+from .schema import DISTRICTS, LINES, POINTS, ZONES, clear_game_rows
 from .store import (
     action_log,
     command_finish,
     command_insert,
+    create_district_board,
     generate_docket_rows,
     read_active_features,
     read_districts,
@@ -47,6 +49,35 @@ def open_effect_report(title, report, affected, state):
     """Show a filed-report receipt after a dashboard action resolves."""
 
     open_filed_report(title, report, affected, state)
+
+
+def prepare_dashboard_session(paths, seed, messages):
+    """Repair resumable saved-game presentation before the GUI opens."""
+
+    if has_saved_game(paths):
+        add_outputs_to_map(paths, messages)
+        if _row_count(paths["docket"]) == 0:
+            generate_docket_rows(paths, seed, messages)
+            refresh_all(paths, messages)
+        _log(messages, "DASH", "resuming saved Permit Office game")
+    else:
+        _log(messages, "DASH", "no saved Permit Office game found; open dashboard start screen")
+    return seed
+
+
+def has_saved_game(paths):
+    """Return whether the geodatabase contains enough rows to resume play."""
+
+    return _row_count(paths["districts"]) > 0 and _row_count(paths["state"]) > 0
+
+
+def _row_count(path):
+    """Return an ArcGIS table row count, treating inaccessible paths as empty."""
+
+    try:
+        return int(arcpy.management.GetCount(path)[0])
+    except Exception:
+        return 0
 
 
 class _StatusProxy:
@@ -109,6 +140,8 @@ class DashboardController:
             approve_mitigated=lambda: self.apply_decision("approve_mitigated", True),
             deny=self.deny,
             advance_turn=self.advance_turn,
+            new_game=self.new_game,
+            scorecard=self.show_scorecard,
             close=self.root.destroy,
         )
         self.view = PermitDeskView(self.root, callbacks, self.select_item)
@@ -136,6 +169,8 @@ class DashboardController:
         state = read_state(self.paths)
         districts = read_districts(self.paths)
         items = read_docket(self.paths)
+        if not has_saved_game(self.paths) and not self.status_text:
+            self.status_text = "No saved game found. Click New Game to create Permit Office layers and start play."
         proposal_visible_by_item = {}
         for item in items:
             try:
@@ -152,6 +187,82 @@ class DashboardController:
         )
         self.selected_item_id = model.selected_item_id
         self.view.render(model)
+
+    def new_game(self):
+        """Start a fresh game from the dashboard after player confirmation."""
+
+        try:
+            from tkinter import messagebox, simpledialog
+        except Exception as exc:
+            self.status_var.set(f"New game failed: tkinter dialogs unavailable: {exc}")
+            self.reload()
+            return
+        if has_saved_game(self.paths):
+            ok = messagebox.askyesno(
+                "Start New Game",
+                "Replace the current Permit Office game rows and map layers?",
+                parent=self.root,
+            )
+            if not ok:
+                return
+        seed = simpledialog.askinteger(
+            "New Game Seed",
+            "Random seed",
+            initialvalue=self.seed,
+            minvalue=0,
+            parent=self.root,
+        )
+        if seed is None:
+            return
+        self.start_new_game(int(seed))
+
+    def start_new_game(self, seed):
+        """Replace persisted game rows and reload the dashboard."""
+
+        with perf_session("new_game", self.messages):
+            try:
+                clear_game_rows(self.paths)
+                create_district_board(self.paths, seed, self.messages)
+                seed_city_features(self.paths, seed, self.messages)
+                write_state(self.paths, rules.CityState())
+                generate_docket_rows(self.paths, seed, self.messages)
+                remove_outputs_from_map(self.messages)
+                add_outputs_to_map(self.paths, self.messages)
+                refresh_all(self.paths, self.messages)
+                self.seed = seed
+                self.district_layer = DISTRICTS
+                self.selected_item_id = ""
+                self.status_var.set(f"New game started with seed {seed}.")
+            except Exception as exc:
+                self.status_var.set(f"New game failed: {exc}")
+                _warn(self.messages, "NEW", traceback.format_exc().strip().splitlines()[-1])
+            finally:
+                self.reload()
+
+    def show_scorecard(self):
+        """Display the current audit scorecard from persisted game rows."""
+
+        try:
+            from tkinter import messagebox
+        except Exception as exc:
+            self.status_var.set(f"Scorecard failed: tkinter dialogs unavailable: {exc}")
+            self.reload()
+            return
+        if not has_saved_game(self.paths):
+            messagebox.showinfo("Scorecard", "No saved Permit Office game found.", parent=self.root)
+            return
+        try:
+            state = read_state(self.paths)
+            districts = read_districts(self.paths)
+            active_features = read_active_features(self.paths)
+            items = read_docket(self.paths)
+            _grade, report = rules.scorecard(state, districts, active_features, items)
+            summary = f"{report}\n\n{rules.population_city_summary(districts)}; incidents={rules.incident_summary(districts)}."
+            messagebox.showinfo("Scorecard", summary, parent=self.root)
+            self.status_var.set(report)
+        except Exception as exc:
+            self.status_var.set(f"Scorecard failed: {exc}")
+        self.reload()
 
     def item_label(self, item):
         """Return a compact debugging label for a docket item."""
