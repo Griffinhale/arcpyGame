@@ -26,20 +26,19 @@ This document describes the current per-turn logic and data flow for the active 
 
 ## Primary Flows
 
-### New Game
+### Tool Launch, Resume, And New Game
 
-1. `arcpy_permit_office.pyt` resolves the workspace and calls `ensure_schema`.
-2. `clear_game_rows` preserves schema and clears active gameplay rows.
-3. `create_district_board` generates 5x5 deterministic `DistrictProfile` rows and writes district polygons.
-4. `seed_city_features` adds baseline city detail features.
-5. `write_state` persists a fresh `CityState`.
-6. `generate_docket_rows` reads state/districts/features/projects, calls `rules.generate_docket`, writes three docket rows, and seeds proposed map exhibits.
-7. Outputs are added to the map and refreshed.
+1. `arcpy_permit_office.pyt` resolves the workspace, calls `ensure_schema`, adds known output layers to the active map, and opens `DashboardController`.
+2. Dashboard startup treats the resolved geodatabase as canonical saved-game state; Contents layers are repaired from the geodatabase when missing.
+3. If saved district and state rows exist, the dashboard resumes them. If docket rows are missing, it regenerates the current docket before play.
+4. If no saved game rows exist, the dashboard opens to a start state and waits for the player to click `New Game`.
+5. Confirmed `New Game` calls `clear_game_rows`, `create_district_board`, `seed_city_features`, `write_state`, and `generate_docket_rows`.
+6. New-game reset removes stale Permit Office output layers, adds fresh layers from the geodatabase, refreshes the map, and reloads the dashboard.
 
 ### Dashboard Load And Selection
 
-1. `Open Dashboard` verifies districts exist, ensures docket rows exist, and starts `DashboardController`.
-2. `reload` reads state, districts, docket rows, and proposal visibility, then builds the desk model.
+1. `reload` reads state, districts, docket rows, and proposal visibility, then builds the desk model.
+2. If no saved game rows exist, the same desk view renders a start status with `New Game` available.
 3. Selecting a docket item calls `select_case_context`, which ensures a proposal exists, selects target districts, and selects the proposal or referenced active feature.
 4. `Toggle Exhibit` deletes or recreates only the selected unresolved proposal row, then refreshes map layers and reloads the dashboard.
 5. `Update From Map` reads selected district IDs from the district layer, replaces the selected proposal, persists the target IDs on the docket item, refreshes, and reloads.
@@ -97,4 +96,4 @@ This document describes the current per-turn logic and data flow for the active 
 - Pure rules: `python3 -m pytest tests/test_permit_office_rules.py -q`
 - Full active suite: `python3 -m pytest -q`
 - Live ArcGIS validation: `docs/permit-office-prototype-smoke-test.md`
-- Refresh diagnostics: enable `Log Refresh Timings` in the toolbox or set `PERMIT_OFFICE_PERF=1` before running a dashboard action.
+- Refresh diagnostics: enable `Log Refresh Timings` in the toolbox or set `PERMIT_OFFICE_PERF=1` before running the dashboard.

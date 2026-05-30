@@ -23,6 +23,8 @@ class DeskCallbacks:
     approve_mitigated: Callable[[], None]
     deny: Callable[[], None]
     advance_turn: Callable[[], None]
+    new_game: Callable[[], None]
+    scorecard: Callable[[], None]
     close: Callable[[], None]
 
 
@@ -515,6 +517,8 @@ class PermitDeskView:
         c.create_text(x0 + 14, y0 + 12, text="FILED REPORT", anchor="nw", fill=Palette.BLUE, font=self._font(8, "bold"))
         lines = _fit_lines(self.model.status_text or "No filed report yet.", max(20, (x1 - x0 - 28) // 7), 4)
         c.create_text(x0 + 14, y0 + 30, text="\n".join(lines), anchor="nw", fill=Palette.INK, font=self._font(9), width=x1 - x0 - 28)
+        self._draw_session_button(c, x0 + 14, y1 - 58, x0 + 106, y1 - 34, "New Game", Palette.BLUE, self.callbacks.new_game)
+        self._draw_session_button(c, x0 + 116, y1 - 58, x1 - 14, y1 - 34, "Scorecard", Palette.GOLD, self.callbacks.scorecard)
         exhibit = self.model.exhibit_visible
         pill_label = "EXHIBIT ON" if exhibit else "EXHIBIT OFF"
         pill_color = Palette.GREEN if exhibit else Palette.MUTED
@@ -524,6 +528,15 @@ class PermitDeskView:
         pill_y0 = y1 - 28
         c.create_rectangle(pill_x0, pill_y0, pill_x0 + pill_w, pill_y0 + pill_h, fill=Palette.PAPER, outline=pill_color, width=2)
         c.create_text(pill_x0 + pill_w // 2, pill_y0 + pill_h // 2, text=pill_label, anchor="center", fill=pill_color, font=self._font(7, "bold"))
+
+    def _draw_session_button(self, c, x0, y0, x1, y1, label, color, callback):
+        """Draw a compact dashboard-level command button."""
+
+        hover = self._hover_key == f"session:{label}"
+        fill = Palette.WHITE if hover else Palette.PAPER
+        c.create_rectangle(x0, y0, x1, y1, fill=fill, outline=color, width=2)
+        c.create_text((x0 + x1) // 2, (y0 + y1) // 2, text=label.upper(), anchor="center", fill=color, font=self._font(7, "bold"))
+        self._add_target("session", label, (x0, y0, x1, y1), callback)
 
     def _add_target(self, kind, ident, bbox, callback):
         """Record a clickable canvas rectangle for later event dispatch."""

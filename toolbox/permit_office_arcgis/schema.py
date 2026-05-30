@@ -23,19 +23,8 @@ COMMANDS = "PermitUICommand"
 ACTION_LOG = "PermitActionLog"
 
 P_WORKSPACE = 0
-P_DISTRICTS = 1
-P_ACTION = 2
-P_SEED = 3
-P_OUTPUT = 4
-P_PERF = 5
-
-ACTIONS = [
-    "Ping Environment",
-    "New Game",
-    "Open Dashboard",
-    "Generate Docket",
-    "Show Scorecard",
-]
+P_OUTPUT = 1
+P_PERF = 2
 
 DISTRICT_FIELDS = [
     ("cell_id", "TEXT", "District ID", 32),

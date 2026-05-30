@@ -18,38 +18,38 @@ Permit Office Prototype
 
 ## Smoke Sequence
 
-1. Run `Ping Environment`.
-   - Confirms workspace resolution and lists loaded docket templates.
-2. Run `New Game`.
-   - Creates or resets `permit_office.gdb`.
-   - Adds `PermitDistricts`, `PermitPoints`, `PermitLines`, and `PermitZones` to the active map.
-   - Generates a 5x5 named district board and three docket items.
-3. Select one district on the map if you want to override the seeded exhibit.
-4. Run `Open Dashboard`.
-5. In the dashboard, pick a point-style docket item.
+1. Run the `Permit Office Prototype` geoprocessing tool.
+   - The tool resolves or creates `permit_office.gdb`, repairs the map layers, and opens the dashboard.
+   - If saved game rows already exist, the dashboard resumes them.
+1. If no saved game is present, click `New Game` in the dashboard.
+   - Confirm replacement if prompted.
+   - Accept seed `2026` for the deterministic smoke route.
+   - The dashboard creates or resets the geodatabase rows, adds `PermitDistricts`, `PermitPoints`, `PermitLines`, and `PermitZones`, and generates a 5x5 named district board with three docket items.
+1. Select one district on the map if you want to override the seeded exhibit.
+1. In the dashboard, pick a point-style docket item.
    - The docket row should select its proposed exhibit and target district on the map.
    - Click `Hide Exhibit`, then `Show Exhibit`; only that selected proposed row should disappear and return.
    - If changing placement, select a replacement district and click `Update From Map`.
-6. Click `Inspect`.
+1. Click `Inspect`.
    - AP should decrease and the dashboard item text should include a risk band.
-7. Click `Approve` or `Approve + Mitigate`.
+1. Click `Approve` or `Approve + Mitigate`.
    - The proposed feature should become active.
    - District metrics and `display_state` should update.
    - A modal effect report should appear.
    - GP messages should include refresh attempts.
-8. Test a line item:
+1. Test a line item:
    - Select exactly two districts.
    - Click `Update From Map`.
    - Approve the corridor/procession item.
-9. Test a polygon item:
+1. Test a polygon item:
    - Select one or more districts.
    - Click `Update From Map`.
    - Approve or deny it.
-10. Click `Advance Turn`.
+1. Click `End Day`.
     - AP should reset.
     - A new three-item docket should be generated.
-11. Run `Show Scorecard` from the GP tool.
-    - The GP pane should show the current audit score.
+1. Click `Scorecard` in the dashboard.
+    - The scorecard dialog should show the current audit score.
 
 ## Expected Data
 

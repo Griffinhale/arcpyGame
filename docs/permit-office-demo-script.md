@@ -13,9 +13,9 @@ Show the core dashboard-map loop in a stable order:
 ## Setup
 
 1. Open ArcGIS Pro and add `toolbox/arcpy_permit_office.pyt`.
-2. Run `Permit Office Prototype` with action `Ping Environment`.
-   - Expected result: the GP pane confirms the workspace and loaded docket templates.
-3. Run action `New Game` with random seed `2026`.
+2. Run `Permit Office Prototype`.
+   - Expected result: the dashboard opens and the GP tool repairs or creates the game geodatabase.
+3. In the dashboard, click `New Game`, confirm replacement if prompted, and enter random seed `2026`.
    - Expected result: `PermitDistricts`, `PermitPoints`, `PermitLines`, and `PermitZones` are added to the map.
 4. Open the `PermitDistricts` attribute table or labels enough to identify these route districts:
    - `D0102` Civic Green, mercantile
@@ -26,11 +26,10 @@ Show the core dashboard-map loop in a stable order:
    - `D0304` Glass Steps, natural
    - `D0000` Civic Green, residential
    - `D0001` Cinder Yard, mercantile
-5. Run action `Open Dashboard`.
 
 ## Steps
 
-For each decision, click the listed docket row first. The row selects its seeded proposal and target districts on the map. If the listed district selection differs from the seeded target, select the listed district or districts on the map and click `Update From Map`, then click the listed dashboard action. Items marked `Advance` are intentionally left open until `Advance Turn`.
+For each decision, click the listed docket row first. The row selects its seeded proposal and target districts on the map. If the listed district selection differs from the seeded target, select the listed district or districts on the map and click `Update From Map`, then click the listed dashboard action. Items marked `Advance` are intentionally left open until `End Day`.
 
 | Turn | Docket item | District selection | Action | Expected result |
 | --- | --- | --- | --- | --- |
@@ -53,7 +52,7 @@ For each decision, click the listed docket row first. The row selects its seeded
 | 6 | Civic Incident Response: Commuters | none | Advance | Final unresolved civic file remains in the audit. |
 | 6 | Civic Incident Response: Families | none | Advance | Final unresolved civic file remains in the audit. |
 
-After turn 6, run `Show Scorecard`.
+After turn 6, click `Scorecard` in the dashboard.
 
 ## Expected Result
 
@@ -78,5 +77,5 @@ After turn 6, run `Show Scorecard`.
 - If an exhibit does not draw immediately, use the layer refresh or reopen the dashboard; proposed geometry is seeded from filed targets and replaced only by `Update From Map`.
 - If the wrong item is selected, close the dashboard without advancing, reopen it, and reselect the docket row.
 - If money is lower than expected, skip optional exhibit toggles and leave turn 5 and turn 6 items unresolved. The rehearsed ending depends on not spending the last reserve.
-- If the final scorecard differs, rerun `New Game` with seed `2026`; route order depends on that seed and the generated active-feature follow-ups.
+- If the final scorecard differs, click `New Game` with seed `2026`; route order depends on that seed and the generated active-feature follow-ups.
 - Live ArcGIS Pro smoke verification is still manual; pure Python regression coverage locks the route state and scorecard outcome.
