@@ -139,6 +139,24 @@ def test_successful_decision_reapplies_map_presentation_before_refresh(monkeypat
     assert order[-5:] == ["clear", "remove", "map", "refresh", "receipt"]
 
 
+def test_filed_report_text_includes_local_decision_changes():
+    result = rules.DecisionResult(
+        True,
+        "approve",
+        "CASE-local",
+        "approved",
+        district_deltas={"D0000": {"prosperity": 2, "unrest": -1, "services": 4}},
+        feature_updates={"F-market": {"status": "active", "condition": 72, "maintenance_due_turn": 5}},
+    )
+
+    report = dashboard._filed_report_text(result)
+
+    assert report.startswith("approved Local changes:")
+    assert "D0000 pros +2" in report
+    assert "serv +4" in report
+    assert "F-market active condition 72 due 5" in report
+
+
 def test_start_new_game_replaces_rows_and_map_layers(monkeypatch):
     controller = dashboard.DashboardController({"districts": "districts"}, "old_layer", 2026, object())
     controller.selected_item_id = "CASE-old"

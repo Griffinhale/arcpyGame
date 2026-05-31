@@ -9,21 +9,25 @@ from .models import *
 from .catalogs import *
 
 def display_state_for_profile(profile: DistrictProfile) -> str:
-    """Return the map-facing display state for a normalized district profile."""
+    """Return the map-facing primary pressure cause for a district profile.
+
+    Rules-facing stat reference: prosperity is economic activity, unrest is
+    visible civic friction, culture is trust/cohesion, risk is exposure, and
+    services are local capacity. Display state shows the leading cause, while
+    district attributes retain severity and type.
+    """
     if profile.incident_state != "none":
         return "incident"
     if _top_dissatisfaction(profile)[1] >= DISSATISFACTION_AGGRIEVED_THRESHOLD:
-        return "aggrieved"
-    if profile.unrest >= 60 and profile.risk >= 55:
-        return "strained"
-    if profile.unrest >= 55:
-        return "restless"
-    if profile.risk >= 55:
-        return "at_risk"
+        return "grievance"
+    if max((int(gap or 0) for gap in (profile.service_gap or {}).values()), default=0) >= 30:
+        return "service_gap"
+    if max((int(band or 0) for band in (profile.hazards or {}).values()), default=0) >= 2:
+        return "hazard"
+    if max((int(band or 0) for band in (profile.displacement or {}).values()), default=0) >= 2:
+        return "housing_pressure"
     if profile.prosperity >= 65:
-        return "prosperous"
-    if profile.culture >= 60:
-        return "cultured"
+        return "economic_growth"
     return "stable"
 
 
@@ -281,14 +285,14 @@ def inspection_population_note(template: DocketTemplate, target_profiles: Iterab
     objector = _strongest_template_group(profiles, template.concerned_groups)
     grievance_group, grievance_band = _top_dissatisfaction_for_profiles(profiles)
     avg_services = sum(profile.services for profile in profiles) / max(1, len(profiles))
-    service_text = "service capacity appears absorbent" if avg_services >= 45 else "service capacity is already using careful verbs"
+    service_text = "service capacity appears adequate" if avg_services >= 45 else "service capacity is limited"
     parts = [f"Census review: {service_text}."]
     if archetype.service_type:
         avg_gap = sum(profile.service_gap.get(archetype.service_type, 0) for profile in profiles) / max(1, len(profiles))
         if avg_gap:
             parts.append(f"Coverage note: {archetype.service_type.replace('_', ' ')} gap remains on the worksheet.")
         else:
-            parts.append(f"Coverage note: {archetype.service_type.replace('_', ' ')} fit is administratively plausible.")
+            parts.append(f"Coverage note: {archetype.service_type.replace('_', ' ')} fit is acceptable.")
     fit_note = _land_use_note(archetype, profiles)
     if fit_note:
         parts.append(fit_note)
@@ -329,7 +333,7 @@ def public_profile_for(profile: DistrictProfile) -> str:
     groups = _top_presence_groups([profile], limit=3)
     if not groups:
         return "Public profile: no census emphasis filed."
-    return f"Public profile: {_join_group_labels(groups)} noted in current census binder."
+    return f"Public profile: {_join_group_labels(groups)} are the main census groups."
 
 
 def compact_group_bands(bands: dict[str, int]) -> dict[str, int]:
@@ -576,10 +580,11 @@ def _surface_new_incidents(state: CityState, profiles: Iterable[DistrictProfile]
     """Refresh profiles and add unrest when grievances become visible incidents."""
     surfaced = 0
     for profile in profiles:
-        before = profile.incident_state
         normalize_profile(profile)
-        if before == "none" and profile.incident_state != "none":
+        key = f"incident:{profile.cell_id}:{profile.incident_group}:{profile.incident_state}"
+        if profile.incident_state != "none" and not state.stakeholder_memory.get(key):
             surfaced += 1
+            state.stakeholder_memory[key] = state.turn
     if surfaced:
         _apply_city_delta(state, {"unrest": surfaced})
     return surfaced
@@ -702,9 +707,9 @@ def _population_report_fragment(target_profiles: list[DistrictProfile]) -> str:
     if band >= DISSATISFACTION_INCIDENT_THRESHOLD:
         return f"Population file: {_group_label(group)} grievance is now incident-ready."
     if band >= DISSATISFACTION_AGGRIEVED_THRESHOLD:
-        return f"Population file: {_group_label(group)} grievance is aggrieved but still in forms."
+        return f"Population file: {_group_label(group)} grievance is elevated but not yet an incident."
     groups = _top_presence_groups(target_profiles, limit=2)
-    return f"Population file: {_join_group_labels(groups)} remain the principal census note."
+    return f"Population file: {_join_group_labels(groups)} are the main affected groups."
 
 
 def _service_gap_for_profile(profile: DistrictProfile) -> dict[str, int]:
@@ -896,6 +901,7 @@ def _failure_chance(template: DocketTemplate, target_profiles: list[DistrictProf
     # keeps routine approvals from becoming impossible or perfectly safe.
     avg_services = sum(p.services for p in target_profiles) / max(1, len(target_profiles))
     avg_risk = sum(p.risk for p in target_profiles) / max(1, len(target_profiles))
+    avg_unrest = sum(p.unrest for p in target_profiles) / max(1, len(target_profiles))
     chance = template.failure_base_chance
     chance += {"low": -0.12, "medium": 0.02, "high": 0.25, "unknown": 0.05}.get(risk_band, 0.05)
     if avg_services < 25:
@@ -903,6 +909,10 @@ def _failure_chance(template: DocketTemplate, target_profiles: list[DistrictProf
     elif avg_services > 55:
         chance -= 0.08
     if avg_risk > 55:
+        chance += 0.10
+    if avg_unrest > 55:
+        chance += 0.08
+    if avg_risk >= 70 or avg_unrest >= 70:
         chance += 0.10
     district_types = {profile.district_type for profile in target_profiles}
     archetype = feature_archetype_for_template(template)

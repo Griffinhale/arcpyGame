@@ -11,6 +11,7 @@ from .helpers import *
 from .profiles import inspect_item, inspection_case_for_item
 from .systems import (
     advance_project_from_item,
+    apply_stat_cascade,
     apply_template_long_term_effects,
     feature_update_payload,
     operating_rule_for_feature,
@@ -123,7 +124,7 @@ def resolve_decision(
                 project_note = f" Project {project.project_id} delayed."
         report = (
             f"Denied {item.title}. Certain effects: project risk avoided; city delta {_format_delta(delta)}. "
-            f"Risk/side effects: {item.stakeholder.replace('_', ' ')} heat {heat_delta:+d} entered the public record."
+            f"Risk/side effects: {item.stakeholder.replace('_', ' ')} heat {heat_delta:+d}."
             f"{project_note} {_population_report_fragment([districts[cid] for cid in targets])}"
         )
         return DecisionResult(
@@ -215,13 +216,19 @@ def resolve_decision(
         long_term_deltas = apply_template_long_term_effects(template, [districts[cid] for cid in targets], mitigated)
         for cid, delta in long_term_deltas.items():
             _merge_delta(district_deltas.setdefault(cid, {}), delta)
+    affected_ids = targets + spillovers
+    for cid in affected_ids:
+        cascade_delta = apply_stat_cascade(districts[cid])
+        if cascade_delta:
+            _merge_delta(district_deltas.setdefault(cid, {}), cascade_delta)
+            _merge_delta(city_delta, {metric: value for metric, value in cascade_delta.items() if metric in CORE_METRICS})
     surfaced = _surface_new_incidents(state, [districts[cid] for cid in targets])
 
     averaged = _average_city_delta(city_delta, targets, spillovers)
     _apply_city_delta(state, averaged)
     if surfaced:
         averaged["unrest"] = averaged.get("unrest", 0) + surfaced
-    affected = targets + spillovers
+    affected = affected_ids
     _settle_item_violations(item, mitigated)
     mitigation_text = " with mitigation" if mitigated else ""
     failure_text = _approval_risk_report(template, failure_triggered, failure_delta, side, item.risk_band, mitigated, [districts[cid] for cid in targets])
@@ -246,7 +253,8 @@ def resolve_decision(
             project_text = f" Project {project.project_id} status {project.status}."
     report = (
         f"Approved {item.title}{mitigation_text}. Certain effects: affected {len(affected)} district(s): "
-        f"{_district_list_fragment(affected)}; immediate city delta {_format_delta(averaged)}; {spillover_text}; recurring budget {recurring_text}. "
+        f"{_district_list_fragment(affected)}; immediate city delta {_format_delta(averaged)}; "
+        f"{_local_cause_fragment([districts[cid] for cid in affected], district_deltas)}; {spillover_text}; recurring budget {recurring_text}. "
         f"Risk/side effects: {failure_text} "
         f"{_population_report_fragment([districts[cid] for cid in targets])}{project_text}"
     )
@@ -383,7 +391,7 @@ def _resolve_enforcement_decision(
             if project:
                 project_note = f" Project {project.project_id} delayed."
         report = (
-            f"Deferred enforcement for {item.title}. The unpermitted condition remains useful to someone; "
+            f"Deferred enforcement for {item.title}. The unpermitted condition remains unresolved; "
             f"{item.stakeholder.replace('_', ' ')} heat {heat_delta:+d}.{project_note}"
         )
         return DecisionResult(
@@ -447,7 +455,7 @@ def _resolve_enforcement_decision(
     else:
         report = (
             f"Enforced {item.title}. Certain effects: city delta {_format_delta(averaged)}. "
-            f"Risk/side effects: the record is clearer and several people are louder; "
+            f"Risk/side effects: compliance record is clearer, but local objections may increase; "
             f"{item.stakeholder.replace('_', ' ')} heat {heat_delta:+d}.{project_note}"
         )
     return DecisionResult(
@@ -499,7 +507,7 @@ def _resolve_incident_decision(
             if project:
                 project_note = f" Project {project.project_id} delayed."
         report = (
-            f"Deferred {item.title}. The incident remains local in form and citywide in tone. "
+            f"Deferred {item.title}. The incident remains unresolved and may affect citywide unrest. "
             f"City delta: {_format_delta(delta)}. {_group_label(group).title()} heat {heat_delta:+d}.{project_note}"
         )
         return DecisionResult(
@@ -553,7 +561,7 @@ def _resolve_incident_decision(
     _apply_city_delta(state, averaged)
     heat_delta = _adjust_heat(state, group, -1 if mitigated else 0)
     _settle_item_violations(item, mitigated)
-    mode_text = "settled with conditions" if mitigated else "accepted for formal response"
+    mode_text = "settled with conditions" if mitigated else "accepted for response"
     project_note = ""
     if projects and item.project_id:
         project = advance_project_from_item(projects, item, state, approved=True, failed=False)
@@ -561,7 +569,7 @@ def _resolve_incident_decision(
             project_note = f" Project {project.project_id} status {project.status}."
     report = (
         f"{item.title} {mode_text}. Certain effects: Target group: {_group_label(group)}; "
-        f"city delta {_format_delta(averaged)}. Risk/side effects: local grievance file may keep moving. "
+        f"city delta {_format_delta(averaged)}. Risk/side effects: local grievance may continue. "
         f"{_population_report_fragment([districts[cid] for cid in targets])}{project_note}"
     )
     return DecisionResult(
@@ -675,6 +683,22 @@ def _district_list_fragment(cell_ids: list[str]) -> str:
         return ", ".join(cell_ids)
     shown = ", ".join(cell_ids[:3])
     return f"{shown}, +{len(cell_ids) - 3} more"
+
+
+def _local_cause_fragment(profiles: list[DistrictProfile], district_deltas: dict[str, dict[str, int]]) -> str:
+    """Format primary pressure causes and local stat deltas for reports."""
+
+    counts: dict[str, int] = {}
+    deltas = []
+    for profile in profiles:
+        counts[profile.display_state] = counts.get(profile.display_state, 0) + 1
+        delta_text = _format_delta(district_deltas.get(profile.cell_id, {}))
+        if delta_text != "no net citywide metric change":
+            deltas.append(f"{profile.cell_id} {delta_text}")
+    causes = ", ".join(f"{cause.replace('_', ' ')} x{count}" for cause, count in sorted(counts.items()))
+    if deltas:
+        return f"primary pressure {causes}; local deltas {'; '.join(deltas[:3])}"
+    return f"primary pressure {causes}; local deltas none"
 
 
 __all__ = [name for name in globals() if not name.startswith("__")]

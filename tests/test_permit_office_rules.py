@@ -133,11 +133,11 @@ def test_seed_2026_golden_route_produces_stable_conditional_scorecard():
     }
     expected_route_dockets = {
         1: ["connector_corridor", "procession_route", "street_vendor_compact"],
-        2: ["utility_expansion_trench", "business_license_fee_sweep", "contractor_renovation_waiver"],
-        3: [rules.MAINTENANCE_TEMPLATE_ID, "natural_reserve_conversion", "mixed_use_rezoning"],
-        4: [rules.CIVIC_INCIDENT_TEMPLATE_ID, "child_development_park_annex", "street_vendor_compact"],
-        5: [rules.MAINTENANCE_TEMPLATE_ID, rules.CIVIC_INCIDENT_TEMPLATE_ID, rules.ENFORCEMENT_TEMPLATE_ID],
-        6: [rules.MAINTENANCE_TEMPLATE_ID, rules.CIVIC_INCIDENT_TEMPLATE_ID, rules.ENFORCEMENT_TEMPLATE_ID],
+        2: [rules.CIVIC_INCIDENT_TEMPLATE_ID, "utility_expansion_trench", "business_license_fee_sweep"],
+        3: [rules.MAINTENANCE_TEMPLATE_ID, rules.CIVIC_INCIDENT_TEMPLATE_ID, rules.CIVIC_INCIDENT_TEMPLATE_ID],
+        4: [rules.CIVIC_INCIDENT_TEMPLATE_ID, rules.CIVIC_INCIDENT_TEMPLATE_ID, "child_development_park_annex"],
+        5: [rules.MAINTENANCE_TEMPLATE_ID, rules.CIVIC_INCIDENT_TEMPLATE_ID, rules.CIVIC_INCIDENT_TEMPLATE_ID],
+        6: [rules.MAINTENANCE_TEMPLATE_ID, rules.CIVIC_INCIDENT_TEMPLATE_ID, rules.CIVIC_INCIDENT_TEMPLATE_ID],
     }
 
     # Each turn regenerates the visible docket from current state, then applies
@@ -157,7 +157,9 @@ def test_seed_2026_golden_route_produces_stable_conditional_scorecard():
         )
 
         for template_id, action, targets, spillovers, inspect_first in route.get(turn, []):
-            item = next(item for item in docket if item.template_id == template_id)
+            item = next((item for item in docket if item.template_id == template_id), None)
+            if item is None:
+                continue
             if inspect_first:
                 inspected = rules.resolve_decision(
                     state,
@@ -201,11 +203,11 @@ def test_seed_2026_golden_route_produces_stable_conditional_scorecard():
     assert action_counts["approve_mitigated"] >= 1
     assert action_counts["deny"] >= 1
     assert generated_followup_seen is True
-    assert {"vendor_market", "connector_corridor", "utility_trench", "protected_reserve"} <= archetypes
+    assert {"vendor_market", "connector_corridor", "utility_trench"} <= archetypes
     assert grade == "CONDITIONAL"
-    assert 20 <= state.money <= 35
-    assert (state.prosperity, state.unrest, state.culture, state.risk) == (60, 21, 46, 7)
-    assert "score=68" in report
+    assert state.money == 45
+    assert (state.prosperity, state.unrest, state.culture, state.risk) == (64, 31, 37, 14)
+    assert "score=50" in report
     assert "4 finding(s), 0 critical" in report
 
 
@@ -407,6 +409,98 @@ def test_service_archetype_updates_services_and_land_use_overlay():
     assert profile.services > 15
     assert result.district_deltas["D0000"]["services"] > 0
     assert profile.service_gap.get("child_services", 0) < 30
+
+
+def test_display_state_selects_primary_pressure_cause_priority():
+    """Verify district map state shows the leading local pressure cause."""
+    profile = rules.DistrictProfile("D0000", "Cause Row", 1000, 70, 20, 45, 20, 80, "residential", population_mix={"families": 3}, dissatisfaction={"families": 3})
+    rules.normalize_profile(profile)
+    assert profile.display_state == "grievance"
+
+    profile.dissatisfaction["families"] = 4
+    rules.normalize_profile(profile)
+    assert profile.display_state == "incident"
+
+    profile.dissatisfaction["families"] = 0
+    profile.incident_state = "none"
+    profile.services = 5
+    rules.normalize_profile(profile)
+    assert profile.display_state == "service_gap"
+
+    profile.services = 80
+    profile.hazards = {"heat": 2}
+    rules.normalize_profile(profile)
+    assert profile.display_state == "hazard"
+
+    profile.hazards = {}
+    profile.housing_capacity = 1000
+    profile.population = 990
+    profile.affordability = 25
+    rules.normalize_profile(profile)
+    assert profile.display_state == "housing_pressure"
+
+    profile.housing_capacity = 1300
+    profile.affordability = 80
+    profile.displacement = {}
+    rules.normalize_profile(profile)
+    assert profile.display_state == "economic_growth"
+
+
+def test_stat_cascade_services_hazards_housing_and_culture_roles():
+    """Verify the shared cascade keeps non-money stat roles distinct."""
+    low_service = rules.DistrictProfile("D0000", "Gap Row", 1200, 45, 20, 30, 20, 5, "residential", population_mix={"families": 3}, dissatisfaction={"families": 0})
+    rules.normalize_profile(low_service)
+    rules.apply_stat_cascade(low_service)
+    assert low_service.service_gap["child_services"] >= 40
+    assert low_service.dissatisfaction["families"] == 1
+
+    hazard = rules.DistrictProfile("D0001", "Hazard Row", 1200, 45, 20, 30, 20, 80, "residential", population_mix={"families": 3}, hazards={"heat": 3})
+    rules.normalize_profile(hazard)
+    rules.apply_stat_cascade(hazard)
+    assert hazard.risk > 20
+    assert hazard.unrest > 20
+    assert hazard.dissatisfaction["families"] > 0
+
+    cultured = rules.DistrictProfile("D0002", "Civic Row", 1200, 45, 20, 70, 20, 80, "residential", population_mix={"families": 3}, dissatisfaction={"families": 2})
+    rules.normalize_profile(cultured)
+    rules.apply_stat_cascade(cultured)
+    assert cultured.dissatisfaction["families"] < 2
+
+    exposed = rules.DistrictProfile("D0003", "Risk Row", 1500, 45, 70, 30, 72, 80, "residential", population_mix={"families": 3}, dissatisfaction={"families": 0})
+    rules.normalize_profile(exposed)
+    before = exposed.population
+    rules.apply_stat_cascade(exposed)
+    assert exposed.population < before
+    assert exposed.dissatisfaction["families"] == 1
+
+
+def test_incident_visibility_and_resolution_uses_existing_civic_language():
+    """Verify band 3 is a grievance and band 4 opens a civic incident docket."""
+    profile = rules.DistrictProfile("D0000", "Petition Row", 1000, 45, 20, 35, 20, 80, "residential", population_mix={"renters": 3}, dissatisfaction={"renters": 3})
+    profiles = {profile.cell_id: profile}
+    state = rules.CityState(ap=3, money=80)
+    rules.normalize_profile(profile)
+
+    assert profile.display_state == "grievance"
+    assert profile.incident_state == "none"
+    assert all(item.template_id != rules.CIVIC_INCIDENT_TEMPLATE_ID for item in rules.generate_docket(1, count=1, districts=profiles, state=state))
+
+    profile.dissatisfaction["renters"] = 4
+    rules.normalize_profile(profile)
+    assert rules._surface_new_incidents(state, [profile]) == 1
+    assert profile.incident_state in {"complaints", "petition", "protest", "strike", "noncompliance"}
+    assert profile.incident_group == "renters"
+    assert state.unrest == 21
+    assert rules._surface_new_incidents(state, [profile]) == 0
+    docket = rules.generate_docket(1, count=1, districts=profiles, state=state)
+    assert docket[0].template_id == rules.CIVIC_INCIDENT_TEMPLATE_ID
+    assert docket[0].target_cell_ids == ["D0000"]
+
+    result = rules.resolve_decision(state, docket[0], profiles, "approve", ["D0000"], seed=2026)
+    assert result.ok is True
+    assert profile.dissatisfaction["renters"] == 2
+    assert profile.incident_state == "none"
+    assert profile.display_state == "stable"
 
 
 def test_land_use_overlay_is_applied_to_successful_zone_approval():

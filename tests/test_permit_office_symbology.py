@@ -196,7 +196,7 @@ class RejectingRenderer:
         raise RuntimeError("field is not supported")
 
 
-def test_apply_simple_symbology_uses_district_type_for_districts():
+def test_apply_simple_symbology_uses_display_state_for_districts():
     renderer = FieldsListRenderer()
     layer = FakeLayer(renderer)
     messages = FakeMessages()
@@ -204,7 +204,7 @@ def test_apply_simple_symbology_uses_district_type_for_districts():
     apply_simple_symbology(layer, "districts", messages)
 
     assert layer.symbology.updated_renderer == "UniqueValueRenderer"
-    assert renderer.fields == ["district_type"]
+    assert renderer.fields == ["display_state"]
     assert renderer.useDefaultSymbol is True
     assert layer.assigned_symbology is layer.symbology
     assert layer.symbology_assignment_count == 1
@@ -231,13 +231,16 @@ def test_apply_simple_symbology_seeds_and_styles_display_state_classes():
     apply_simple_symbology(layer, "districts", messages)
 
     items = {item.values[0][0]: item for item in renderer.groups[0].items}
-    assert "residential" in items
-    assert "academic" in items
-    assert "natural" in items
-    assert items["residential"].label == "Residential"
-    assert items["academic"].symbol.color == {"RGB": [176, 160, 211, 100]}
-    assert items["residential"].symbol.outlineColor == {"RGB": [242, 238, 226, 100]}
-    assert items["residential"].symbol.outlineWidth == 3.0
+    assert "stable" in items
+    assert "service_gap" in items
+    assert "hazard" in items
+    assert "housing_pressure" in items
+    assert "incident" in items
+    assert items["stable"].label == "Stable"
+    assert items["service_gap"].label == "Service Gap"
+    assert items["hazard"].symbol.color == {"RGB": [196, 90, 74, 100]}
+    assert items["stable"].symbol.outlineColor == {"RGB": [242, 238, 226, 100]}
+    assert items["stable"].symbol.outlineWidth == 3.0
     assert renderer.defaultSymbol.color == {"RGB": [220, 220, 208, 100]}
     assert renderer.defaultSymbol.outlineColor == {"RGB": [242, 238, 226, 100]}
     assert renderer.defaultSymbol.outlineWidth == 3.0
@@ -293,7 +296,7 @@ def test_apply_simple_symbology_falls_back_to_cim_field_setter():
     assert layer.assigned_symbology is layer.symbology
     assert layer.symbology_assignment_count == 1
     assert layer.requested_cim_versions == ["V3"]
-    assert layer.cim_renderer.fields == ["district_type"]
+    assert layer.cim_renderer.fields == ["display_state"]
     assert layer.cim_renderer.useDefaultSymbol is True
     assert layer.cim_renderer.isDefaultSymbolVisible is True
     assert layer.assigned_definition is layer.cim_definition

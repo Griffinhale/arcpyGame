@@ -451,18 +451,19 @@ class DashboardController:
     def _finish_decision(self, command_id, item, state, districts, projects, result, layer_names=None):
         """Persist a successful decision result and show its filed report."""
 
+        filed_report = _filed_report_text(result)
         with perf_block("writes"):
             write_district_updates(self.paths, districts, result.report, result.affected_cell_ids)
             write_state(self.paths, state)
             write_projects(self.paths, projects)
             write_docket_item(self.paths, item)
             action_log(self.paths, state, result)
-            command_finish(self.paths, command_id, result.command_status, result.report)
+            command_finish(self.paths, command_id, result.command_status, filed_report)
         rebuild_output_layers(self.paths, self.messages, layer_names=layer_names)
         self.district_layer = DISTRICTS
-        self.status_var.set(result.report)
+        self.status_var.set(filed_report)
         with perf_block("receipt"):
-            open_effect_report(item.title, result.report, result.affected_cell_ids, state)
+            open_effect_report(item.title, filed_report, result.affected_cell_ids, state)
 
     def advance_turn(self):
         """Advance the saved game one turn and regenerate the docket."""
@@ -549,3 +550,53 @@ def rebuild_output_layers(paths, messages, layer_names=None):
             add_outputs_to_map(paths, messages, layer_names=layer_names)
         with perf_block("refresh"):
             refresh_all(paths, messages, layer_names=layer_names)
+
+
+def _filed_report_text(result):
+    """Append compact non-money local changes to a decision report."""
+
+    local = _local_changes_fragment(result)
+    if not local:
+        return result.report
+    return f"{result.report} Local changes: {local}."
+
+
+def _local_changes_fragment(result):
+    """Summarize district deltas and feature updates for filed receipts."""
+
+    parts = []
+    for cell_id, delta in sorted((result.district_deltas or {}).items())[:3]:
+        text = _compact_delta(delta)
+        if text:
+            parts.append(f"{cell_id} {text}")
+    extra = max(0, len(result.district_deltas or {}) - 3)
+    if extra:
+        parts.append(f"+{extra} district(s)")
+    for feature_id, update in sorted((result.feature_updates or {}).items())[:2]:
+        status = update.get("status") or update.get("display_state") or "updated"
+        condition = update.get("condition")
+        due = update.get("maintenance_due_turn")
+        feature_text = f"{feature_id} {status}"
+        if condition not in (None, ""):
+            feature_text += f" condition {condition}"
+        if due not in (None, "", -1):
+            feature_text += f" due {due}"
+        parts.append(feature_text)
+    return "; ".join(parts)
+
+
+def _compact_delta(delta):
+    """Format a district delta map without burying the receipt."""
+
+    if not delta:
+        return ""
+    ordered = sorted(delta.items(), key=lambda row: (row[0] not in ("prosperity", "unrest", "culture", "risk", "services", "dissatisfaction"), row[0]))
+    parts = []
+    for metric, amount in ordered:
+        if not amount:
+            continue
+        label = "dissat" if metric == "dissatisfaction" else metric[:4]
+        parts.append(f"{label} {int(amount):+d}")
+        if len(parts) == 4:
+            break
+    return ", ".join(parts)
