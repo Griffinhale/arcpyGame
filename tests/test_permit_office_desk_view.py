@@ -3,7 +3,12 @@
 from __future__ import annotations
 
 from toolbox import arcpy_permit_office_rules as rules
-from toolbox.permit_office_arcgis.desk_view import build_desk_model
+from toolbox.permit_office_arcgis.desk_view import (
+    _hazard_summary,
+    _maintenance_summary,
+    _service_gap_summary,
+    build_desk_model,
+)
 
 
 def _vendor_case():
@@ -44,15 +49,21 @@ def test_uninspected_case_uses_qualitative_impact_buckets():
     )
     buckets = {bucket.label: bucket for bucket in model.case.impact_buckets}
 
-    assert list(buckets) == ["Cost", "City Effect", "Budget", "Risk"]
+    assert list(buckets) == ["Cost", "City", "Local", "People", "Services", "Aftermath"]
     assert model.exhibit_visible is True
     assert "Issue 1AP/$12" in buckets["Cost"].value
     assert "conditions +$6" in buckets["Cost"].value
-    assert "pros" in buckets["City Effect"].value
-    assert "rev $4/turn" in buckets["Budget"].value
-    assert "upkeep $1/turn" in buckets["Budget"].value
-    assert "inspect for unlicensed spillover" == buckets["Risk"].value
-    assert "evidence" not in buckets["Risk"].value
+    assert "pros" in buckets["City"].value
+    assert "district(s)" in buckets["Local"].value
+    assert "fit" in buckets["Local"].value
+    assert "grievance" in buckets["Local"].value
+    assert "vendors" in buckets["People"].value
+    assert "homeowners" in buckets["People"].value
+    assert "gap" in buckets["Services"].value
+    assert "rev $4/turn" in buckets["Aftermath"].value
+    assert "upkeep $1/turn" in buckets["Aftermath"].value
+    assert "inspect for unlicensed spillover" in buckets["Aftermath"].value
+    assert "evidence" not in buckets["Aftermath"].value
 
 
 def test_inspected_case_buckets_surface_evidence_and_population_context():
@@ -70,5 +81,41 @@ def test_inspected_case_buckets_surface_evidence_and_population_context():
     model = build_desk_model(rules.CityState(), districts, [item], item.item_id)
     buckets = {bucket.label: bucket for bucket in model.case.impact_buckets}
 
-    assert buckets["Risk"].value == "high risk; 2/2 flagged evidence; 1 violation(s)"
-    assert buckets["Risk"].tone == "bad"
+    assert "high risk; 2/2 flagged evidence; 1 violation(s)" in buckets["Aftermath"].value
+    assert buckets["Aftermath"].tone == "bad"
+    assert "homeowners aggrieved" in buckets["People"].value
+
+
+def test_ledger_rows_surface_non_money_city_health():
+    item, districts = _vendor_case()
+    profile = districts["D0000"]
+    profile.service_gap["child_services"] = 21
+    profile.hazards = {"noise": 2}
+    profile.affordability = 28
+
+    model = build_desk_model(
+        rules.CityState(last_revenue=4, last_upkeep=7, last_net=-3, maintenance_backlog=2),
+        districts,
+        [item],
+        item.item_id,
+    )
+    ledger = {row.label: row for row in model.ledger_rows}
+
+    assert ledger["Economy"].value == "rev $4; up $7; net -3"
+    assert "grievance" in ledger["Pressure"].value
+    assert "worst mobility" in ledger["Services"].value
+    assert ledger["Hazards"].value == "noise band 2 x1"
+    assert ledger["Housing"].value == "D0000 affordability 28"
+    assert ledger["Maintenance"].value == "2 active"
+
+
+def test_summary_helpers_report_service_hazard_and_maintenance_backlog():
+    _item, districts = _vendor_case()
+    profile = districts["D0000"]
+    profile.service_gap["child_services"] = 21
+    profile.hazards = {"fire": 3, "noise": 1}
+    feature = rules.FeatureInstance("F-market", "vendor_market", status="degraded", condition=22)
+
+    assert _service_gap_summary([profile], "child_services") == "mobility gap 40 in D0000"
+    assert _hazard_summary([profile]) == "fire band 3 x1"
+    assert _maintenance_summary([feature]) == "1 due; lowest condition 22"

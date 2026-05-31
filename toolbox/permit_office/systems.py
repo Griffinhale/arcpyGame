@@ -9,6 +9,57 @@ from .catalogs import *
 from .helpers import *
 
 
+SERVICE_GAP_GROUPS = {
+    "child_services": ("families", "elders"),
+    "fire_response": ("families", "elders", "workers"),
+    "utilities": ("renters", "workers", "homeowners"),
+    "mobility": ("commuters", "workers", "students"),
+    "culture_access": ("artists", "students"),
+    "green_buffer": ("families", "conservationists", "elders"),
+}
+
+
+def apply_stat_cascade(profile: DistrictProfile) -> dict[str, int]:
+    """Apply shared non-money derived effects after direct deltas land."""
+
+    before = {metric: getattr(profile, metric) for metric in DISTRICT_METRICS}
+    before["population"] = profile.population
+    before["dissatisfaction"] = sum((profile.dissatisfaction or {}).values())
+    normalize_profile(profile)
+    for service, gap in sorted((profile.service_gap or {}).items()):
+        if gap >= 40:
+            _adjust_dissatisfaction(profile, SERVICE_GAP_GROUPS.get(service, ()), 1)
+        elif gap <= 10 and profile.services >= 55:
+            _adjust_dissatisfaction(profile, SERVICE_GAP_GROUPS.get(service, ()), -1)
+    risk_delta = unrest_delta = 0
+    for hazard, band in _normalize_service_map(profile.hazards, HAZARD_TYPES, maximum=4, include_zeros=False).items():
+        rule = HAZARD_RULES[hazard]
+        if band >= rule.risk_threshold:
+            risk_delta += band - rule.risk_threshold + 1
+            _adjust_dissatisfaction(profile, rule.affected_groups, 1 if band < 4 else 2)
+        if band >= rule.unrest_threshold:
+            unrest_delta += 1
+    pressure = max((int(value or 0) for value in (profile.displacement or {}).values()), default=0)
+    if pressure >= 2:
+        _adjust_dissatisfaction(profile, ("renters", "families", "elders", "artists"), 1 if pressure < 4 else 2)
+    if profile.culture >= 60 and profile.incident_state == "none":
+        group, band = _top_dissatisfaction(profile)
+        if 0 < band < DISSATISFACTION_INCIDENT_THRESHOLD:
+            _adjust_dissatisfaction(profile, (group,), -1)
+    if profile.risk >= 70 or profile.unrest >= 70:
+        group, _band = _top_presence_group(profile)
+        _adjust_dissatisfaction(profile, (group,), 1)
+        if profile.population > 100:
+            profile.population = max(100, profile.population - max(4, profile.population // 150))
+    if risk_delta or unrest_delta:
+        _apply_profile_delta(profile, {"risk": risk_delta, "unrest": unrest_delta})
+    normalize_profile(profile)
+    out = {metric: getattr(profile, metric) - before[metric] for metric in DISTRICT_METRICS}
+    out["population"] = profile.population - before["population"]
+    out["dissatisfaction"] = sum((profile.dissatisfaction or {}).values()) - before["dissatisfaction"]
+    return {key: value for key, value in out.items() if value}
+
+
 def project_step_template(chain_template_id: str, step_id: str) -> ProjectStepTemplate | None:
     """Find a project step in a chain template."""
 
@@ -201,7 +252,7 @@ def apply_hazard_turn(
             if band >= 4:
                 severe += 1
         profile.hazards = next_hazards
-        _apply_hazard_pressure(profile)
+        apply_stat_cascade(profile)
         normalize_profile(profile)
     return {"severe_hazards": severe}
 
@@ -217,13 +268,12 @@ def apply_housing_dynamics(districts: dict[str, DistrictProfile]) -> dict[str, i
         pressure = max(profile.displacement.values(), default=0)
         if pressure >= 2:
             pressured += 1
-            _adjust_dissatisfaction(profile, ("renters", "elders", "artists", "families"), 1 if pressure < 4 else 2)
         if pressure >= 3:
             _shift_mix(profile, ("renters", "artists"), -1)
             _shift_mix(profile, ("homeowners", "developers"), 1)
         if profile.housing_capacity and profile.population > profile.housing_capacity:
             profile.population = max(100, profile.population - max(4, (profile.population - profile.housing_capacity) // 3))
-        normalize_profile(profile)
+        apply_stat_cascade(profile)
         population_delta += profile.population - before
     return {"housing_population_delta": population_delta, "displacement_pressure": pressured}
 
@@ -247,7 +297,7 @@ def apply_template_long_term_effects(template: DocketTemplate, profiles: Iterabl
             }
         else:
             _apply_hazard_effects(profile, template.hazard_effects)
-        normalize_profile(profile)
+        apply_stat_cascade(profile)
         delta = {
             "population": profile.population - before["population"],
             "housing_capacity": profile.housing_capacity - before["housing_capacity"],

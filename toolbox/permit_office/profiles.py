@@ -233,6 +233,7 @@ def _incident_followup_item(turn: int, districts: dict[str, DistrictProfile]) ->
         return None
     incident_state, group, cell_id = sorted(visible, key=lambda row: (row[2], row[1], row[0]))[0]
     item = _make_docket_item(turn, 1, CIVIC_INCIDENT_TEMPLATE_ID, stakeholder=group, origin_item_id=f"dissatisfaction:{cell_id}:{group}")
+    item.target_cell_ids = [cell_id]
     item.preview_text = f"{item.preview_text} Visible condition: {incident_state} in {cell_id}."
     return item
 
@@ -318,7 +319,7 @@ def inspection_case_for_item(
             note = "Referenced support feature has an open maintenance condition."
         elif rng.random() < 0.2:
             severity = "warning"
-            note = "The file is internally consistent after one heroic assumption."
+            note = "The file is mostly consistent but needs one assumption checked."
         label = VIOLATION_CODES.get(code, {}).get("label", code.replace("_", " ").title())
         evidence.append(EvidenceRecord(f"{item.item_id}:{code}", label, severity, code, note))
 
@@ -386,7 +387,7 @@ def _inspection_consequence_text(template: DocketTemplate, inspection_case: dict
     elif risk == "low":
         base = "no acute side-effect flag"
     else:
-        base = "side-effect file remains incomplete"
+        base = "side-effect review is incomplete"
     if violations:
         return f"{base}; {len(violations)} compliance deadline(s) may follow."
     return f"{base}; no compliance deadline opened."
