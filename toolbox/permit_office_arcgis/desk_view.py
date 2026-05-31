@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from textwrap import shorten, wrap
 from typing import Callable
 
@@ -95,6 +95,9 @@ class DeskViewModel:
     ledger_rows: tuple[LedgerRow, ...] = ()
     status_text: str = ""
     exhibit_visible: bool = False
+    deadline_text: str = ""
+    deadline_meter: int = 0
+    deadline_running: bool = False
 
 
 def build_desk_model(
@@ -104,6 +107,9 @@ def build_desk_model(
     selected_item_id="",
     status_text="",
     proposal_visible_by_item=None,
+    deadline_text="",
+    deadline_meter=0,
+    deadline_running=False,
 ) -> DeskViewModel:
     """Format gameplay state into a presentation-only desk model."""
 
@@ -127,7 +133,17 @@ def build_desk_model(
     ledger_rows = _ledger_rows(state, districts)
     status = status_text or "No report yet. Select a docket row; use Update From Map when changing targets."
     exhibit_visible = bool(proposal_visible_by_item.get(selected_id))
-    return DeskViewModel(docket_rows, selected_id, case, ledger_rows, status, exhibit_visible)
+    return DeskViewModel(
+        docket_rows,
+        selected_id,
+        case,
+        ledger_rows,
+        status,
+        exhibit_visible,
+        deadline_text,
+        deadline_meter,
+        deadline_running,
+    )
 
 
 def open_filed_report(title, report, affected, state):
@@ -232,6 +248,28 @@ class PermitDeskView:
 
         return self.model.selected_item_id
 
+    def update_deadline(self, text: str, meter: int, running: bool, status_text: str | None = None):
+        """Update the live filing-deadline presentation without reloading ArcGIS rows."""
+
+        if (
+            self.model.deadline_text == text
+            and self.model.deadline_meter == meter
+            and self.model.deadline_running == running
+            and (status_text is None or self.model.status_text == status_text)
+        ):
+            return
+        next_status = self.model.status_text if status_text is None else status_text
+        self.model = replace(
+            self.model,
+            status_text=next_status,
+            deadline_text=text,
+            deadline_meter=meter,
+            deadline_running=running,
+        )
+        width = max(self.canvas.winfo_width(), 1180)
+        height = max(self.canvas.winfo_height(), 720)
+        self._draw(width, height)
+
     def _on_configure(self, event):
         """Redraw the canvas when the window size changes."""
 
@@ -316,9 +354,9 @@ class PermitDeskView:
         c.create_rectangle(0, h - 3, width, h, fill=Palette.CARD_SHADOW, outline="")
         c.create_text(22, h // 2, text="PERMIT OFFICE", anchor="w", fill=Palette.PAPER, font=self._font(13, "bold"))
         metrics = {row.label: row for row in self.model.ledger_rows}
-        headlines = (("Turn", "DAY"), ("AP", "AP"), ("Money", "$"), ("Prosperity", "PROS"), ("Unrest", "UNREST"), ("Culture", "CULT"), ("Risk", "RISK"), ("Heat", "HEAT"))
+        headlines = (("Week", "WEEK"), ("AP", "AP"), ("Money", "$"), ("Prosperity", "PROS"), ("Unrest", "UNREST"), ("Culture", "CULT"), ("Risk", "RISK"), ("Heat", "HEAT"))
         x_start = 280
-        right_pad = 30
+        right_pad = 206 if self.model.deadline_text else 30
         spacing = max(78, (width - x_start - right_pad) // len(headlines))
         x = x_start
         for key, display in headlines:
@@ -328,6 +366,22 @@ class PermitDeskView:
             c.create_text(x, h // 2 - 9, text=display, anchor="w", fill=Palette.LEDGER_LINE, font=self._font(7, "bold"))
             c.create_text(x, h // 2 + 8, text=_clip(row.value, 12), anchor="w", fill=Palette.PAPER, font=self._font(11, "bold"))
             x += spacing
+        if self.model.deadline_text:
+            self._draw_deadline_clock(c, width, h)
+
+    def _draw_deadline_clock(self, c, width, h):
+        """Draw the live filing deadline in the top banner."""
+
+        x1 = width - 22
+        x0 = x1 - 170
+        y0 = 11
+        y1 = h - 11
+        meter = max(0, min(100, int(self.model.deadline_meter or 0)))
+        fill = Palette.GOLD if meter >= 75 else Palette.PAPER if self.model.deadline_running else Palette.LEDGER_LINE
+        c.create_rectangle(x0, y0, x1, y1, outline=fill, width=1)
+        c.create_rectangle(x0 + 1, y1 - 5, x0 + 1 + int((x1 - x0 - 2) * meter / 100), y1 - 1, fill=fill, outline="")
+        c.create_text(x0 + 8, y0 + 5, text="FILING DEADLINE", anchor="nw", fill=Palette.LEDGER_LINE, font=self._font(6, "bold"))
+        c.create_text(x0 + 8, y0 + 19, text=_clip(self.model.deadline_text, 24), anchor="nw", fill=Palette.PAPER, font=self._font(9, "bold"))
 
     def _draw_rolodex_stack(self, c, box):
         """Draw the horizontal edge-tab stack of queued (non-active) docket items."""
@@ -341,7 +395,7 @@ class PermitDeskView:
         c.create_text(x0 + 76, y0 + 4, text=f"{total_open} OPEN", anchor="nw", fill=Palette.MUTED, font=self._font(7))
 
         if not queue:
-            c.create_text(x0 + 4, y0 + 22, text="No queued cases. End the filing day to draw fresh dockets.", anchor="nw", fill=Palette.MUTED, font=self._font(9))
+            c.create_text(x0 + 4, y0 + 22, text="No queued cases. End the filing week to draw fresh dockets.", anchor="nw", fill=Palette.MUTED, font=self._font(9))
             return
 
         tab_h = 28
@@ -451,7 +505,7 @@ class PermitDeskView:
             ("Issue Permit", Palette.GREEN, self.callbacks.approve),
             ("Conditions", "#527d65", self.callbacks.approve_mitigated),
             ("Deny", Palette.RED, self.callbacks.deny),
-            ("End Day", Palette.INK, self.callbacks.advance_turn),
+            ("End Week", Palette.INK, self.callbacks.advance_turn),
         )
         gap = 8
         inner_x0 = x0 + 22
@@ -484,7 +538,7 @@ class PermitDeskView:
         c.create_text(x0 + 14, y0 + 16, text="CITY HEALTH", anchor="w", fill=Palette.INK, font=self._font(10, "bold"))
         c.create_line(x0 + 10, y0 + 33, x1 - 10, y0 + 33, fill=Palette.LEDGER_LINE)
 
-        banner_labels = {"Turn", "AP", "Money", "Prosperity", "Unrest", "Culture", "Risk", "Heat"}
+        banner_labels = {"Week", "AP", "Money", "Prosperity", "Unrest", "Culture", "Risk", "Heat"}
         rows = [r for r in self.model.ledger_rows if r.label not in banner_labels]
         y = y0 + 42
         label_x = x0 + 12
@@ -684,7 +738,7 @@ def _recurring_bucket_value(template) -> str:
     upkeep = operating.upkeep_per_turn
     net = revenue - upkeep
     if revenue or upkeep:
-        return f"rev ${revenue}/turn, upkeep ${upkeep}/turn, net ${net:+d}"
+        return f"rev ${revenue}/week, upkeep ${upkeep}/week, net ${net:+d}"
     return "no recurring budget"
 
 
@@ -996,7 +1050,7 @@ def _ledger_rows(state, districts) -> tuple[LedgerRow, ...]:
     maintenance = _maintenance_count_from_state(state)
     pressure = _pressure_cause_summary(districts)
     return (
-        LedgerRow("Turn", f"{state.turn}/{state.max_turns}", "neutral", _meter(state.turn, state.max_turns)),
+        LedgerRow("Week", f"{state.turn}/{state.max_turns}", "neutral", _meter(state.turn, state.max_turns)),
         LedgerRow("AP", f"{state.ap}/{state.max_ap}", "good" if state.ap else "watch", _meter(state.ap, state.max_ap)),
         LedgerRow("Money", f"${state.money}", "good" if state.money >= 20 else "watch"),
         LedgerRow("Prosperity", str(state.prosperity), "good", state.prosperity),

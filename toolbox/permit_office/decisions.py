@@ -661,10 +661,10 @@ def _recurring_budget_report(archetype: FeatureArchetype) -> str:
     if not revenue and not upkeep:
         return "no recurring revenue or upkeep"
     if net > 0:
-        return f"helps the budget later: revenue ${revenue}/turn, upkeep ${upkeep}/turn, net ${net:+d}"
+        return f"helps the budget later: revenue ${revenue}/week, upkeep ${upkeep}/week, net ${net:+d}"
     if net < 0:
-        return f"creates maintenance burden: revenue ${revenue}/turn, upkeep ${upkeep}/turn, net ${net:+d}"
-    return f"budget neutral: revenue ${revenue}/turn, upkeep ${upkeep}/turn, net ${net:+d}"
+        return f"creates maintenance burden: revenue ${revenue}/week, upkeep ${upkeep}/week, net ${net:+d}"
+    return f"budget neutral: revenue ${revenue}/week, upkeep ${upkeep}/week, net ${net:+d}"
 
 
 def _spillover_report_fragment(spillovers: list[str], template: DocketTemplate, mitigated: bool) -> str:

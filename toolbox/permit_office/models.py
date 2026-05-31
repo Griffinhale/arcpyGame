@@ -320,6 +320,8 @@ class CityState:
     last_net: int = 0
     maintenance_backlog: int = 0
     stakeholder_memory: dict[str, int] = field(default_factory=dict)
+    week_day: int = 0
+    daily_pressure: dict[str, int] = field(default_factory=dict)
 
 
 @dataclass

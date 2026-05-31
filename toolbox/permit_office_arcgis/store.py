@@ -138,6 +138,8 @@ def write_state(paths, state):
         "last_net": (str(state.last_net), state.last_net),
         "maintenance_backlog": (str(state.maintenance_backlog), state.maintenance_backlog),
         "stakeholder_memory": (json.dumps(state.stakeholder_memory, sort_keys=True), None),
+        "week_day": (str(getattr(state, "week_day", 0)), getattr(state, "week_day", 0)),
+        "daily_pressure": (json.dumps(getattr(state, "daily_pressure", {}) or {}, sort_keys=True), None),
     }
     arcpy.management.DeleteRows(paths["state"])
     with arcpy.da.InsertCursor(paths["state"], ["key", "value_text", "value_num"]) as cursor:
@@ -153,7 +155,7 @@ def read_state(paths):
         for key, text, num in cursor:
             values[key] = (text, num)
     state = rules.CityState()
-    for key in ("turn", "max_turns", "ap", "max_ap", "money", "audit_stage", "prosperity", "unrest", "culture", "risk", "last_revenue", "last_upkeep", "last_net", "maintenance_backlog"):
+    for key in ("turn", "max_turns", "ap", "max_ap", "money", "audit_stage", "prosperity", "unrest", "culture", "risk", "last_revenue", "last_upkeep", "last_net", "maintenance_backlog", "week_day"):
         if key in values and values[key][1] is not None:
             setattr(state, key, int(values[key][1]))
     for key in ("status", "last_report", "scenario_id"):
@@ -171,6 +173,12 @@ def read_state(paths):
             state.stakeholder_memory = {str(key): int(value) for key, value in parsed.items()}
         except Exception:
             state.stakeholder_memory = {}
+    if "daily_pressure" in values and values["daily_pressure"][0]:
+        try:
+            parsed = json.loads(values["daily_pressure"][0])
+            state.daily_pressure = {str(key): max(0, min(4, int(value))) for key, value in parsed.items() if int(value) > 0}
+        except Exception:
+            state.daily_pressure = {}
     return state
 
 
@@ -376,6 +384,59 @@ def write_district_updates(paths, districts, report, affected_ids=None):
             cursor.updateRow(row)
 
 
+@perf_traced("write_daily_pressure_overlays")
+def write_daily_pressure_overlays(paths, districts, pressure):
+    """Persist only daily pressure display overlays on district rows."""
+
+    pressure = {str(cid): max(0, min(4, int(value or 0))) for cid, value in (pressure or {}).items()}
+    fields = ["cell_id", "display_state", "last_report"]
+    with arcpy.da.UpdateCursor(paths["districts"], fields) as cursor:
+        for row in cursor:
+            cid = row[0]
+            profile = districts.get(cid) if districts else None
+            amount = pressure.get(cid, 0)
+            overlay = _daily_overlay_state(profile, amount)
+            row[1] = overlay
+            row[2] = _daily_overlay_report(cid, overlay, amount, profile)
+            cursor.updateRow(row)
+
+
+def _daily_overlay_state(profile, pressure):
+    """Choose daily map overlay state without normalizing district profiles."""
+
+    if profile and profile.incident_state != "none":
+        return "incident"
+    if profile and max((int(band or 0) for band in (profile.hazards or {}).values()), default=0) >= 2:
+        return "hazard"
+    if profile and max((int(gap or 0) for gap in (profile.service_gap or {}).values()), default=0) >= 30:
+        return "service_gap"
+    if profile and max((int(band or 0) for band in (profile.displacement or {}).values()), default=0) >= 2:
+        return "housing_pressure"
+    if profile and rules._top_dissatisfaction(profile)[1] >= rules.DISSATISFACTION_AGGRIEVED_THRESHOLD:
+        return "grievance"
+    if pressure >= 3:
+        return "at_risk"
+    if pressure >= 2:
+        return "aggrieved"
+    if pressure >= 1:
+        return "strained"
+    return profile.display_state if profile else "stable"
+
+
+def _daily_overlay_report(cid, overlay, pressure, profile):
+    """Return compact map note for daily pressure overlays."""
+
+    if overlay == "incident":
+        return f"{cid}: active civic incident remains visible."[:512]
+    if overlay in {"hazard", "service_gap", "housing_pressure", "grievance"}:
+        return f"{cid}: {overlay.replace('_', ' ')} condition remains visible."[:512]
+    if pressure:
+        return f"{cid}: daily docket pressure {pressure}/4."[:512]
+    if profile:
+        return f"{cid}: no daily pressure filed."[:512]
+    return ""
+
+
 def read_active_features(paths):
     """Read active support features from point, line, and polygon classes."""
 
@@ -549,6 +610,9 @@ def generate_docket_rows(paths, seed, messages):
     active_features = read_active_features(paths)
     projects = read_projects(paths)
     arcpy.management.DeleteRows(paths["docket"])
+    if state.status == "complete" or state.turn > state.max_turns:
+        _log(messages, "DOCKET", f"final audit complete; no week {state.turn + 1} docket generated")
+        return []
     items = rules.generate_docket(turn=state.turn, seed=seed, count=3, state=state, districts=districts, projects=projects, active_features=active_features)
     # Docket rows mirror rule items exactly enough for the dashboard to reload
     # without recomputing follow-up priority or case metadata.

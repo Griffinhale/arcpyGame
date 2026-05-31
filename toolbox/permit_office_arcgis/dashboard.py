@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 import traceback
 
 import arcpy
@@ -38,11 +39,24 @@ from .store import (
     read_state,
     write_active_features,
     write_district_updates,
+    write_daily_pressure_overlays,
     write_docket_item,
     write_projects,
     write_state,
 )
 from .desk_view import DeskCallbacks, PermitDeskView, build_desk_model, open_filed_report
+
+
+WEEK_DEADLINE_SECONDS = 5 * 60
+TIMER_TICK_MS = 1000
+WORK_WEEK_DAYS = (
+    ("MON INTAKE", "New applications logged. Triage high-risk packets."),
+    ("TUE INSPECTION", "Inspection desk is active. File reviews reveal compliance risk."),
+    ("WED COMMENT", "Public comment window is open. Unresolved cases may draw attention."),
+    ("THU ESCALATION", "Escalation review. Ignored stakeholders are warming up."),
+    ("FRI CLOSE", "Filing close approaching. Open cases advance unresolved."),
+)
+WORK_DAY_SECONDS = WEEK_DEADLINE_SECONDS // len(WORK_WEEK_DAYS)
 
 
 def open_effect_report(title, report, affected, state):
@@ -68,7 +82,7 @@ def prepare_dashboard_session(paths, seed, messages):
 def has_saved_game(paths):
     """Return whether the geodatabase contains enough rows to resume play."""
 
-    return _row_count(paths["districts"]) > 0 and _row_count(paths["state"]) > 0
+    return _row_count(paths.get("districts", "")) > 0 and _row_count(paths.get("state", "")) > 0
 
 
 def _row_count(path):
@@ -109,6 +123,12 @@ class DashboardController:
         self.district_layer = district_layer
         self.seed = seed
         self.messages = messages
+        self.status_text = ""
+        self._deadline_week = 0
+        self._deadline_started = 0.0
+        self._deadline_after_id = None
+        self._deadline_running = False
+        self._command_busy = False
 
     def open(self):
         """Create the Tkinter window, wire callbacks, and enter the UI loop."""
@@ -147,6 +167,7 @@ class DashboardController:
         self.view = PermitDeskView(self.root, callbacks, self.select_item)
 
         self.reload()
+        self._schedule_deadline_tick()
         self.root.mainloop()
 
     def select_item(self, item_id):
@@ -169,6 +190,7 @@ class DashboardController:
         state = read_state(self.paths)
         districts = read_districts(self.paths)
         items = read_docket(self.paths)
+        self._sync_deadline_timer(state)
         if not has_saved_game(self.paths) and not self.status_text:
             self.status_text = "No saved game found. Click New Game to create Permit Office layers and start play."
         proposal_visible_by_item = {}
@@ -182,11 +204,122 @@ class DashboardController:
             districts,
             items,
             self.selected_item_id,
-            self.status_text,
+            self._display_status_text(),
             proposal_visible_by_item,
+            *self._deadline_presentation(),
         )
         self.selected_item_id = model.selected_item_id
         self.view.render(model)
+
+    def _sync_deadline_timer(self, state):
+        """Start or reset the five-minute filing clock for the current week."""
+
+        if state.status == "complete" or state.turn > state.max_turns or not has_saved_game(self.paths):
+            self._deadline_running = False
+            self._deadline_week = int(getattr(state, "turn", 0) or 0)
+            self._deadline_started = 0.0
+            return
+        week = int(getattr(state, "turn", 1) or 1)
+        if self._deadline_week != week or not self._deadline_started:
+            self._deadline_week = week
+            self._deadline_started = time.monotonic()
+        self._deadline_running = True
+
+    def _deadline_remaining_seconds(self):
+        """Return seconds left before the filing deadline closes the week."""
+
+        if not self._deadline_running or not self._deadline_started:
+            return WEEK_DEADLINE_SECONDS
+        elapsed = max(0, time.monotonic() - self._deadline_started)
+        return max(0, int(round(WEEK_DEADLINE_SECONDS - elapsed)))
+
+    def _deadline_elapsed_seconds(self):
+        """Return elapsed seconds in the current office week."""
+
+        if not self._deadline_running or not self._deadline_started:
+            return 0
+        return min(WEEK_DEADLINE_SECONDS, max(0, int(time.monotonic() - self._deadline_started)))
+
+    def _deadline_phase(self):
+        """Return the current office-day label, note, and seconds left in that day."""
+
+        elapsed = self._deadline_elapsed_seconds()
+        index = self._deadline_day_index()
+        label, note = WORK_WEEK_DAYS[index]
+        seconds_left = max(0, WORK_DAY_SECONDS - (elapsed - index * WORK_DAY_SECONDS))
+        return label, note, seconds_left
+
+    def _deadline_day_index(self):
+        """Return zero-based office day index for the live deadline clock."""
+
+        return min(len(WORK_WEEK_DAYS) - 1, self._deadline_elapsed_seconds() // WORK_DAY_SECONDS)
+
+    def _deadline_presentation(self):
+        """Return banner text, meter, and running state for the deadline clock."""
+
+        if not self._deadline_running:
+            return ("CLOCK PAUSED", 0, False)
+        day_label, _note, day_remaining = self._deadline_phase()
+        minutes, seconds = divmod(day_remaining, 60)
+        elapsed = self._deadline_elapsed_seconds()
+        meter = int(100 * elapsed / WEEK_DEADLINE_SECONDS)
+        return (f"{day_label} {minutes}:{seconds:02d}", meter, True)
+
+    def _display_status_text(self):
+        """Return action status when present, otherwise the current office-day note."""
+
+        if self.status_text:
+            return self.status_text
+        if self._deadline_running:
+            _label, note, _day_remaining = self._deadline_phase()
+            return note
+        return ""
+
+    def _schedule_deadline_tick(self):
+        """Keep the live clock moving without reloading ArcGIS rows."""
+
+        if not getattr(self, "root", None):
+            return
+        try:
+            self._deadline_after_id = self.root.after(TIMER_TICK_MS, self._deadline_tick)
+        except Exception:
+            self._deadline_after_id = None
+
+    def _deadline_tick(self):
+        """Advance daily pressure and close the week when the deadline expires."""
+
+        self._deadline_after_id = None
+        try:
+            if self._deadline_running and not self._command_busy:
+                self._advance_daily_pressure_if_due()
+                text, meter, running = self._deadline_presentation()
+                if getattr(self, "view", None):
+                    self.view.update_deadline(text, meter, running, self._display_status_text())
+                if self._deadline_remaining_seconds() <= 0:
+                    self.status_var.set("Friday filing deadline reached. Closing the week.")
+                    self.advance_turn(auto=True)
+            elif getattr(self, "view", None):
+                self.view.update_deadline(*self._deadline_presentation(), self._display_status_text())
+        finally:
+            self._schedule_deadline_tick()
+
+    def _advance_daily_pressure_if_due(self):
+        """Persist district overlays when the office day moves forward."""
+
+        target_day = self._deadline_day_index()
+        try:
+            state = read_state(self.paths)
+            if target_day <= int(getattr(state, "week_day", 0) or 0):
+                return
+            items = read_docket(self.paths)
+            districts = read_districts(self.paths)
+            active_features = read_active_features(self.paths)
+            pressure = rules.advance_daily_pressure(state, items, districts, active_features, target_day)
+            write_state(self.paths, state)
+            write_daily_pressure_overlays(self.paths, districts, pressure)
+            refresh_all(self.paths, self.messages, layer_names={DISTRICTS})
+        except Exception as exc:
+            _warn(self.messages, "DASH", f"daily pressure update failed: {exc}")
 
     def new_game(self):
         """Start a fresh game from the dashboard after player confirmation."""
@@ -221,6 +354,7 @@ class DashboardController:
 
         with perf_session("new_game", self.messages):
             try:
+                self._command_busy = True
                 clear_game_rows(self.paths)
                 create_district_board(self.paths, seed, self.messages)
                 seed_city_features(self.paths, seed, self.messages)
@@ -232,11 +366,14 @@ class DashboardController:
                 self.seed = seed
                 self.district_layer = DISTRICTS
                 self.selected_item_id = ""
+                self._deadline_week = 0
+                self._deadline_started = 0.0
                 self.status_var.set(f"New game started with seed {seed}.")
             except Exception as exc:
                 self.status_var.set(f"New game failed: {exc}")
                 _warn(self.messages, "NEW", traceback.format_exc().strip().splitlines()[-1])
             finally:
+                self._command_busy = False
                 self.reload()
 
     def show_scorecard(self):
@@ -337,6 +474,7 @@ class DashboardController:
             try:
                 # Inspection reads the live state, lets pure rules attach evidence,
                 # then persists both the changed docket item and the command log.
+                self._command_busy = True
                 state = read_state(self.paths)
                 districts = read_districts(self.paths)
                 active_features = read_active_features(self.paths)
@@ -352,6 +490,8 @@ class DashboardController:
             except Exception as exc:
                 command_finish(self.paths, command_id, "error", error=str(exc))
                 self.status_var.set(f"Inspect failed: {exc}")
+            finally:
+                self._command_busy = False
         self.reload()
 
     def apply_decision(self, action, mitigated):
@@ -363,6 +503,7 @@ class DashboardController:
         command_id = None
         with perf_session(f"turn={action}", self.messages):
             try:
+                self._command_busy = True
                 # Approvals need current map proposal context before pure rules can
                 # resolve target effects, spillover, active features, and projects.
                 target_ids = list(item.target_cell_ids or ())
@@ -409,6 +550,7 @@ class DashboardController:
                 self.status_var.set(f"Approve failed: {exc}")
                 _warn(self.messages, "DASH", traceback.format_exc().strip().splitlines()[-1])
             finally:
+                self._command_busy = False
                 with perf_block("reload"):
                     self.reload()
 
@@ -421,6 +563,7 @@ class DashboardController:
         command_id = command_insert(self.paths, "deny", item.item_id, item.target_cell_ids)
         with perf_session("turn=deny", self.messages):
             try:
+                self._command_busy = True
                 # Denials use the same pure-rule resolver, but proposal features are
                 # marked denied instead of activated on the map.
                 with perf_block("reads"):
@@ -445,6 +588,7 @@ class DashboardController:
                 command_finish(self.paths, command_id, "error", error=str(exc))
                 self.status_var.set(f"Deny failed: {exc}")
             finally:
+                self._command_busy = False
                 with perf_block("reload"):
                     self.reload()
 
@@ -465,12 +609,13 @@ class DashboardController:
         with perf_block("receipt"):
             open_effect_report(item.title, filed_report, result.affected_cell_ids, state)
 
-    def advance_turn(self):
-        """Advance the saved game one turn and regenerate the docket."""
+    def advance_turn(self, auto=False):
+        """Advance the saved game one week and regenerate the docket."""
 
         command_id = command_insert(self.paths, "advance_turn", "", [])
         with perf_session("turn=advance", self.messages):
             try:
+                self._command_busy = True
                 # Turn advancement mutates open docket items, city systems, active
                 # features, projects, and the next generated docket as one command.
                 with perf_block("reads"):
@@ -489,15 +634,20 @@ class DashboardController:
                     write_active_features(self.paths, active_features)
                     for item in items:
                         write_docket_item(self.paths, item)
-                    generate_docket_rows(self.paths, self.seed, self.messages)
+                    if state.status != "complete":
+                        generate_docket_rows(self.paths, self.seed, self.messages)
                     command_finish(self.paths, command_id, "applied", report)
                 rebuild_output_layers(self.paths, self.messages)
                 self.district_layer = DISTRICTS
-                self.status_var.set(report)
+                prefix = "Auto-deadline: " if auto else ""
+                self.status_var.set(f"{prefix}{report}")
+                self._deadline_week = 0
+                self._deadline_started = 0.0
             except Exception as exc:
                 command_finish(self.paths, command_id, "error", error=str(exc))
                 self.status_var.set(f"Advance failed: {exc}")
             finally:
+                self._command_busy = False
                 with perf_block("reload"):
                     self.reload()
 
