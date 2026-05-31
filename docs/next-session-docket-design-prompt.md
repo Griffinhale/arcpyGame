@@ -23,7 +23,7 @@ Current state:
 - Live ArcGIS Pro smoke-test results and presentation-machine refresh behavior are still the main missing evidence.
 
 Next major slice:
-Run the ArcGIS Pro smoke test, record failures or friction, then tune the six-turn demo around the actual dashboard/map feel. Only revisit refresh implementation details if stale display behavior, flicker, or lock errors show up during the live run.
+Run the ArcGIS Pro smoke test, record failures or friction, then tune the six-week demo around the actual dashboard/map feel. Only revisit refresh implementation details if stale display behavior, flicker, or lock errors show up during the live run.
 
 Default automated check:
 python3 -m pytest tests/test_permit_office_rules.py -q

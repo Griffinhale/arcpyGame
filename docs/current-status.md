@@ -11,7 +11,7 @@ This file is the quick project status source for Permit Office. It separates the
 - Pure Python gameplay package in `toolbox/permit_office/`, with dataclasses, catalogs, district generation, docket generation, inspections, decisions, turns, scorecards, and audit findings.
 - Content systems for docket templates, stakeholder pressure, population mix, local dissatisfaction, civic incidents, service gaps, housing, hazards, projects, maintenance, and feature lifecycle.
 - ArcGIS adapter package in `toolbox/permit_office_arcgis/`, covering schema creation, store/read/write helpers, generated district geometry, proposal geometry, proposal activation, map refresh hooks, and the Tkinter dashboard.
-- Seed `2026` six-turn golden route documented in `docs/permit-office-demo-script.md`, with pure Python regression coverage for the route state and scorecard.
+- Seed `2026` six-week golden route documented in `docs/permit-office-demo-script.md`, with pure Python regression coverage for the route state and scorecard.
 - Thin ArcGIS toolbox entrypoint in `toolbox/arcpy_permit_office.pyt`.
 - Compatibility facade in `toolbox/arcpy_permit_office_rules.py` for tests and toolbox loading.
 - Active automated regression suite in `tests/test_permit_office_rules.py`.
