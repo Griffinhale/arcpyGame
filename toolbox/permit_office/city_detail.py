@@ -95,6 +95,8 @@ def generate_city_detail_features(
 
 
 def _line_feature(seed, suffix, archetype_id, targets, display_state, name, orientation, active=False):
+    """Build a deterministic line descriptor for seeded map context."""
+
     return CityDetailFeature(
         feature_id=f"CITY-{seed}-{suffix}",
         archetype_id=archetype_id,
@@ -112,13 +114,19 @@ def _line_feature(seed, suffix, archetype_id, targets, display_state, name, orie
 
 
 def _best_corridor(vertical, horizontal, by_id, prefer):
+    """Choose the corridor with the strongest preferred district-type fit."""
+
     def score(targets):
+        """Score one candidate corridor by preferred district membership."""
+
         return sum(2 if by_id[cid].district_type in prefer else 0 for cid in targets)
 
     return vertical if score(vertical) >= score(horizontal) else horizontal
 
 
 def _district_block_features(profile: DistrictProfile, seed: int, rng: random.Random, reserved_slots=None) -> list[CityDetailFeature]:
+    """Create context block polygons for one district."""
+
     block_count = {"natural": 1, "industrial": 2, "civic": 2, "academic": 3, "mercantile": 4, "residential": 4}.get(profile.district_type, 3)
     archetype_id = {
         "residential": "residential_block",
@@ -138,6 +146,8 @@ def _district_block_features(profile: DistrictProfile, seed: int, rng: random.Ra
     }.get(profile.district_type, "building")
     features = []
     occupancy_budget = _occupancy_budget(profile, block_count)
+    # Building slots are relative to the district polygon. Reserved slots keep
+    # seeded parks from being covered by context building rectangles.
     positions = [slot for slot in _BUILDING_SLOTS if slot not in set(reserved_slots or ())]
     for idx, (cx, cy) in enumerate(positions[:block_count]):
         jitter = rng.randrange(-2, 3) / 100.0
@@ -165,6 +175,8 @@ def _district_block_features(profile: DistrictProfile, seed: int, rng: random.Ra
 
 
 def _zone_feature(seed, suffix, archetype_id, profile, display_state, name, status, capacity, geometry_hint, metadata):
+    """Build a polygon descriptor with district metadata and geometry hints."""
+
     payload = {
         "district_id": profile.cell_id,
         "district_type": profile.district_type,
@@ -187,6 +199,8 @@ def _zone_feature(seed, suffix, archetype_id, profile, display_state, name, stat
 
 
 def _local_street_stub(profile, seed, rng):
+    """Create a short local street hint inside a district without a corridor."""
+
     orientation = "horizontal" if rng.random() < 0.5 else "vertical"
     return CityDetailFeature(
         feature_id=f"CITY-{seed}-{profile.cell_id}-street",
@@ -203,6 +217,8 @@ def _local_street_stub(profile, seed, rng):
 
 
 def _park_profiles(profiles, rng):
+    """Select deterministic districts that should receive seeded parks."""
+
     candidates = [profile for profile in profiles if profile.district_type in ("natural", "residential", "academic")]
     if not candidates:
         candidates = profiles
@@ -211,6 +227,8 @@ def _park_profiles(profiles, rng):
 
 
 def _anchor_profiles(profiles):
+    """Pick one visible civic/commerce/campus anchor per preferred type."""
+
     preferred = [profile for profile in profiles if profile.district_type in ("civic", "mercantile", "academic")]
     selected = []
     seen_types = set()
@@ -224,6 +242,8 @@ def _anchor_profiles(profiles):
 
 
 def _anchor_point(profile, seed, idx):
+    """Create a point-of-interest descriptor for a prominent district anchor."""
+
     archetype_id = {
         "civic": "civic_building",
         "academic": "academic_block",
@@ -257,10 +277,14 @@ _POI_SLOTS = ((0.38, 0.24), (0.76, 0.38), (0.62, 0.76), (0.24, 0.62))
 
 
 def _park_slot(idx):
+    """Return a repeating relative slot for seeded park placement."""
+
     return _BUILDING_SLOTS[(idx - 1) % len(_BUILDING_SLOTS)]
 
 
 def _occupancy_budget(profile, block_count):
+    """Split district population into visible context-block occupancy."""
+
     if profile.district_type == "natural":
         return [0] * block_count
     share = 0.70 if profile.district_type in ("residential", "mercantile", "academic") else 0.35
@@ -275,6 +299,8 @@ def _occupancy_budget(profile, block_count):
 
 
 def _top_groups(profile, limit=3):
+    """Return the highest-band population groups for context metadata."""
+
     return [
         group
         for group, band in sorted((profile.population_mix or {}).items(), key=lambda pair: (-int(pair[1] or 0), pair[0]))

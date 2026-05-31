@@ -809,6 +809,8 @@ def _set_unique_value_renderer_field(renderer, field_name):
 
 
 def _renderer_has_attr(renderer, attr):
+    """Return whether an ArcGIS renderer exposes an attribute safely."""
+
     try:
         getattr(renderer, attr)
     except Exception:
@@ -818,6 +820,7 @@ def _renderer_has_attr(renderer, attr):
 
 def _set_unique_value_renderer_field_with_cim(layer, sym, field_name):
     """Fallback through CIM when arcpy.mp renderer properties are unavailable."""
+
     last_error = None
     if not hasattr(layer, "getDefinition") or not hasattr(layer, "setDefinition"):
         return False, "CIM definition API unavailable"
@@ -827,6 +830,8 @@ def _set_unique_value_renderer_field_with_cim(layer, sym, field_name):
         last_error = exc
     for cim_version in ("V3", "V2"):
         try:
+            # ArcGIS Pro has shipped renderer field setters under different
+            # arcpy.mp surfaces; CIM keeps this path working across versions.
             definition = layer.getDefinition(cim_version)
             renderer = getattr(definition, "renderer", None)
             if renderer is None:
@@ -856,6 +861,8 @@ def _set_cim_attr(target, names, value):
 
 
 def _try_set_cim_attr(target, names, value):
+    """Best-effort CIM attribute write used for optional renderer flags."""
+
     try:
         _set_cim_attr(target, names, value)
     except Exception:
@@ -863,6 +870,8 @@ def _try_set_cim_attr(target, names, value):
 
 
 def _try_configure_layer_unique_value_items(layer, field_name, key):
+    """Best-effort item styling after a CIM renderer-field fallback."""
+
     try:
         sym = layer.symbology
         if not _renderer_uses_field(sym.renderer, field_name):
@@ -885,6 +894,8 @@ def _configure_unique_value_renderer(renderer, field_name, key=None):
 
 
 def _add_unique_values(renderer, field_name):
+    """Seed expected unique-value classes when the renderer supports it."""
+
     if not hasattr(renderer, "addValues"):
         return
     heading = field_name
@@ -901,6 +912,8 @@ def _add_unique_values(renderer, field_name):
 
 
 def _style_default_symbol(renderer, key):
+    """Apply the configured fallback style to a renderer default symbol."""
+
     for attr in ("defaultSymbol", "default_symbol"):
         try:
             symbol = getattr(renderer, attr)
@@ -912,6 +925,8 @@ def _style_default_symbol(renderer, key):
 
 
 def _style_unique_value_items(renderer, field_name, key=None):
+    """Apply configured labels and symbols to known unique-value items."""
+
     symbol_map = SYMBOLS_BY_FIELD.get(field_name, {})
     try:
         groups = renderer.groups
@@ -935,6 +950,8 @@ def _style_unique_value_items(renderer, field_name, key=None):
 
 
 def _unique_value_item_value(item):
+    """Extract the string value from an ArcGIS unique-value item."""
+
     try:
         values = item.values
         if values and values[0]:
@@ -945,6 +962,8 @@ def _unique_value_item_value(item):
 
 
 def _renderer_uses_field(renderer, field_name):
+    """Return whether a renderer is already keyed by the requested field."""
+
     try:
         fields = renderer.fields
         return field_name in list(fields or [])
@@ -957,6 +976,8 @@ def _renderer_uses_field(renderer, field_name):
 
 
 def _tune_layer_visibility(layer, key):
+    """Apply configured transparency when the ArcGIS layer allows it."""
+
     try:
         layer.transparency = LAYER_TRANSPARENCY[key]
     except Exception:
@@ -964,6 +985,8 @@ def _tune_layer_visibility(layer, key):
 
 
 def _configure_labels(layer, key):
+    """Enable district cell-id labels when label APIs are available."""
+
     if key != "districts":
         return
     try:

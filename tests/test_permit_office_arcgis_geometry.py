@@ -22,43 +22,71 @@ from toolbox.permit_office_arcgis import geometry
 
 @dataclass
 class FakeField:
+    """Minimal ArcPy field object exposing only a name."""
+
     name: str
 
 
 class FakeMessages:
+    """Capture warning messages emitted by geometry helpers."""
+
     def __init__(self):
+        """Initialize captured warning storage."""
+
         self.warnings = []
 
     def addWarningMessage(self, text):
+        """Record an ArcPy-style warning message."""
+
         self.warnings.append(text)
 
 
 class FakeManagement:
+    """Record ArcPy management selection calls."""
+
     def __init__(self):
+        """Initialize captured selections."""
+
         self.selections = []
 
     def SelectLayerByAttribute(self, layer, selection_type, where_clause=None):
+        """Capture a layer selection operation."""
+
         self.selections.append((layer, selection_type, where_clause))
 
 
 class FakeDA:
+    """Provide fake ArcPy data-access cursor factories."""
+
     def __init__(self, rows):
+        """Store shared fake table rows."""
+
         self.rows = rows
 
     def SearchCursor(self, path, fields):
+        """Return a read cursor over one fake table."""
+
         return FakeSearchCursor(self.rows[path], fields)
 
     def UpdateCursor(self, path, fields):
+        """Return a mutable cursor over one fake table."""
+
         return FakeUpdateCursor(self.rows[path], fields)
 
 
 class FakeArcpy:
+    """Small ArcPy module stand-in for geometry tests."""
+
     def __init__(self, rows):
+        """Wire fake rows into management and data-access namespaces."""
+
         self.rows = rows
         self.da = FakeDA(rows)
         self.management = FakeManagement()
 
     def ListFields(self, path):
+        """Return field names discovered from fake row dictionaries."""
+
         names = set()
         for row in self.rows.get(path, []):
             names.update(row)
@@ -66,20 +94,32 @@ class FakeArcpy:
 
 
 class FakeSearchCursor:
+    """Context-manager search cursor for fake row dictionaries."""
+
     def __init__(self, rows, fields):
+        """Project fake rows to the requested field order."""
+
         self.projected = [[row.get(field) for field in fields] for row in rows]
         self.index = 0
 
     def __enter__(self):
+        """Enter the cursor context."""
+
         return self
 
     def __exit__(self, *exc):
+        """Leave the cursor context without suppressing errors."""
+
         return False
 
     def __iter__(self):
+        """Return this cursor as its own iterator."""
+
         return self
 
     def __next__(self):
+        """Return the next projected row."""
+
         if self.index >= len(self.projected):
             raise StopIteration
         row = self.projected[self.index]
@@ -88,22 +128,34 @@ class FakeSearchCursor:
 
 
 class FakeUpdateCursor:
+    """Mutable fake cursor that supports update and delete calls."""
+
     def __init__(self, rows, fields):
+        """Store rows and the ArcPy cursor field order."""
+
         self.rows = rows
         self.fields = fields
         self.index = 0
         self.current = None
 
     def __enter__(self):
+        """Enter the cursor context."""
+
         return self
 
     def __exit__(self, *exc):
+        """Leave the cursor context without suppressing errors."""
+
         return False
 
     def __iter__(self):
+        """Return this cursor as its own iterator."""
+
         return self
 
     def __next__(self):
+        """Return the next row values in cursor field order."""
+
         if self.index >= len(self.rows):
             raise StopIteration
         self.current = self.rows[self.index]
@@ -111,24 +163,34 @@ class FakeUpdateCursor:
         return [self.current.get(field) for field in self.fields]
 
     def updateRow(self, values):
+        """Write values back to the current fake row."""
+
         for field, value in zip(self.fields, values):
             self.current[field] = value
 
     def deleteRow(self):
+        """Delete the current fake row."""
+
         if self.current in self.rows:
             self.rows.remove(self.current)
             self.index -= 1
 
 
 def _paths():
+    """Return canonical fake geodatabase paths."""
+
     return {"districts": "districts", "points": "points", "lines": "lines", "zones": "zones"}
 
 
 def _rows():
+    """Return empty fake feature-class row containers."""
+
     return {"districts": [], "points": [], "lines": [], "zones": []}
 
 
 def test_select_case_context_creates_proposal_and_selects_support_feature(monkeypatch):
+    """Verify selecting a case creates and selects its proposal context."""
+
     rows = _rows()
     fake = FakeArcpy(rows)
     monkeypatch.setattr(geometry, "arcpy", fake)
@@ -142,6 +204,8 @@ def test_select_case_context_creates_proposal_and_selects_support_feature(monkey
     )
 
     def insert(paths, docket_item, target_ids, messages):
+        """Fake proposal insertion used by the selection flow."""
+
         rows["points"].append(
             {
                 "item_id": docket_item.item_id,
@@ -162,6 +226,8 @@ def test_select_case_context_creates_proposal_and_selects_support_feature(monkey
 
 
 def test_maintenance_selection_includes_referenced_active_feature(monkeypatch):
+    """Verify maintenance cases select both proposal and subject feature."""
+
     rows = _rows()
     rows["points"].append({"item_id": "CASE-2", "status": "proposed", "target_cell_ids": "D0000", "feature_id": "P-2"})
     fake = FakeArcpy(rows)
@@ -183,6 +249,8 @@ def test_maintenance_selection_includes_referenced_active_feature(monkeypatch):
 
 
 def test_hide_show_affects_only_selected_proposed_feature(monkeypatch):
+    """Verify hiding a proposal leaves active and context features intact."""
+
     rows = _rows()
     rows["points"].extend(
         [
