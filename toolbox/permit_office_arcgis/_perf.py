@@ -51,15 +51,21 @@ class _PerfBlock:
     __slots__ = ("name", "children", "_start", "elapsed")
 
     def __init__(self, name):
+        """Start timing a named block and prepare its child list."""
+
         self.name = name
         self.children = []
         self._start = time.perf_counter()
         self.elapsed = 0.0
 
     def stop(self):
+        """Freeze this block's elapsed time."""
+
         self.elapsed = time.perf_counter() - self._start
 
     def summary(self):
+        """Return a compact nested timing summary for log output."""
+
         if not self.children:
             return f"{self.name}={self.elapsed:.3f}"
         parts = " ".join(child.summary() for child in self.children)
@@ -67,6 +73,8 @@ class _PerfBlock:
 
 
 def _stack():
+    """Return the thread-local active perf-block stack."""
+
     stack = getattr(_state, "stack", None)
     if stack is None:
         stack = []
@@ -113,8 +121,12 @@ def perf_traced(name):
     """
 
     def decorator(fn):
+        """Wrap one function in a named perf block."""
+
         @functools.wraps(fn)
         def wrapper(*args, **kwargs):
+            """Run the wrapped function while recording elapsed time."""
+
             with perf_block(name):
                 return fn(*args, **kwargs)
         return wrapper
