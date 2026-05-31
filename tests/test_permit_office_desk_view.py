@@ -12,6 +12,8 @@ from toolbox.permit_office_arcgis.desk_view import (
 
 
 def _vendor_case():
+    """Return a vendor docket item with a local target district."""
+
     item = rules.DocketItem(
         "T01-vendor",
         "street_vendor_compact",
@@ -38,6 +40,8 @@ def _vendor_case():
 
 
 def test_uninspected_case_uses_qualitative_impact_buckets():
+    """Verify uninspected cases show qualitative impact buckets."""
+
     item, districts = _vendor_case()
 
     model = build_desk_model(
@@ -46,11 +50,16 @@ def test_uninspected_case_uses_qualitative_impact_buckets():
         [item],
         item.item_id,
         proposal_visible_by_item={item.item_id: True},
+        deadline_text="MON INTAKE 1:00",
+        deadline_meter=0,
+        deadline_running=True,
     )
     buckets = {bucket.label: bucket for bucket in model.case.impact_buckets}
 
     assert list(buckets) == ["Cost", "City", "Local", "People", "Services", "Aftermath"]
     assert model.exhibit_visible is True
+    assert model.deadline_text == "MON INTAKE 1:00"
+    assert model.deadline_running is True
     assert "Issue 1AP/$12" in buckets["Cost"].value
     assert "conditions +$6" in buckets["Cost"].value
     assert "pros" in buckets["City"].value
@@ -60,13 +69,15 @@ def test_uninspected_case_uses_qualitative_impact_buckets():
     assert "vendors" in buckets["People"].value
     assert "homeowners" in buckets["People"].value
     assert "gap" in buckets["Services"].value
-    assert "rev $4/turn" in buckets["Aftermath"].value
-    assert "upkeep $1/turn" in buckets["Aftermath"].value
+    assert "rev $4/week" in buckets["Aftermath"].value
+    assert "upkeep $1/week" in buckets["Aftermath"].value
     assert "inspect for unlicensed spillover" in buckets["Aftermath"].value
     assert "evidence" not in buckets["Aftermath"].value
 
 
 def test_inspected_case_buckets_surface_evidence_and_population_context():
+    """Verify inspected cases surface evidence and population context."""
+
     item, districts = _vendor_case()
     item.inspected = True
     item.risk_band = "high"
@@ -87,6 +98,8 @@ def test_inspected_case_buckets_surface_evidence_and_population_context():
 
 
 def test_ledger_rows_surface_non_money_city_health():
+    """Verify desk ledger rows expose non-money city systems."""
+
     item, districts = _vendor_case()
     profile = districts["D0000"]
     profile.service_gap["child_services"] = 21
@@ -110,6 +123,8 @@ def test_ledger_rows_surface_non_money_city_health():
 
 
 def test_summary_helpers_report_service_hazard_and_maintenance_backlog():
+    """Verify compact summary helpers report services, hazards, and upkeep."""
+
     _item, districts = _vendor_case()
     profile = districts["D0000"]
     profile.service_gap["child_services"] = 21

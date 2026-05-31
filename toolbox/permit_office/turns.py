@@ -17,6 +17,80 @@ from .systems import (
 )
 
 TURN_PERMIT_SPEND_KEY = "_turn_permit_spend"
+PRESSURE_DAY_MAX = 4
+
+
+def advance_daily_pressure(
+    state: CityState,
+    docket: Iterable[DocketItem],
+    districts: dict[str, DistrictProfile] | None = None,
+    active_features: Iterable[FeatureInstance] = (),
+    target_day: int = 0,
+) -> dict[str, int]:
+    """Accumulate visible district pressure for newly entered office days."""
+
+    current_day = max(0, min(PRESSURE_DAY_MAX, int(getattr(state, "week_day", 0) or 0)))
+    target_day = max(0, min(PRESSURE_DAY_MAX, int(target_day or 0)))
+    if target_day <= current_day:
+        state.week_day = current_day
+        return dict(state.daily_pressure)
+
+    district_ids = set((districts or {}).keys())
+    increments = _daily_pressure_increments(docket, districts or {}, active_features)
+    pressure = {
+        str(cid): max(0, min(PRESSURE_DAY_MAX, int(value or 0)))
+        for cid, value in (getattr(state, "daily_pressure", {}) or {}).items()
+        if str(cid) in district_ids or not district_ids
+    }
+    elapsed_days = target_day - current_day
+    for cid, amount in increments.items():
+        if district_ids and cid not in district_ids:
+            continue
+        pressure[cid] = min(PRESSURE_DAY_MAX, pressure.get(cid, 0) + amount * elapsed_days)
+    state.week_day = target_day
+    state.daily_pressure = dict(sorted((cid, value) for cid, value in pressure.items() if value > 0))
+    return dict(state.daily_pressure)
+
+
+def _daily_pressure_increments(
+    docket: Iterable[DocketItem],
+    districts: dict[str, DistrictProfile],
+    active_features: Iterable[FeatureInstance],
+) -> dict[str, int]:
+    """Return per-day district pressure from unresolved work and city conditions."""
+
+    increments: dict[str, int] = {}
+    for item in docket or ():
+        if item.status not in ("open", "inspected"):
+            continue
+        for cid in item.target_cell_ids:
+            increments[cid] = increments.get(cid, 0) + 1
+    for cid, profile in (districts or {}).items():
+        if _profile_has_daily_pressure(profile):
+            increments[cid] = increments.get(cid, 0) + 1
+    for feature in active_features or ():
+        if getattr(feature, "status", "") not in ("maintenance_due", "degraded"):
+            continue
+        for cid in feature.target_cell_ids:
+            increments[cid] = increments.get(cid, 0) + 1
+    return increments
+
+
+def _profile_has_daily_pressure(profile: DistrictProfile) -> bool:
+    """Return whether an existing district condition should count today."""
+
+    if profile.incident_state != "none":
+        return True
+    if _top_dissatisfaction(profile)[1] >= DISSATISFACTION_AGGRIEVED_THRESHOLD:
+        return True
+    if max((int(gap or 0) for gap in (profile.service_gap or {}).values()), default=0) >= 30:
+        return True
+    if max((int(band or 0) for band in (profile.hazards or {}).values()), default=0) >= 2:
+        return True
+    if max((int(band or 0) for band in (profile.displacement or {}).values()), default=0) >= 2:
+        return True
+    return False
+
 
 def _scenario_score(
     state: CityState,
@@ -77,6 +151,18 @@ def advance_turn_result(
 ) -> TurnAdvanceResult:
     """Advance unresolved cases, city systems, economy, incidents, and audits."""
 
+    if state.status == "complete" or state.turn > state.max_turns:
+        if state.turn > state.max_turns:
+            state.turn = state.max_turns
+            state.status = "complete"
+            state.audit_stage = max(state.audit_stage, 2)
+        audit = generate_audit_result(state, districts, features, open_items)
+        report = f"Final audit already filed. Scorecard: {audit.grade}."
+        state.week_day = 0
+        state.daily_pressure = {}
+        state.last_report = report
+        return TurnAdvanceResult(report, audit=audit)
+
     items = list(open_items)
     feature_list = list(features or ())
     carried = 0
@@ -88,6 +174,10 @@ def advance_turn_result(
     district_deltas: dict[str, dict[str, int]] = {}
     money_before_recurring = state.money
     permit_spend = int(state.stakeholder_memory.pop(TURN_PERMIT_SPEND_KEY, 0) or 0)
+    weekly_pressure = {
+        str(cid): max(0, min(PRESSURE_DAY_MAX, int(value or 0)))
+        for cid, value in (getattr(state, "daily_pressure", {}) or {}).items()
+    }
     # Unresolved docket work creates heat, local grievances, carryover state,
     # and project delay before long-running systems advance.
     for item in items:
@@ -97,11 +187,18 @@ def advance_turn_result(
             item.stakeholder = item.stakeholder or template.stakeholder
             if _adjust_heat(state, item.stakeholder, template.ignore_heat):
                 heated += 1
+            item_pressure = max((weekly_pressure.get(cid, 0) for cid in item.target_cell_ids), default=0)
+            extra_heat = (1 if item_pressure >= 2 else 0) + (1 if item_pressure >= PRESSURE_DAY_MAX else 0)
+            if extra_heat and _adjust_heat(state, item.stakeholder, extra_heat):
+                heated += 1
             if districts:
                 for cid in item.target_cell_ids:
                     if cid in districts:
                         _apply_population_reaction(template, [districts[cid]], "ignore", False)
                         local_grievances += 1
+                        if weekly_pressure.get(cid, 0) >= 3:
+                            _apply_population_reaction(template, [districts[cid]], "ignore", False)
+                            local_grievances += 1
             if item.carryover == "expire_or_return" and (item.turn + len(item.item_id)) % 2 == 0:
                 item.status = "carried"
                 carried += 1
@@ -135,13 +232,18 @@ def advance_turn_result(
         for profile in districts.values():
             population_delta += _advance_population_pressure(profile)
         new_incidents = _surface_new_incidents(state, districts.values())
-    state.turn += 1
+    final_week = state.turn >= state.max_turns
+    if not final_week:
+        state.turn += 1
     state.ap = state.max_ap
-    if state.turn in (3, 6):
+    if not final_week and state.turn == 3:
         state.audit_stage += 1
-    if state.turn > state.max_turns:
+    if final_week:
         state.status = "complete"
+        state.audit_stage = max(state.audit_stage, 2)
     audit = generate_audit_result(state, districts, feature_list, items)
+    state.week_day = 0
+    state.daily_pressure = {}
     heat_text = f" Stakeholder heat added to {heated} unresolved case(s)." if heated else ""
     grievance_text = f" Local grievance files updated for {local_grievances} unresolved target(s)." if local_grievances else ""
     violation_text = f" Overdue violation(s): {overdue_violations}." if overdue_violations else ""
@@ -155,9 +257,9 @@ def advance_turn_result(
     population_text = f" Population drift {population_delta:+d}." if population_delta else ""
     incident_text = f" New civic incident file(s): {new_incidents}." if new_incidents else ""
     system_text = f" {' '.join(system_notes)}" if system_notes else ""
-    audit_text = f" Audit snapshot: {audit.grade}." if state.turn in (3, 6) or state.status == "complete" else ""
+    audit_text = f" Final audit: {audit.grade}." if state.status == "complete" else f" Audit snapshot: {audit.grade}." if state.turn == 3 else ""
     report = (
-        f"Advanced turn. Carried {carried} item(s), expired {expired} item(s)."
+        f"{'Final week closed' if state.status == 'complete' else 'Advanced week'}. Carried {carried} item(s), expired {expired} item(s)."
         f"{heat_text}{grievance_text}{violation_text}{feature_text}{economy_text}{population_text}{incident_text}{system_text}{audit_text}"
     )
     state.last_report = report

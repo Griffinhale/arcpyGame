@@ -104,7 +104,7 @@ def _active_feature_from_route_item(item, turn):
 
 
 def test_seed_2026_golden_route_produces_stable_conditional_scorecard():
-    """Verify the six-turn golden route preserves its conditional audit result."""
+    """Verify the six-week golden route preserves its conditional audit result."""
     profiles = {profile.cell_id: profile for profile in rules.generate_district_profiles(seed=2026)}
     state = rules.CityState()
     active_features = []
@@ -768,11 +768,64 @@ def test_advance_turn_resets_ap_and_marks_audit_stage():
 
     report = rules.advance_turn(state, items)
 
-    assert "Advanced turn" in report
+    assert "Advanced week" in report
     assert state.turn == 3
     assert state.ap == 3
     assert state.audit_stage == 1
     assert {item.status for item in items} <= {"carried", "expired"}
+
+
+def test_final_week_closes_audit_without_advancing_past_max_turns():
+    """Verify week six closes the final audit and does not create week seven."""
+    state = rules.CityState(turn=6, ap=0, max_ap=3)
+    items = rules.generate_docket(turn=6, seed=2026, count=3)
+
+    report = rules.advance_turn(state, items)
+
+    assert "Final week closed" in report
+    assert "Final audit:" in report
+    assert state.turn == 6
+    assert state.status == "complete"
+    assert state.audit_stage == 2
+    assert state.ap == 3
+    assert {item.status for item in items} <= {"carried", "expired"}
+
+
+def test_week_five_advance_opens_week_six_without_final_audit():
+    """Verify the final audit waits until week six is closed."""
+    state = rules.CityState(turn=5, audit_stage=1)
+
+    report = rules.advance_turn(state, [])
+
+    assert "Advanced week" in report
+    assert "Final audit:" not in report
+    assert state.turn == 6
+    assert state.status == "playing"
+    assert state.audit_stage == 1
+
+
+def test_completed_game_does_not_advance_again():
+    """Verify repeated final audit clicks do not mutate the game clock."""
+    state = rules.CityState(turn=6, status="complete", audit_stage=2)
+
+    report = rules.advance_turn(state, [])
+
+    assert "Final audit already filed" in report
+    assert state.turn == 6
+    assert state.status == "complete"
+    assert state.audit_stage == 2
+
+
+def test_legacy_week_seven_save_is_clamped_to_final_audit():
+    """Verify old saves past the final week stop at week six."""
+    state = rules.CityState(turn=7, status="playing", audit_stage=1)
+
+    report = rules.advance_turn(state, [])
+
+    assert "Final audit already filed" in report
+    assert state.turn == 6
+    assert state.status == "complete"
+    assert state.audit_stage == 2
 
 
 def test_advance_turn_applies_population_drift_and_unresolved_local_grievance():
@@ -810,6 +863,56 @@ def test_advance_turn_applies_population_drift_and_unresolved_local_grievance():
     assert profile.dissatisfaction["families"] == 1
     assert "Local grievance files updated" in report
     assert "Population drift" in report
+
+
+def test_daily_pressure_advances_once_catches_up_and_caps():
+    """Verify daily pressure advances only for newly entered days."""
+
+    profile = rules.DistrictProfile("D0000", "Pressure Row", 1000, 45, 20, 35, 25, 90, "civic", housing_capacity=1500, affordability=80)
+    rules.normalize_profile(profile)
+    state = rules.CityState()
+    item = rules.DocketItem("open-case", "street_vendor_compact", rules.TEMPLATES["street_vendor_compact"].title, "POINT", 1, target_cell_ids=["D0000"])
+
+    first = rules.advance_daily_pressure(state, [item], {"D0000": profile}, [], 2)
+    second = rules.advance_daily_pressure(state, [item], {"D0000": profile}, [], 2)
+    caught_up = rules.advance_daily_pressure(state, [item], {"D0000": profile}, [], 4)
+
+    assert first == {"D0000": 2}
+    assert second == {"D0000": 2}
+    assert caught_up == {"D0000": 4}
+    assert state.week_day == 4
+
+
+def test_daily_pressure_ignores_resolved_items_and_counts_background_conditions():
+    """Verify pressure skips resolved cases but counts city conditions."""
+
+    hazard = rules.DistrictProfile("D0000", "Hazard Row", 1000, 45, 20, 35, 25, 50, "industrial", hazards={"heat": 2})
+    stable = rules.DistrictProfile("D0001", "Stable Row", 1000, 45, 20, 35, 25, 90, "civic", housing_capacity=1500, affordability=80)
+    rules.normalize_profile(hazard)
+    rules.normalize_profile(stable)
+    resolved = rules.DocketItem("done", "street_vendor_compact", rules.TEMPLATES["street_vendor_compact"].title, "POINT", 1, status="active", target_cell_ids=["D0001"])
+    feature = rules.FeatureInstance("F-due", "vendor_market", target_cell_ids=["D0001"], status="maintenance_due")
+    state = rules.CityState()
+
+    pressure = rules.advance_daily_pressure(state, [resolved], {"D0000": hazard, "D0001": stable}, [feature], 1)
+
+    assert pressure == {"D0000": 1, "D0001": 1}
+
+
+def test_week_close_escalates_from_daily_pressure_and_resets():
+    """Verify weekly close consumes pressure for escalation then clears it."""
+
+    profile = rules.DistrictProfile("D0000", "Ignored Row", 1000, 45, 20, 35, 25, 50, "mercantile", population_mix={"vendors": 2}, dissatisfaction={"vendors": 0})
+    rules.normalize_profile(profile)
+    state = rules.CityState(daily_pressure={"D0000": 4}, week_day=4)
+    item = rules.DocketItem("ignored", "street_vendor_compact", rules.TEMPLATES["street_vendor_compact"].title, "POINT", 1, target_cell_ids=["D0000"])
+
+    rules.advance_turn_result(state, [item], {"D0000": profile})
+
+    assert state.week_day == 0
+    assert state.daily_pressure == {}
+    assert state.stakeholder_heat["vendors"] >= rules.TEMPLATES["street_vendor_compact"].ignore_heat + 2
+    assert profile.dissatisfaction["vendors"] >= 2
 
 
 def test_scorecard_returns_audit_grade_and_metrics():
@@ -1086,6 +1189,8 @@ def test_seeded_city_detail_descriptors_are_deterministic_and_moderate():
 
 
 def _assert_city_detail_rects_clear_road_lanes(features):
+    """Assert generated block rectangles do not cover seeded road lanes."""
+
     lanes_by_cell: dict[str, set[tuple[str, float]]] = {}
     for feature in features:
         if feature.geometry_type != "LINE":
