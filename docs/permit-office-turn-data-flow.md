@@ -4,7 +4,7 @@ Date: 2026-05-27
 
 ## Purpose
 
-This document describes the current per-turn logic and data flow for the active Permit Office prototype. A game turn is an audit turn with several dashboard actions inside it. Dashboard actions spend AP, mutate docket items, update map features, and persist results; `Advance Turn` closes the audit turn and generates the next docket.
+This document describes the current per-week logic and data flow for the active Permit Office prototype. The persisted field is still named `turn` for compatibility, but player-facing copy treats each turn as one office week. Dashboard actions spend AP, mutate docket items, update map features, and persist results; `End Week` closes the audit week and generates the next docket until the final audit is filed.
 
 ## Dependencies
 
@@ -71,15 +71,15 @@ This document describes the current per-turn logic and data flow for the active 
 5. Districts, state, projects, docket item, action log, and command status are persisted.
 6. The affected layer set is rebuilt/refreshed, the filed report opens, and the dashboard reloads.
 
-### Advance Turn
+### End Week
 
 1. The dashboard inserts an `advance_turn` command.
 2. It reads state, open docket rows, districts, active features, and projects.
 3. `rules.advance_turn_result` processes unresolved open/inspected items into stakeholder heat, local grievances, carried or expired status, project overdue state, and violation deadline pressure.
 4. Active feature lifecycle advances, recurring economy applies revenue/upkeep/net, network access is recomputed, hazards advance, housing dynamics apply, population pressure changes, and new incidents can surface.
-5. `CityState.turn` increments, AP resets, audit stage can advance on turn 3 or 6, completion is marked after `max_turns`, and an audit snapshot is generated.
+5. `CityState.turn` increments, AP resets, audit stage can advance on week 3, and week 6 closes as the final audit without advancing to week 7.
 6. State, projects, districts, active features, old docket item statuses, and command status are written.
-7. `generate_docket_rows` replaces the visible docket with due project, maintenance, incident, stakeholder heat, and deterministic demo items in priority order.
+7. `generate_docket_rows` replaces the visible docket with due project, maintenance, incident, stakeholder heat, and deterministic demo items in priority order unless the final audit has completed.
 8. All output layers are rebuilt/refreshed, the dashboard status updates, and the dashboard reloads.
 
 ## Edge Cases

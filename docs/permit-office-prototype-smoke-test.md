@@ -45,7 +45,7 @@ Permit Office Prototype
    - Select one or more districts.
    - Click `Update From Map`.
    - Approve or deny it.
-1. Click `End Day`.
+1. Click `End Week`.
     - AP should reset.
     - A new three-item docket should be generated.
 1. Click `Scorecard` in the dashboard.
@@ -69,4 +69,4 @@ The prototype writes:
 - The dashboard is intentionally the main controller.
 - Manual map refresh is acceptable if live redraw lags.
 - Proposed geometries are seeded automatically and can be replaced from the current district selection; Feature Set drawing is not used.
-- This smoke test validates ArcGIS dashboard-map mechanics. The final six-turn balance is locked by pure Python regression coverage, but still needs a recorded live ArcGIS Pro run.
+- This smoke test validates ArcGIS dashboard-map mechanics. The final six-week balance is locked by pure Python regression coverage, but still needs a recorded live ArcGIS Pro run.

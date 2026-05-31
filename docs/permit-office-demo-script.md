@@ -1,6 +1,6 @@
 # Permit Office Demo Script
 
-Purpose: rehearse the seed `2026` Permit Office demo inside ArcGIS Pro as a six-turn office run, not a sandbox tour.
+Purpose: rehearse the seed `2026` Permit Office demo inside ArcGIS Pro as a six-week office run, not a sandbox tour.
 
 ## Objective
 
@@ -29,9 +29,9 @@ Show the core dashboard-map loop in a stable order:
 
 ## Steps
 
-For each decision, click the listed docket row first. The row selects its seeded proposal and target districts on the map. If the listed district selection differs from the seeded target, select the listed district or districts on the map and click `Update From Map`, then click the listed dashboard action. Items marked `Advance` are intentionally left open until `End Day`.
+For each decision, click the listed docket row first. The row selects its seeded proposal and target districts on the map. If the listed district selection differs from the seeded target, select the listed district or districts on the map and click `Update From Map`, then click the listed dashboard action. Items marked `Advance` are intentionally left open until `End Week`.
 
-| Turn | Docket item | District selection | Action | Expected result |
+| Week | Docket item | District selection | Action | Expected result |
 | --- | --- | --- | --- | --- |
 | 1 | Street Vendor Compact | `D0102` | Inspect, then `Approve + Mitigate` | `PermitPoints` gets an active vendor point. AP drops for inspection and approval. Report emphasizes mitigated nuisance risk, prosperity, culture, and any computed spillover. |
 | 1 | Connector Corridor Pilot | `D0101`, `D0102` | `Approve` | `PermitLines` gets an active corridor. Report shows access/prosperity gain and risk relief. |
@@ -52,7 +52,7 @@ For each decision, click the listed docket row first. The row selects its seeded
 | 6 | Civic Incident Response: Commuters | none | Advance | Final unresolved civic file remains in the audit. |
 | 6 | Civic Incident Response: Families | none | Advance | Final unresolved civic file remains in the audit. |
 
-After turn 6, click `Scorecard` in the dashboard.
+After week 6, click `End Week` to file the final audit, then click `Scorecard` in the dashboard.
 
 ## Expected Result
 
@@ -62,11 +62,11 @@ After turn 6, click `Scorecard` in the dashboard.
   - `PermitZones`: active protected reserve polygon.
   - Later maintenance/civic cards seed proposed rows automatically; unresolved proposals can remain visible or be hidden with `Hide Exhibit`.
 - Report beats:
-  - Turn 1: inspection risk band appears on the vendor card; mitigated approval shows prosperity/culture with reduced nuisance.
-  - Turn 2: utility approval visibly lowers risk; contractor denial creates a clean tradeoff.
-  - Turn 3: vendor maintenance proves the docket is generated from active city state; reserve approval shows the first polygon.
-  - Turn 4: civic incident response lowers unrest/risk; two denials show AP/budget triage.
-  - Turn 5 and 6: advancing unresolved items creates an intentional audit backlog rather than a failure cascade.
+  - Week 1: inspection risk band appears on the vendor card; mitigated approval shows prosperity/culture with reduced nuisance.
+  - Week 2: utility approval visibly lowers risk; contractor denial creates a clean tradeoff.
+  - Week 3: vendor maintenance proves the docket is generated from active city state; reserve approval shows the first polygon.
+  - Week 4: civic incident response lowers unrest/risk; two denials show AP/budget triage.
+  - Week 5 and 6: advancing unresolved items creates an intentional audit backlog rather than a failure cascade.
 - Final scorecard:
   - Expected grade: `CONDITIONAL`.
   - Expected stable summary from pure rules: `score=56`, money `15`, prosperity `60`, unrest `21`, culture `46`, risk `7`.
@@ -76,6 +76,6 @@ After turn 6, click `Scorecard` in the dashboard.
 
 - If an exhibit does not draw immediately, use the layer refresh or reopen the dashboard; proposed geometry is seeded from filed targets and replaced only by `Update From Map`.
 - If the wrong item is selected, close the dashboard without advancing, reopen it, and reselect the docket row.
-- If money is lower than expected, skip optional exhibit toggles and leave turn 5 and turn 6 items unresolved. The rehearsed ending depends on not spending the last reserve.
+- If money is lower than expected, skip optional exhibit toggles and leave week 5 and week 6 items unresolved. The rehearsed ending depends on not spending the last reserve.
 - If the final scorecard differs, click `New Game` with seed `2026`; route order depends on that seed and the generated active-feature follow-ups.
 - Live ArcGIS Pro smoke verification is still manual; pure Python regression coverage locks the route state and scorecard outcome.

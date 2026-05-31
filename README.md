@@ -46,7 +46,7 @@ Add `toolbox/arcpy_permit_office.pyt` to ArcGIS Pro and run the `Permit Office P
 
 - `docs/permit-office-concept.md`: product concept and design direction.
 - `docs/permit-office-architecture.md`: module boundaries and file-size rule.
-- `docs/permit-office-turn-data-flow.md`: current per-turn logic and ArcGIS data flow.
+- `docs/permit-office-turn-data-flow.md`: current per-week logic and ArcGIS data flow.
 - `docs/permit-office-docket-design.md`: docket template and consequence model.
 - `docs/permit-office-population-design.md`: population, dissatisfaction, and incident model.
 - `docs/permit-office-prototype-smoke-test.md`: manual ArcGIS Pro validation sequence.

@@ -38,7 +38,7 @@ Potential permit families to draw from:
 
 ## Demo Shortlist
 
-The six-turn demo uses these ten normal templates, with three items per turn:
+The six-week demo uses these ten normal templates, with three items per week:
 
 - `connector_corridor`: transit/roads, line, access gain with construction failure risk.
 - `procession_route`: event, line, culture gain with crowd-control risk.
