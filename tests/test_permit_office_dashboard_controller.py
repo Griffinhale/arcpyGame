@@ -148,7 +148,7 @@ def test_successful_decision_reapplies_map_presentation_before_refresh(monkeypat
     monkeypatch.setattr(dashboard, "action_log", lambda *args, **kwargs: order.append("log"))
     monkeypatch.setattr(dashboard, "command_finish", lambda *args, **kwargs: order.append("command"))
     monkeypatch.setattr(dashboard, "rebuild_output_layers", lambda *args, **kwargs: order.extend(["clear", "remove", "map", "refresh"]))
-    monkeypatch.setattr(dashboard, "open_effect_report", lambda *args, **kwargs: order.append("receipt"))
+    monkeypatch.setattr(controller, "_record_receipt", lambda *args, **kwargs: order.append("receipt"))
 
     result = rules.DecisionResult(True, "approve", item.item_id, "approved", affected_cell_ids=["D0000"])
 
@@ -347,8 +347,8 @@ def test_daily_pressure_overlay_writer_updates_only_display_fields(monkeypatch):
 
     profile = _profile("D0000")
     profile.incident_state = "protest"
-    strained = rules.DistrictProfile("D0001", "D0001", 1000, 50, 20, 35, 25, 90, "civic", housing_capacity=1500, affordability=80)
-    rules.normalize_profile(strained)
+    pressured = rules.DistrictProfile("D0001", "D0001", 1000, 50, 20, 35, 25, 90, "civic", housing_capacity=1500, affordability=80)
+    rules.normalize_profile(pressured)
     rows = [["D0000", "stable", "old"], ["D0001", "stable", "old"]]
     updated = []
 
@@ -382,10 +382,10 @@ def test_daily_pressure_overlay_writer_updates_only_display_fields(monkeypatch):
 
     monkeypatch.setattr(store.arcpy, "da", SimpleNamespace(UpdateCursor=FakeCursor), raising=False)
 
-    store.write_daily_pressure_overlays({"districts": "districts"}, {"D0000": profile, "D0001": strained}, {"D0000": 1, "D0001": 2})
+    store.write_daily_pressure_overlays({"districts": "districts"}, {"D0000": profile, "D0001": pressured}, {"D0000": 1, "D0001": 2})
 
     assert updated[0][1] == "incident"
-    assert updated[1][1] == "aggrieved"
+    assert updated[1][1] == "daily_pressure"
     assert rows[0][0] == "D0000"
 
 
