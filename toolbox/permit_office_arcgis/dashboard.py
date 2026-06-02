@@ -44,7 +44,7 @@ from .store import (
     write_projects,
     write_state,
 )
-from .desk_view import DeskCallbacks, PermitDeskView, build_desk_model, open_filed_report
+from .desk_view import DeskCallbacks, Palette, PermitDeskView, ReceiptModel, build_desk_model, receipt_metrics
 
 
 WEEK_DEADLINE_SECONDS = 5 * 60
@@ -57,12 +57,6 @@ WORK_WEEK_DAYS = (
     ("FRI CLOSE", "Filing close approaching. Open cases advance unresolved."),
 )
 WORK_DAY_SECONDS = WEEK_DEADLINE_SECONDS // len(WORK_WEEK_DAYS)
-
-
-def open_effect_report(title, report, affected, state):
-    """Show a filed-report receipt after a dashboard action resolves."""
-
-    open_filed_report(title, report, affected, state)
 
 
 def prepare_dashboard_session(paths, seed, messages):
@@ -124,6 +118,8 @@ class DashboardController:
         self.seed = seed
         self.messages = messages
         self.status_text = ""
+        self.last_receipt = None
+        self._newgame_overlay = None
         self._deadline_week = 0
         self._deadline_started = 0.0
         self._deadline_after_id = None
@@ -140,8 +136,9 @@ class DashboardController:
 
         self.root = tk.Tk()
         self.root.title("Permit Office")
-        self.root.geometry("1320x760")
-        self.root.minsize(1180, 720)
+        # Portrait pane sized to sit beside ArcGIS Pro on a 1920x1080 monitor.
+        self.root.geometry("980x1040")
+        self.root.minsize(900, 860)
         try:
             self.root.attributes("-topmost", True)
         except Exception:
@@ -190,6 +187,7 @@ class DashboardController:
         state = read_state(self.paths)
         districts = read_districts(self.paths)
         items = read_docket(self.paths)
+        active_features = read_active_features(self.paths)
         self._sync_deadline_timer(state)
         if not has_saved_game(self.paths) and not self.status_text:
             self.status_text = "No saved game found. Click New Game to create Permit Office layers and start play."
@@ -207,9 +205,21 @@ class DashboardController:
             self._display_status_text(),
             proposal_visible_by_item,
             *self._deadline_presentation(),
+            active_features=active_features,
+            receipt=self.last_receipt,
         )
         self.selected_item_id = model.selected_item_id
         self.view.render(model)
+
+    def _record_receipt(self, title, report, affected, state):
+        """Store the latest filed report for the inline receipt panel (no popup)."""
+
+        self.last_receipt = ReceiptModel(
+            title=title,
+            report=report,
+            affected=tuple(affected or ()),
+            metrics=receipt_metrics(state),
+        )
 
     def _sync_deadline_timer(self, state):
         """Start or reset the five-minute filing clock for the current week."""
@@ -322,32 +332,67 @@ class DashboardController:
             _warn(self.messages, "DASH", f"daily pressure update failed: {exc}")
 
     def new_game(self):
-        """Start a fresh game from the dashboard after player confirmation."""
+        """Open an inline seed-entry overlay (no native dialog, single screen)."""
 
         try:
-            from tkinter import messagebox, simpledialog
+            import tkinter as tk
         except Exception as exc:
-            self.status_var.set(f"New game failed: tkinter dialogs unavailable: {exc}")
+            self.status_var.set(f"New game failed: tkinter unavailable: {exc}")
             self.reload()
             return
-        if has_saved_game(self.paths):
-            ok = messagebox.askyesno(
-                "Start New Game",
-                "Replace the current Permit Office game rows and map layers?",
-                parent=self.root,
-            )
-            if not ok:
-                return
-        seed = simpledialog.askinteger(
-            "New Game Seed",
-            "Random seed",
-            initialvalue=self.seed,
-            minvalue=0,
-            parent=self.root,
-        )
-        if seed is None:
+        if getattr(self, "_newgame_overlay", None) is not None:
             return
-        self.start_new_game(int(seed))
+
+        pal = Palette
+        frame = tk.Frame(self.root, bg=pal.PAPER, highlightbackground=pal.INK, highlightthickness=2)
+        self._newgame_overlay = frame
+        tk.Label(frame, text="START NEW GAME", bg=pal.PAPER, fg=pal.BLUE, font=("Segoe UI", 13, "bold")).pack(padx=26, pady=(18, 6))
+        message = (
+            "Replace the current Permit Office game rows and map layers?"
+            if has_saved_game(self.paths)
+            else "Create Permit Office layers and start a new game."
+        )
+        tk.Label(frame, text=message, bg=pal.PAPER, fg=pal.INK, font=("Segoe UI", 9), wraplength=320, justify="left").pack(padx=26, pady=(0, 12))
+        row = tk.Frame(frame, bg=pal.PAPER)
+        row.pack(padx=26)
+        tk.Label(row, text="Random seed", bg=pal.PAPER, fg=pal.MUTED, font=("Segoe UI", 9, "bold")).pack(side="left")
+        seed_var = tk.StringVar(value=str(self.seed))
+        entry = tk.Entry(row, textvariable=seed_var, width=12, relief="solid", bd=1, font=("Segoe UI", 10))
+        entry.pack(side="left", padx=(10, 0))
+        buttons = tk.Frame(frame, bg=pal.PAPER)
+        buttons.pack(padx=26, pady=(14, 18))
+
+        def _start(_event=None):
+            """Validate the seed and start the new game, then close the overlay."""
+
+            try:
+                seed = abs(int(seed_var.get().strip()))
+            except (TypeError, ValueError):
+                seed = self.seed
+            self._close_newgame_overlay()
+            self.start_new_game(int(seed))
+
+        def _cancel(_event=None):
+            """Dismiss the overlay without changing the game."""
+
+            self._close_newgame_overlay()
+
+        tk.Button(buttons, text="START", command=_start, bg=pal.GREEN, fg=pal.PAPER, activebackground=pal.BLUE, activeforeground=pal.PAPER, relief="flat", padx=20, pady=7, font=("Segoe UI", 9, "bold")).pack(side="left", padx=6)
+        tk.Button(buttons, text="CANCEL", command=_cancel, bg=pal.MUTED, fg=pal.PAPER, activebackground=pal.INK, activeforeground=pal.PAPER, relief="flat", padx=20, pady=7, font=("Segoe UI", 9, "bold")).pack(side="left", padx=6)
+        frame.place(relx=0.5, rely=0.5, anchor="center")
+        frame.lift()
+        entry.focus_set()
+        entry.bind("<Return>", _start)
+        entry.bind("<Escape>", _cancel)
+        frame.bind("<Escape>", _cancel)
+
+    def _close_newgame_overlay(self):
+        """Destroy the inline new-game overlay if it is open."""
+
+        overlay = getattr(self, "_newgame_overlay", None)
+        if overlay is not None:
+            overlay.destroy()
+            self._newgame_overlay = None
 
     def start_new_game(self, seed):
         """Replace persisted game rows and reload the dashboard."""
@@ -485,8 +530,7 @@ class DashboardController:
                     action_log(self.paths, state, result)
                     command_finish(self.paths, command_id, result.command_status, result.report)
                 self.status_var.set(result.report)
-                with perf_block("receipt"):
-                    open_effect_report(item.title, result.report, result.affected_cell_ids, state)
+                self._record_receipt(item.title, result.report, result.affected_cell_ids, state)
             except Exception as exc:
                 command_finish(self.paths, command_id, "error", error=str(exc))
                 self.status_var.set(f"Inspect failed: {exc}")
@@ -606,8 +650,7 @@ class DashboardController:
         rebuild_output_layers(self.paths, self.messages, layer_names=layer_names)
         self.district_layer = DISTRICTS
         self.status_var.set(filed_report)
-        with perf_block("receipt"):
-            open_effect_report(item.title, filed_report, result.affected_cell_ids, state)
+        self._record_receipt(item.title, filed_report, result.affected_cell_ids, state)
 
     def advance_turn(self, auto=False):
         """Advance the saved game one week and regenerate the docket."""
