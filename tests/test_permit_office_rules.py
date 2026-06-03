@@ -102,6 +102,20 @@ def test_type_ledger_round_trips_through_city_state_memory():
     assert state.type_ledger == ledger
 
 
+def test_type_ledger_refreshes_after_blank_read_without_districts():
+    state = rules.CityState()
+    districts = {
+        profile.cell_id: profile
+        for profile in rules.generate_district_profiles(rows=2, cols=2, seed=2026)
+    }
+
+    rules.read_type_ledger(state, None)
+    loaded = rules.read_type_ledger(state, districts)
+
+    assert sum(entry["holdings"] for entry in loaded.values()) == 4
+    assert state.type_ledger == loaded
+
+
 def test_type_pressure_summary_is_qualitative_not_table_data():
     ledger = {
         "mercantile": {"capital": 85, "appetite": 12, "fatigue": 1, "holdings": 4, "overextension": 0},

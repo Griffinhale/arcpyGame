@@ -56,6 +56,10 @@ def read_type_ledger(
 ) -> dict[str, dict[str, int]]:
     """Return normalized city type pressure memory, rebuilding it when absent."""
 
+    if not state.type_ledger and districts is None:
+        return _empty_ledger()
+    if districts is not None and _is_zero_ledger(state.type_ledger):
+        return write_type_ledger(state, rebuild_type_ledger(districts))
     if not state.type_ledger:
         return write_type_ledger(state, rebuild_type_ledger(districts))
     return write_type_ledger(state, _normalize_ledger(state.type_ledger, districts))
@@ -153,6 +157,15 @@ def _empty_ledger() -> dict[str, dict[str, int]]:
     """Build the empty default ledger without district-derived holdings."""
 
     return {dtype: _normalize_entry({}) for dtype in DISTRICT_TYPES}
+
+
+def _is_zero_ledger(ledger: object) -> bool:
+    """Return True when a ledger carries no authoritative pressure or holdings."""
+
+    if not isinstance(ledger, Mapping):
+        return False
+    normalized = _normalize_ledger(ledger, None)
+    return all(entry[field] == 0 for entry in normalized.values() for field in LEDGER_FIELDS)
 
 
 def _normalize_entry(entry: Mapping[str, object]) -> dict[str, int]:

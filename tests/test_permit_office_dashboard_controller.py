@@ -348,6 +348,59 @@ def test_state_persists_pending_followups_json(monkeypatch):
     assert restored.pending_followups == state.pending_followups
 
 
+def test_state_persists_type_ledger_json(monkeypatch):
+    """Verify ArcGIS state rows round-trip hidden type pressure memory."""
+
+    rows = []
+    paths = {"state": "state"}
+    state = rules.CityState()
+    districts = {
+        profile.cell_id: profile
+        for profile in rules.generate_district_profiles(rows=2, cols=2, seed=2026)
+    }
+    state.type_ledger = rules.rebuild_type_ledger(districts)
+
+    class FakeInsertCursor:
+        """Minimal InsertCursor stand-in for state rows."""
+
+        def __init__(self, _path, _fields):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, _exc_type, _exc, _tb):
+            return False
+
+        def insertRow(self, row):
+            rows.append(tuple(row))
+
+    class FakeSearchCursor:
+        """Minimal SearchCursor stand-in for state rows."""
+
+        def __init__(self, _path, _fields):
+            pass
+
+        def __enter__(self):
+            return iter(rows)
+
+        def __exit__(self, _exc_type, _exc, _tb):
+            return False
+
+    monkeypatch.setattr(store.arcpy, "management", SimpleNamespace(DeleteRows=lambda _path: rows.clear()), raising=False)
+    monkeypatch.setattr(
+        store.arcpy,
+        "da",
+        SimpleNamespace(InsertCursor=FakeInsertCursor, SearchCursor=FakeSearchCursor),
+        raising=False,
+    )
+
+    store.write_state(paths, state)
+    restored = store.read_state(paths)
+
+    assert restored.type_ledger == state.type_ledger
+
+
 def test_generate_docket_rows_persists_consumed_pending_followups(monkeypatch):
     """Verify generated momentum rows are removed from saved state."""
 
