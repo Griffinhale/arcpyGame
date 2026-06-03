@@ -195,6 +195,25 @@ def test_buyout_single_bidder_starts_contested_transition():
     assert "entered contested buyout" in result.report.lower()
 
 
+def test_buyout_target_can_refuse_bid_deterministically():
+    state = rules.CityState()
+    districts = {
+        "A": _district_for_buyout("A", "residential", 49, ["B"]),
+        "B": _district_for_buyout("B", "mercantile", 82, ["A"]),
+    }
+    ledger = rules.rebuild_type_ledger(districts)
+    ledger["mercantile"]["capital"] = 100
+    ledger["mercantile"]["appetite"] = 20
+
+    result = rules.resolve_buyout_round(state, districts, ledger, seed=3)
+
+    assert result.started == []
+    assert result.refused == ["A"]
+    assert districts["A"].identity_state == "stable"
+    assert districts["A"].contesting_cell_id == ""
+    assert "refused buyout" in result.report.lower()
+
+
 def test_contested_transition_converts_when_pressure_remains_high():
     state = rules.CityState(turn=2)
     target = _district_for_buyout("A", "residential", 32, ["B"])
@@ -360,8 +379,12 @@ def test_week_close_can_start_buyout_transition_from_unattended_pressure():
     result = rules.advance_turn_result(state, [item], districts)
 
     assert state.turn == 2
-    assert districts["A"].identity_state in {"vulnerable", "contested"}
+    assert districts["A"].identity_state == "contested"
+    assert districts["A"].contesting_cell_id == "B"
+    assert districts["A"].contesting_type == "mercantile"
+    assert districts["A"].transition_due_turn == 2
     assert "expired" in result.report.lower()
+    assert "entered contested buyout" in result.report.lower()
 
 
 def test_mandatory_followup_carries_without_pending_momentum_queue():

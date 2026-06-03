@@ -52,6 +52,15 @@ def resolve_buyout_round(
         if not bidders:
             continue
         bidder = bidders[0]
+        if _target_refuses_buyout(target, rng):
+            refused.append(cell_id)
+            target.last_buyout_report = f"{target.name} refused buyout from {bidder.name} on turn {state.turn}."
+            reports.append(
+                f"{target.name} refused buyout from {bidder.name}; "
+                f"local leverage held off {bidder.district_type.replace('_', ' ')} interests."
+            )
+            adjust_type_ledger(ledger, bidder.district_type, appetite_delta=-1, fatigue_delta=1)
+            continue
         _start_contested_transition(state, target, bidder, ledger)
         started.append(cell_id)
         reports.append(
@@ -162,6 +171,15 @@ def _eligible_bidders(
 
     rng.shuffle(bidders)
     return sorted(bidders, key=lambda bidder: _bidder_score(bidder, ledger), reverse=True)
+
+
+def _target_refuses_buyout(target: DistrictProfile, rng: random.Random) -> bool:
+    """Return whether target leverage blocks the current buyout bid."""
+
+    prosperity = max(0, min(100, int(target.prosperity or 0)))
+    pressure = max(0, min(100, int(target.buyout_pressure or 0)))
+    refusal_chance = max(0.0, min(0.65, (prosperity - 30) * 0.025 - pressure * 0.06))
+    return rng.random() < refusal_chance
 
 
 def _bidder_score(
