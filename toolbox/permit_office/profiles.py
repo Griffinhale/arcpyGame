@@ -65,11 +65,7 @@ def generate_docket(
     """Generate the current turn docket, including due follow-up items first."""
 
     scenario = SCENARIO_RULES.get(state.scenario_id if state else "default", SCENARIO_RULES["default"])
-    chosen = _scenario_ordered_templates(turn, scenario)
-    if len(chosen) < count:
-        rng = random.Random(seed * 1000 + turn)
-        pool = [template_id for template_id in DEMO_TEMPLATE_IDS if template_id not in chosen]
-        chosen.extend(rng.sample(pool, min(count - len(chosen), len(pool))))
+    chosen = _weighted_template_pool(turn, seed, count, state, districts, scenario)
 
     items: list[DocketItem] = []
     for due in _project_due_items(turn, projects):
@@ -122,6 +118,73 @@ def _scenario_ordered_templates(turn: int, scenario: ScenarioRule) -> list[str]:
         if template_id not in chosen:
             chosen.append(template_id)
     return chosen
+
+
+TYPE_CATEGORY_WEIGHTS = {
+    "mercantile": {"business": 4, "development": 3, "compliance": 2},
+    "industrial": {"utility": 4, "department": 2, "compliance": 2, "transit": 2},
+    "civic": {"department": 3, "education": 2, "culture": 2, "transit": 2},
+    "academic": {"culture": 3, "education": 3, "event": 2, "land": 1},
+    "natural": {"land": 5, "culture": 1},
+    "residential": {"residential": 4, "education": 2, "development": 2, "business": 1},
+}
+
+
+def _weighted_template_pool(
+    turn: int,
+    seed: int,
+    count: int,
+    state: CityState | None,
+    districts: dict[str, DistrictProfile] | None,
+    scenario: ScenarioRule,
+) -> list[str]:
+    """Return deterministic proposal templates weighted by district mix."""
+
+    rng = random.Random(f"docket:{seed}:{turn}:{_district_mix_key(districts)}:{state.prosperity if state else 0}:{state.unrest if state else 0}:{state.risk if state else 0}")
+    weights = {template_id: 1 for template_id in DEMO_TEMPLATE_IDS}
+    for template_id in scenario.docket_priority:
+        if template_id in weights:
+            weights[template_id] += 4
+    if districts:
+        for profile in districts.values():
+            for template_id, template in TEMPLATES.items():
+                if template_id not in weights:
+                    continue
+                weights[template_id] += TYPE_CATEGORY_WEIGHTS.get(profile.district_type, {}).get(template.category, 0)
+                if profile.district_type in template.good_fit_types:
+                    weights[template_id] += 2
+                if profile.district_type in template.bad_fit_types:
+                    weights[template_id] = max(1, weights[template_id] - 1)
+                if profile.prosperity < 45 and template.category in {"development", "business", "residential"}:
+                    weights[template_id] += 2
+                if profile.unrest > 45 and template.is_incident:
+                    weights[template_id] += 3
+                if profile.risk > 45 and template.category in {"utility", "department", "compliance"}:
+                    weights[template_id] += 2
+    chosen: list[str] = []
+    available = dict(weights)
+    while available and len(chosen) < count:
+        total = sum(available.values())
+        pick = rng.randrange(total)
+        running = 0
+        selected = next(iter(available))
+        for template_id, weight in sorted(available.items()):
+            running += weight
+            if pick < running:
+                selected = template_id
+                break
+        chosen.append(selected)
+        available.pop(selected)
+    return chosen
+
+
+def _district_mix_key(districts: dict[str, DistrictProfile] | None) -> str:
+    if not districts:
+        return "none"
+    counts = {}
+    for profile in districts.values():
+        counts[profile.district_type] = counts.get(profile.district_type, 0) + 1
+    return ",".join(f"{key}:{counts[key]}" for key in sorted(counts))
 
 
 def _project_due_items(turn: int, projects: Iterable[ProjectRecord] | dict[str, ProjectRecord] | None) -> list[DocketItem]:

@@ -587,15 +587,48 @@ def test_feature_archetype_catalog_is_valid_and_covers_all_templates():
 def test_generate_docket_has_three_seeded_items_with_templates():
     """Verify the first seeded docket has three valid template-backed cases."""
     docket = rules.generate_docket(turn=1, seed=2026, count=3)
+    repeat = rules.generate_docket(turn=1, seed=2026, count=3)
 
     assert len(docket) == 3
     assert len({item.item_id for item in docket}) == 3
-    assert [item.template_id for item in docket] == ["connector_corridor", "procession_route", "street_vendor_compact"]
+    assert [item.template_id for item in docket] == [item.template_id for item in repeat]
     assert all(item.template_id in rules.TEMPLATES for item in docket)
     assert all(item.preview_text for item in docket)
     assert all(item.stakeholder for item in docket)
     assert all(item.target_rule for item in docket)
     assert {item.geometry_type for item in docket} <= {"POINT", "LINE", "POLYGON"}
+
+
+def test_docket_order_varies_by_seed_for_same_week():
+    state = rules.CityState()
+    districts = {profile.cell_id: profile for profile in rules.generate_district_profiles(seed=2026)}
+
+    first = rules.generate_docket(turn=1, seed=2026, count=4, state=state, districts=districts)
+    second = rules.generate_docket(turn=1, seed=2027, count=4, state=copy.deepcopy(state), districts=copy.deepcopy(districts))
+
+    assert [item.template_id for item in first] != [item.template_id for item in second]
+
+
+def test_docket_weights_reflect_district_type_distribution():
+    state = rules.CityState()
+    mercantile = {
+        f"M{i}": _district_for_buyout(f"M{i}", "mercantile", 65, [])
+        for i in range(8)
+    }
+    natural = {
+        f"N{i}": _district_for_buyout(f"N{i}", "natural", 65, [])
+        for i in range(8)
+    }
+
+    market_docket = rules.generate_docket(turn=4, seed=2026, count=4, state=state, districts=mercantile)
+    natural_docket = rules.generate_docket(turn=4, seed=2026, count=4, state=copy.deepcopy(state), districts=natural)
+
+    market_categories = [rules.TEMPLATES[item.template_id].category for item in market_docket]
+    natural_categories = [rules.TEMPLATES[item.template_id].category for item in natural_docket]
+
+    assert market_categories.count("business") + market_categories.count("development") >= 1
+    assert natural_categories.count("land") >= 1
+    assert [item.template_id for item in market_docket] != [item.template_id for item in natural_docket]
 
 
 def test_twelve_week_docket_generation_keeps_three_or_four_items_available():
@@ -1543,7 +1576,7 @@ def test_scenario_rules_change_docket_priority_and_scorecard_text():
     docket = rules.generate_docket(turn=1, seed=2026, count=3, state=state, districts=profiles)
     grade, report = rules.scorecard(state, profiles)
 
-    assert docket[0].template_id == "affordable_infill_rezoning"
+    assert set(item.template_id for item in docket) & set(rules.SCENARIO_RULES["housing_mandate"].docket_priority)
     assert grade in {"PASS", "CONDITIONAL", "FAIL"}
     assert "scenario=housing_mandate" in report
 
