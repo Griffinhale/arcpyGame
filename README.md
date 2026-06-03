@@ -64,7 +64,8 @@ filing, approving, delaying, and explaining official decisions.
 
 - ArcGIS Pro with ArcPy available.
 - Python 3 for the pure rules tests.
-- `pytest` if you want to run the test suite outside ArcGIS Pro.
+- `pytest` if you want to run the test suite outside ArcGIS Pro:
+  `python3 -m pip install -r requirements-dev.txt`
 
 ### Run In ArcGIS Pro
 
@@ -82,7 +83,7 @@ not be committed.
 ### Run Pure Python Tests
 
 ```bash
-python -m pytest -q
+python3 -m pytest -q
 ```
 
 The tests cover the ArcPy-free rules and lightweight ArcGIS adapter shims. They

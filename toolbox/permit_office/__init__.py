@@ -3,6 +3,7 @@
 from .models import *
 from .catalogs import *
 from .helpers import *
+from .incidents import *
 from .systems import *
 from .profiles import *
 from .type_pressure import *

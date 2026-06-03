@@ -546,6 +546,47 @@ def _apply_population_reaction(
     return deltas
 
 
+def _dissatisfaction_floor(profile: DistrictProfile, groups: Iterable[str], amount: int) -> dict[str, int]:
+    """Return minimum grievance bands after a known reaction amount."""
+
+    profile.dissatisfaction = _normalize_bands(profile.dissatisfaction, 4)
+    floors: dict[str, int] = {}
+    for group in groups:
+        if group not in CITIZEN_GROUPS:
+            continue
+        floors[group] = max(0, min(4, profile.dissatisfaction.get(group, 0) + amount))
+    return floors
+
+
+def _merge_dissatisfaction_floors(
+    floors_by_cell: dict[str, dict[str, int]],
+    cell_id: str,
+    floors: dict[str, int],
+) -> None:
+    """Merge per-group grievance floors for later post-system normalization."""
+
+    if not floors:
+        return
+    current = floors_by_cell.setdefault(cell_id, {})
+    for group, floor in floors.items():
+        current[group] = max(current.get(group, 0), floor)
+
+
+def _apply_dissatisfaction_floors(profile: DistrictProfile, floors: dict[str, int]) -> int:
+    """Restore minimum grievance bands and return the total dissatisfaction delta."""
+
+    if not floors:
+        return 0
+    before = sum(_normalize_bands(profile.dissatisfaction, 4).values())
+    profile.dissatisfaction = _normalize_bands(profile.dissatisfaction, 4)
+    for group, floor in floors.items():
+        if group not in CITIZEN_GROUPS:
+            continue
+        profile.dissatisfaction[group] = max(profile.dissatisfaction.get(group, 0), max(0, min(4, int(floor or 0))))
+    normalize_profile(profile)
+    return sum(profile.dissatisfaction.values()) - before
+
+
 def _population_decision_delta(profile: DistrictProfile, template: DocketTemplate, mitigated: bool) -> int:
     """Estimate population growth from a successful growth-oriented template."""
     if not template.growth_groups:

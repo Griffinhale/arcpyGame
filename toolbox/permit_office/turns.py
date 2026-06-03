@@ -177,6 +177,7 @@ def advance_turn_result(
     district_deltas: dict[str, dict[str, int]] = {}
     money_before_recurring = state.money
     permit_spend = int(state.stakeholder_memory.pop(TURN_PERMIT_SPEND_KEY, 0) or 0)
+    ignored_grievance_floors: dict[str, dict[str, int]] = {}
     weekly_pressure = {
         str(cid): max(0, min(PRESSURE_DAY_MAX, int(value or 0)))
         for cid, value in (getattr(state, "daily_pressure", {}) or {}).items()
@@ -195,10 +196,15 @@ def advance_turn_result(
             if districts:
                 for cid in item.target_cell_ids:
                     if cid in districts:
+                        reaction_groups = template.supporter_groups or (template.stakeholder,)
+                        floors = _dissatisfaction_floor(districts[cid], reaction_groups, 1)
                         _apply_population_reaction(template, [districts[cid]], "ignore", False)
+                        _merge_dissatisfaction_floors(ignored_grievance_floors, cid, floors)
                         local_grievances += 1
                         if weekly_pressure.get(cid, 0) >= 3:
+                            floors = _dissatisfaction_floor(districts[cid], reaction_groups, 1)
                             _apply_population_reaction(template, [districts[cid]], "ignore", False)
+                            _merge_dissatisfaction_floors(ignored_grievance_floors, cid, floors)
                             local_grievances += 1
             heat_before_resolution = state.stakeholder_heat.get(item.stakeholder, 0)
             expiration = resolve_unattended_item(state, item, districts or {}, seed=2026)
@@ -236,6 +242,11 @@ def advance_turn_result(
             system_notes.append(f"Displacement pressure in {housing_report['displacement_pressure']} district(s).")
         for profile in districts.values():
             population_delta += _advance_population_pressure(profile)
+        for cid, floors in ignored_grievance_floors.items():
+            if cid in districts:
+                delta = _apply_dissatisfaction_floors(districts[cid], floors)
+                if delta:
+                    _merge_delta(district_deltas.setdefault(cid, {}), {"dissatisfaction": delta})
         new_incidents = _surface_new_incidents(state, districts.values())
         ledger = read_type_ledger(state, districts)
         transition_result = resolve_contested_transitions(state, districts, ledger)

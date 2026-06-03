@@ -160,6 +160,33 @@ def _district_for_buyout(cell_id, dtype, prosperity, adjacent):
     return profile
 
 
+def _incident_profile(cell_id, group="renters", band=4):
+    profile = rules.DistrictProfile(
+        cell_id=cell_id,
+        name=f"{cell_id} Incident Row",
+        population=1200,
+        prosperity=42,
+        unrest=35,
+        culture=35,
+        risk=30,
+        services=35,
+        district_type="residential",
+        population_mix={group: 3},
+        dissatisfaction={group: band},
+    )
+    rules.normalize_profile(profile)
+    return profile
+
+
+def _local_incident_items(docket):
+    return [
+        item
+        for item in docket
+        if item.template_id == rules.CIVIC_INCIDENT_TEMPLATE_ID
+        and item.origin_item_id.startswith("dissatisfaction:")
+    ]
+
+
 def test_buyout_no_eligible_target_does_nothing():
     state = rules.CityState()
     districts = {
@@ -606,7 +633,7 @@ def test_carried_and_generated_maintenance_have_unique_item_ids():
     assert len({item.item_id for item in docket}) == len(docket)
 
 
-def test_carried_and_visible_same_group_incident_have_unique_item_ids():
+def test_carried_and_visible_same_group_incident_deduplicates_by_identity():
     carried = rules.DocketItem(
         "incident-carried",
         rules.CIVIC_INCIDENT_TEMPLATE_ID,
@@ -614,7 +641,16 @@ def test_carried_and_visible_same_group_incident_have_unique_item_ids():
         "POINT",
         1,
         status="carried",
+        target_cell_ids=["D0000"],
         stakeholder="renters",
+        origin_item_id="dissatisfaction:D0000:renters",
+        case_json={
+            "incident": {
+                "identity": "dissatisfaction:D0000:renters",
+                "cell_id": "D0000",
+                "group": "renters",
+            }
+        },
     )
     profile = rules.DistrictProfile(
         "D0000",
@@ -633,9 +669,97 @@ def test_carried_and_visible_same_group_incident_have_unique_item_ids():
     docket = rules.generate_docket(turn=2, seed=2026, count=4, carried_items=[carried], districts={"D0000": profile})
 
     assert docket[0].template_id == rules.CIVIC_INCIDENT_TEMPLATE_ID
-    assert docket[1].template_id == rules.CIVIC_INCIDENT_TEMPLATE_ID
-    assert docket[0].item_id != docket[1].item_id
+    assert docket[0].origin_item_id == "dissatisfaction:D0000:renters"
+    assert len(_local_incident_items(docket)) == 1
     assert len({item.item_id for item in docket}) == len(docket)
+
+
+def test_repeated_carried_incident_rows_deduplicate_by_identity():
+    first = rules.DocketItem(
+        "incident-carried-a",
+        rules.CIVIC_INCIDENT_TEMPLATE_ID,
+        "Civic Incident Response: Renters",
+        "POINT",
+        1,
+        status="carried",
+        target_cell_ids=["D0000"],
+        stakeholder="renters",
+        origin_item_id="dissatisfaction:D0000:renters",
+    )
+    second = copy.deepcopy(first)
+    second.item_id = "incident-carried-b"
+
+    docket = rules.generate_docket(turn=2, seed=2026, count=4, carried_items=[first, second])
+
+    assert len(_local_incident_items(docket)) == 1
+
+
+def test_unresolved_visible_incident_reappears_once_next_week():
+    profiles = {"D0000": _incident_profile("D0000", "renters")}
+    state = rules.CityState(turn=2)
+    docket = rules.generate_docket(turn=2, seed=2026, count=1, state=state, districts=profiles)
+
+    rules.advance_turn_result(state, docket, profiles)
+    next_docket = rules.generate_docket(
+        turn=state.turn,
+        seed=2026,
+        count=4,
+        state=state,
+        districts=profiles,
+        carried_items=docket,
+    )
+
+    assert docket[0].status == "carried"
+    assert len(_local_incident_items(next_docket)) == 1
+
+
+def test_resolving_incident_uses_case_identity_not_unrelated_selection():
+    profiles = {
+        "D0000": _incident_profile("D0000", "renters"),
+        "D0001": _incident_profile("D0001", "renters"),
+    }
+    state = rules.CityState(turn=2, ap=3, money=100)
+    item = rules.generate_docket(turn=2, seed=2026, count=1, state=state, districts=profiles)[0]
+
+    result = rules.resolve_decision(
+        state,
+        item,
+        profiles,
+        action="approve_mitigated",
+        target_cell_ids=["D0001"],
+        seed=2026,
+        mitigated=True,
+    )
+
+    assert result.ok is True
+    assert result.affected_cell_ids == ["D0000"]
+    assert profiles["D0000"].dissatisfaction["renters"] == 1
+    assert profiles["D0000"].incident_state == "none"
+    assert profiles["D0001"].dissatisfaction["renters"] == 4
+    assert profiles["D0001"].incident_state != "none"
+
+
+def test_deferred_incident_reappears_as_one_coherent_case():
+    profiles = {"D0000": _incident_profile("D0000", "renters")}
+    state = rules.CityState(turn=2, ap=3, money=100)
+    item = rules.generate_docket(turn=2, seed=2026, count=1, state=state, districts=profiles)[0]
+
+    result = rules.resolve_decision(state, item, profiles, action="deny", target_cell_ids=["D0000"], seed=2026)
+    rules.advance_turn_result(state, [item], profiles)
+    next_docket = rules.generate_docket(
+        turn=state.turn,
+        seed=2026,
+        count=4,
+        state=state,
+        districts=profiles,
+        carried_items=[item],
+    )
+
+    incidents = _local_incident_items(next_docket)
+    assert result.ok is True
+    assert item.status == "deferred"
+    assert len(incidents) == 1
+    assert incidents[0].origin_item_id == "dissatisfaction:D0000:renters"
 
 
 def test_feature_archetype_catalog_is_valid_and_covers_all_templates():
@@ -739,6 +863,78 @@ def _active_feature_from_route_item(item, turn):
     return rules.normalize_feature_instance(feature, turn)
 
 
+ROUTE_PROFIT_TEMPLATES = {
+    "business_license_fee_sweep",
+    "contractor_renovation_waiver",
+    "procession_route",
+    "street_vendor_compact",
+    "compliance_settlement_drive",
+}
+ROUTE_STABILIZER_TEMPLATES = {
+    "natural_reserve_conversion",
+    "green_buffer_reserve",
+    "water_main_loop",
+    "utility_expansion_trench",
+    "bus_priority_link",
+    "inspection_order",
+}
+ROUTE_DENY_TEMPLATES = {
+    "fire_budget_escalation",
+    "mixed_use_rezoning",
+    "affordable_infill_rezoning",
+    "infill_construction_site",
+}
+
+
+def _route_priority(item):
+    if item.template_id == rules.CIVIC_INCIDENT_TEMPLATE_ID:
+        return 0
+    if item.template_id == rules.ENFORCEMENT_TEMPLATE_ID:
+        return 1
+    if item.template_id in ROUTE_PROFIT_TEMPLATES:
+        return 2
+    if item.template_id in ROUTE_STABILIZER_TEMPLATES:
+        return 3
+    return 9
+
+
+def _route_action(state, item):
+    if item.template_id in ROUTE_DENY_TEMPLATES:
+        return "deny"
+    if item.template_id in {rules.CIVIC_INCIDENT_TEMPLATE_ID, rules.ENFORCEMENT_TEMPLATE_ID}:
+        return "approve" if state.money >= rules.TEMPLATES[item.template_id].money_cost else "deny"
+    if item.template_id in ROUTE_PROFIT_TEMPLATES | ROUTE_STABILIZER_TEMPLATES:
+        return "approve" if state.money >= rules.TEMPLATES[item.template_id].money_cost else "deny"
+    return "deny"
+
+
+def _route_targets(item, profiles):
+    if item.target_cell_ids:
+        return list(item.target_cell_ids)
+    template = rules.TEMPLATES[item.template_id]
+
+    def score(profile):
+        value = 0
+        if profile.district_type in template.good_fit_types:
+            value += 100
+        if profile.district_type in template.bad_fit_types:
+            value -= 100
+        if template.base_effects.get("risk", 0) < 0:
+            value += profile.risk
+        if template.base_effects.get("unrest", 0) < 0:
+            value += profile.unrest
+        if template.base_effects.get("services", 0) > 0:
+            value += 100 - profile.services
+        if template.base_effects.get("prosperity", 0) > 0:
+            value += 50 - profile.prosperity
+        if template.base_effects.get("culture", 0) > 0:
+            value += 50 - profile.culture
+        return (-value, profile.cell_id)
+
+    count = 2 if item.geometry_type == "LINE" else 1
+    return [profile.cell_id for profile in sorted(profiles.values(), key=score)[:count]]
+
+
 def test_seed_2026_reasonable_attention_route_reaches_final_audit():
     profiles = {profile.cell_id: profile for profile in rules.generate_district_profiles(seed=2026)}
     state = rules.CityState()
@@ -754,20 +950,24 @@ def test_seed_2026_reasonable_attention_route_reaches_final_audit():
             districts=profiles,
             active_features=active_features,
         )
-        for item in docket[:2]:
-            targets = item.target_cell_ids or ["D0000"]
-            if item.geometry_type == "LINE":
-                targets = ["D0000", "D0001"]
+        for item in sorted(docket, key=lambda candidate: (_route_priority(candidate), candidate.item_id)):
+            if state.ap <= 0:
+                break
+            if item.status not in {"open", "inspected"}:
+                continue
+            action = _route_action(state, item)
             result = rules.resolve_decision(
                 state,
                 item,
                 profiles,
-                "deny" if item.template_id == "mixed_use_rezoning" else "approve",
-                targets,
+                action,
+                _route_targets(item, profiles),
                 seed=2026,
                 active_features=active_features,
             )
-            assert result.ok is True
+            assert result.ok is True, result.report
+            if item.status == "active":
+                active_features.append(_active_feature_from_route_item(item, state.turn))
         docket_history.extend(docket)
         rules.advance_turn_result(state, docket, profiles, active_features)
 
@@ -775,7 +975,9 @@ def test_seed_2026_reasonable_attention_route_reaches_final_audit():
 
     assert state.status == "complete"
     assert state.turn == 12
-    assert grade in {"PASS", "CONDITIONAL", "FAIL"}
+    assert active_features
+    assert any(feature.condition < 100 or feature.status != "active" for feature in active_features)
+    assert grade == "PASS"
     assert "score=" in report
 
 

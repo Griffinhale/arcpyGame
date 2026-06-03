@@ -9,6 +9,7 @@ from typing import Iterable
 from .models import *
 from .catalogs import *
 from .helpers import *
+from .incidents import incident_identity, incident_identity_from_item, write_incident_case_identity
 from .systems import normalize_feature_instance, project_step_template
 
 
@@ -89,7 +90,12 @@ def generate_docket(
             items.append(followup)
 
     if districts:
-        followup = _incident_followup_item(turn, districts, idx=len(items) + 1)
+        followup = _incident_followup_item(
+            turn,
+            districts,
+            idx=len(items) + 1,
+            skip_identities=_incident_identities_for_items(items),
+        )
         if followup and len(items) < count:
             items.append(followup)
 
@@ -229,11 +235,17 @@ def _carried_docket_items(
     if not carried_items or limit <= 0:
         return []
     out: list[DocketItem] = []
+    local_incident_identities: set[str] = set()
     for carried in carried_items:
         if len(out) >= limit:
             break
         if carried.status != "carried" or carried.template_id not in TEMPLATES:
             continue
+        incident_identity, incident_cell_id, incident_group = incident_identity_from_item(carried)
+        if carried.template_id == CIVIC_INCIDENT_TEMPLATE_ID and incident_identity:
+            if incident_identity in local_incident_identities:
+                continue
+            local_incident_identities.add(incident_identity)
         item = _make_docket_item(
             turn,
             start_idx + len(out),
@@ -254,6 +266,8 @@ def _carried_docket_items(
         item.due_turn = carried.due_turn
         item.subject_feature_id = carried.subject_feature_id
         item.case_json = copy.deepcopy(carried.case_json)
+        if carried.template_id == CIVIC_INCIDENT_TEMPLATE_ID and incident_identity:
+            write_incident_case_identity(item, incident_cell_id, incident_group)
         carry_text = "Carried forward from prior week."
         item.preview_text = f"{carried.preview_text} {carry_text}".strip() if carried.preview_text else carry_text
         out.append(item)
@@ -367,19 +381,41 @@ def _maintenance_followup_item(turn: int, active_features: Iterable[FeatureInsta
     return item
 
 
-def _incident_followup_item(turn: int, districts: dict[str, DistrictProfile], idx: int = 1) -> DocketItem | None:
+def _incident_identities_for_items(items: Iterable[DocketItem]) -> set[str]:
+    """Return local civic incident identities already represented on the docket."""
+
+    identities: set[str] = set()
+    for item in items:
+        if item.template_id != CIVIC_INCIDENT_TEMPLATE_ID:
+            continue
+        identity, _cell_id, _group = incident_identity_from_item(item)
+        if identity:
+            identities.add(identity)
+    return identities
+
+
+def _incident_followup_item(
+    turn: int,
+    districts: dict[str, DistrictProfile],
+    idx: int = 1,
+    skip_identities: Iterable[str] = (),
+) -> DocketItem | None:
     """Return the earliest visible local grievance that needs civic response."""
 
     visible = []
+    skip = set(skip_identities or ())
     for profile in districts.values():
         normalize_profile(profile)
         if profile.incident_state != "none" and profile.incident_group:
-            visible.append((profile.incident_state, profile.incident_group, profile.cell_id))
+            identity = incident_identity(profile.cell_id, profile.incident_group)
+            if identity not in skip:
+                visible.append((profile.incident_state, profile.incident_group, profile.cell_id))
     if not visible:
         return None
     incident_state, group, cell_id = sorted(visible, key=lambda row: (row[2], row[1], row[0]))[0]
     item = _make_docket_item(turn, idx, CIVIC_INCIDENT_TEMPLATE_ID, stakeholder=group, origin_item_id=f"dissatisfaction:{cell_id}:{group}")
     item.target_cell_ids = [cell_id]
+    write_incident_case_identity(item, cell_id, group, incident_state)
     item.preview_text = f"{item.preview_text} Visible condition: {incident_state} in {cell_id}."
     return item
 

@@ -8,6 +8,7 @@ from typing import Iterable
 from .models import *
 from .catalogs import *
 from .helpers import *
+from .incidents import incident_identity_from_item, write_incident_case_identity
 from .profiles import inspect_item, inspection_case_for_item
 from .buyouts import reduce_buyout_pressure
 from .systems import (
@@ -204,6 +205,13 @@ def resolve_decision(
             _apply_land_use_change(districts[cid], archetype)
             normalize_profile(districts[cid])
 
+    dissatisfaction_before = {cid: sum((districts[cid].dissatisfaction or {}).values()) for cid in targets}
+    approval_grievance_floors: dict[str, dict[str, int]] = {}
+    if not failure_triggered and mitigated:
+        for cid in targets:
+            floors = _dissatisfaction_floor(districts[cid], template.supporter_groups, -1)
+            _merge_dissatisfaction_floors(approval_grievance_floors, cid, floors)
+
     population_deltas = _apply_population_reaction(
         template,
         [districts[cid] for cid in targets],
@@ -228,6 +236,14 @@ def resolve_decision(
         if cascade_delta:
             _merge_delta(district_deltas.setdefault(cid, {}), cascade_delta)
             _merge_delta(city_delta, {metric: value for metric, value in cascade_delta.items() if metric in CORE_METRICS})
+    for cid, floors in approval_grievance_floors.items():
+        _apply_dissatisfaction_floors(districts[cid], floors)
+    for cid, before in dissatisfaction_before.items():
+        delta = sum((districts[cid].dissatisfaction or {}).values()) - before
+        if delta:
+            district_deltas.setdefault(cid, {})["dissatisfaction"] = delta
+        elif cid in district_deltas:
+            district_deltas[cid].pop("dissatisfaction", None)
     surfaced = _surface_new_incidents(state, [districts[cid] for cid in targets])
 
     averaged = _average_city_delta(city_delta, targets, spillovers)
@@ -491,6 +507,13 @@ def _resolve_incident_decision(
 ) -> DecisionResult:
     """Resolve civic incident responses produced by local dissatisfaction."""
 
+    identity, identity_cell_id, identity_group = incident_identity_from_item(item)
+    if identity:
+        if identity_cell_id not in districts:
+            return _blocked(action, item.item_id, f"Incident district {identity_cell_id!r} is not available.")
+        targets = [identity_cell_id]
+        spillovers = []
+        write_incident_case_identity(item, identity_cell_id, identity_group)
     if not targets:
         return _blocked(action, item.item_id, "Incident response requires one selected district.")
     if action_key == "deny":
@@ -500,10 +523,12 @@ def _resolve_incident_decision(
         # Deferring an incident raises the attached group's dissatisfaction
         # before the city-level unrest/risk penalty is applied.
         item.status = "deferred"
-        group = item.stakeholder if item.stakeholder in CITIZEN_GROUPS else _top_dissatisfaction(districts[targets[0]])[0]
+        group = identity_group if identity_group in CITIZEN_GROUPS else item.stakeholder if item.stakeholder in CITIZEN_GROUPS else _top_dissatisfaction(districts[targets[0]])[0]
         for cid in targets:
             _adjust_dissatisfaction(districts[cid], (group,), 1)
             normalize_profile(districts[cid])
+        if identity:
+            write_incident_case_identity(item, targets[0], group, districts[targets[0]].incident_state)
         delta = {"unrest": 2, "risk": 1}
         _apply_city_delta(state, delta)
         heat_delta = _adjust_heat(state, group, template.denial_heat)
@@ -537,7 +562,7 @@ def _resolve_incident_decision(
 
     item.target_cell_ids = targets
     item.status = "settled" if mitigated else "responded"
-    group = item.stakeholder if item.stakeholder in CITIZEN_GROUPS else _top_dissatisfaction(districts[targets[0]])[0]
+    group = identity_group if identity_group in CITIZEN_GROUPS else item.stakeholder if item.stakeholder in CITIZEN_GROUPS else _top_dissatisfaction(districts[targets[0]])[0]
     relief = -3 if mitigated else -2
     base = _mitigate(template.base_effects) if mitigated else dict(template.base_effects)
     spill = _mitigate(template.spillover_effects) if mitigated else dict(template.spillover_effects)
@@ -550,6 +575,8 @@ def _resolve_incident_decision(
         _apply_profile_delta(districts[cid], base)
         _adjust_dissatisfaction(districts[cid], (group,), relief)
         normalize_profile(districts[cid])
+        if identity and cid == identity_cell_id:
+            write_incident_case_identity(item, cid, group, districts[cid].incident_state)
         district_deltas[cid] = dict(base)
         district_deltas[cid]["dissatisfaction"] = relief
         _merge_delta(city_delta, base)

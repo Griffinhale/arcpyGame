@@ -472,12 +472,8 @@ def _daily_overlay_state(profile, pressure):
         return "housing_pressure"
     if profile and rules._top_dissatisfaction(profile)[1] >= rules.DISSATISFACTION_AGGRIEVED_THRESHOLD:
         return "grievance"
-    if pressure >= 3:
-        return "at_risk"
-    if pressure >= 2:
-        return "aggrieved"
     if pressure >= 1:
-        return "strained"
+        return "daily_pressure"
     return profile.display_state if profile else "stable"
 
 

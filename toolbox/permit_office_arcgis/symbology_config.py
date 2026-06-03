@@ -7,6 +7,7 @@ DISPLAY_STATE_SYMBOLS = {
     "service_gap": ([64, 126, 180, 100], "Service Gap"),
     "hazard": ([196, 90, 74, 100], "Hazard Pressure"),
     "housing_pressure": ([177, 126, 88, 100], "Housing Pressure"),
+    "daily_pressure": ([205, 132, 78, 100], "Daily Pressure"),
     "economic_growth": ([106, 162, 114, 100], "Economic Growth"),
     "prosperous": ([106, 162, 114, 100], "Prosperous"),
     "restless": ([216, 159, 84, 100], "Restless"),
