@@ -254,6 +254,44 @@ def test_prepare_dashboard_session_regenerates_missing_docket_for_saved_game(mon
     assert order == ["map", ("docket", 2026), "refresh"]
 
 
+def test_generate_docket_rows_uses_rules_default_four_item_docket(monkeypatch):
+    """Verify persisted ArcGIS dockets follow the rules default row count."""
+
+    inserted = []
+    paths = {"docket": "docket"}
+    state = rules.CityState()
+    districts = {profile.cell_id: profile for profile in rules.generate_district_profiles(seed=2026)}
+
+    class FakeInsertCursor:
+        """Minimal InsertCursor stand-in that records rows."""
+
+        def __init__(self, _path, _fields):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, _exc_type, _exc, _tb):
+            return False
+
+        def insertRow(self, row):
+            inserted.append(row)
+
+    monkeypatch.setattr(store, "read_state", lambda _paths: state)
+    monkeypatch.setattr(store, "read_districts", lambda _paths: districts)
+    monkeypatch.setattr(store, "read_active_features", lambda _paths: [])
+    monkeypatch.setattr(store, "read_projects", lambda _paths: {})
+    monkeypatch.setattr(store, "_log", lambda *args: None)
+    monkeypatch.setattr(store.arcpy, "management", SimpleNamespace(DeleteRows=lambda _path: None), raising=False)
+    monkeypatch.setattr(store.arcpy, "da", SimpleNamespace(InsertCursor=FakeInsertCursor), raising=False)
+    monkeypatch.setattr("toolbox.permit_office_arcgis.geometry.seed_docket_proposals", lambda *args: None)
+
+    items = store.generate_docket_rows(paths, 2026, object())
+
+    assert len(items) == 4
+    assert len(inserted) == 4
+
+
 def test_deadline_timer_formats_equal_office_days(monkeypatch):
     """Verify the five-minute timer divides into equal office days."""
 

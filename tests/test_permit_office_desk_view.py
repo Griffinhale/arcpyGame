@@ -65,6 +65,7 @@ def test_uninspected_case_uses_qualitative_impact_buckets():
     assert model.deadline_running is True
     assert "Issue 1AP/$12" in buckets["Cost"].value
     assert "conditions +$6" in buckets["Cost"].value
+    assert "deny 0AP" in buckets["Cost"].value
     assert "activity" in buckets["City"].value
     assert "district(s)" in buckets["Local"].value
     assert "fit" in buckets["Local"].value

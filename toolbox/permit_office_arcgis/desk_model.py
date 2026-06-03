@@ -262,7 +262,7 @@ def _impact_buckets(state, districts, item, template) -> tuple[ImpactBucket, ...
 def _cost_bucket_value(template) -> str:
     """Format direct decision costs for all stamp choices."""
 
-    return f"Issue {template.ap_cost}AP/${template.money_cost}; conditions +${template.mitigation_cost}; deny 1AP"
+    return f"Issue {template.ap_cost}AP/${template.money_cost}; conditions +${template.mitigation_cost}; deny 0AP"
 
 
 def _city_forecast_bucket(template, targets, mitigated: bool) -> str:
