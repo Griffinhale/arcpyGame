@@ -410,8 +410,8 @@ def test_schema_declares_buyout_identity_district_fields():
     assert fields["prior_district_type"] == ("TEXT", "Prior District Type", 32)
     assert fields["identity_state"] == ("TEXT", "Identity State", 32)
     assert fields["contesting_cell_id"] == ("TEXT", "Contesting District ID", 32)
-    assert fields["contesting_type"] == ("TEXT", "Contesting District Type", 32)
-    assert fields["transition_due_turn"] == ("LONG", "Transition Due Turn", None)
+    assert fields["contesting_type"] == ("TEXT", "Contesting Type", 32)
+    assert fields["transition_due_turn"] == ("LONG", "Transition Due Week", None)
     assert fields["buyout_pressure"] == ("LONG", "Buyout Pressure", None)
     assert fields["last_buyout_report"] == ("TEXT", "Last Buyout Report", 512)
 
