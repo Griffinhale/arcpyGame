@@ -13,6 +13,9 @@ The Permit Office prototype is split into two layers: pure game rules and the Ar
 - `helpers.py`: district normalization, population/service helpers, stakeholder heat, catalog validation, and shared effect math.
 - `systems.py`: projects, active feature lifecycle, network access, hazards, housing, scenarios, and recurring economy.
 - `profiles.py`: district generation, docket generation, inspection case creation, and follow-up docket items.
+- `expiration.py`: unattended docket expiration policies, city momentum, and pending follow-up triggers.
+- `type_pressure.py`: hidden district-type ledger defaults, persistence helpers, and pressure summaries.
+- `buyouts.py`: low-prosperity district buyout eligibility, refusal, contested transition, and conversion rules.
 - `turns.py`: turn advancement, scorecards, audit results, and violation deadline handling.
 - `decisions.py`: inspect/approve/mitigate/deny resolution for regular, maintenance, enforcement, and incident docket items.
 

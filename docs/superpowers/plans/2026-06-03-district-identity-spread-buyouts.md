@@ -8,6 +8,19 @@
 
 **Tech Stack:** Python dataclasses, deterministic `random.Random`, pytest, ArcPy geodatabase adapters, ArcGIS Pro unique-value symbology.
 
+## Implementation Status
+
+Implemented on `main` on 2026-06-03. The checklist below is preserved as the
+implementation record, but several final fixes were made after review:
+
+- Converted districts are excluded from immediate same-week re-contest.
+- Week 12 is playable; the final audit is filed when closing week 12.
+- ArcGIS persistence and district-type-first symbology were wired in the same pass.
+- `pytest` was unavailable in the local environment, so verification used
+  `compileall`, public API import smoke, direct focused test calls, and a broad
+  no-arg direct smoke harness. The broad harness still has two known
+  `families` dissatisfaction assertion failures tracked separately.
+
 ---
 
 ## Scope Check

@@ -27,6 +27,9 @@ follow-up orders.
 Approvals can spawn points, lines, or polygons on the map: vendor markets,
 utility trenches, fire coverage areas, public art grants, corridors, reserves,
 incidents, inspection orders, and other civic paperwork with consequences.
+The current rules target a 12-week civic season with scarce AP, more docket
+items than the player can fully process, and city momentum from unresolved
+cases.
 
 ## Why I Built It
 
@@ -49,6 +52,9 @@ filing, approving, delaying, and explaining official decisions.
 - **Procedural civic texture:** district names, populations, services,
   grievances, hazards, housing pressure, stakeholder heat, and docket items are
   generated from a seed.
+- **District identity pressure:** district type mix influences dockets, ignored
+  proposals can create hidden momentum, and low-prosperity districts can enter
+  contested buyout transitions from stronger neighbors.
 - **Dry municipal absurdism:** the interface is built like a cluttered permit
   desk, with filed reports and audit language instead of fantasy UI tropes.
 
@@ -95,13 +101,15 @@ do not replace a live ArcGIS Pro smoke test.
 ## Current Status
 
 Permit Office is a playable prototype. It has generated districts, seeded city
-detail, docket templates, inspections, approvals, denials, mitigation, incidents,
-maintenance follow-ups, recurring economy, projects, audits, map symbology, and
-a Tkinter dashboard.
+detail, weighted docket templates, inspections, approvals, no-AP ordinary
+denials, mitigation, incidents, maintenance follow-ups, recurring economy,
+projects, audits, map symbology, district identity/buyout pressure, and a
+Tkinter dashboard.
 
 The next public-readiness work is focused on clarity and balance: better help
-and start flows, more varied dockets, clearer action semantics, more legible
-city-health displays, stronger map symbology, and a fairer path to winning.
+and start flows, clearer action/exhibit semantics, more legible city-health
+displays, richer map symbology, final-scorecard UX, and a proven fair path to
+winning.
 
 See `docs/current-status.md` and `docs/permit-office-prototype-smoke-test.md`
 for the latest implementation notes and manual validation checklist.

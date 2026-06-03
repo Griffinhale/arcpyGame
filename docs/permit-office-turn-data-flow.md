@@ -4,7 +4,7 @@ Date: 2026-05-27
 
 ## Purpose
 
-This document describes the current per-week logic and data flow for the active Permit Office prototype. The persisted field is still named `turn` for compatibility, but player-facing copy treats each turn as one office week. Dashboard actions spend AP, mutate docket items, update map features, and persist results; `End Week` closes the audit week and generates the next docket until the final audit is filed.
+This document describes the current per-week logic and data flow for the active Permit Office prototype. The persisted field is still named `turn` for compatibility, but player-facing copy treats each turn as one office week. Dashboard actions may spend AP, mutate docket items, update map features, and persist results; ordinary permit denials are the main no-AP exception. `End Week` closes the audit week and generates the next docket until the final audit is filed.
 
 ## Dependencies
 
