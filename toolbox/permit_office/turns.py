@@ -248,7 +248,6 @@ def advance_turn_result(
     final_week = state.turn >= state.max_turns
     if not final_week:
         state.turn += 1
-        final_week = state.turn >= state.max_turns
     state.ap = state.max_ap
     mid_audit_turn = max(2, state.max_turns // 2)
     if not final_week and state.turn == mid_audit_turn:

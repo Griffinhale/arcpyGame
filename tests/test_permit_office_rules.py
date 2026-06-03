@@ -265,6 +265,30 @@ def test_contested_transition_converts_when_pressure_remains_high():
     assert districts["A"].identity_state == "converted"
 
 
+def test_converted_transition_does_not_recontest_during_same_week_close():
+    state = rules.CityState(turn=2)
+    target = _district_for_buyout("A", "residential", 32, ["B", "C"])
+    target.identity_state = "contested"
+    target.contesting_cell_id = "B"
+    target.contesting_type = "mercantile"
+    target.transition_due_turn = 2
+    target.buyout_pressure = 5
+    districts = {
+        "A": target,
+        "B": _district_for_buyout("B", "mercantile", 82, ["A"]),
+        "C": _district_for_buyout("C", "industrial", 90, ["A"]),
+    }
+
+    result = rules.advance_turn_result(state, [], districts)
+
+    assert state.turn == 3
+    assert districts["A"].district_type == "mercantile"
+    assert districts["A"].prior_district_type == "residential"
+    assert districts["A"].identity_state == "converted"
+    assert districts["A"].contesting_cell_id == ""
+    assert "converted from residential to mercantile" in result.report
+
+
 def test_contested_transition_cancels_when_target_stabilizes():
     state = rules.CityState(turn=2)
     target = _district_for_buyout("A", "residential", 57, ["B"])
@@ -1320,6 +1344,12 @@ def test_twelve_week_season_mid_audit_week_six_and_final_week_twelve():
         rules.advance_turn_result(state, [], districts)
 
     assert state.turn == 12
+    assert state.audit_stage == 1
+    assert state.status == "playing"
+
+    rules.advance_turn_result(state, [], districts)
+
+    assert state.turn == 12
     assert state.audit_stage == 2
     assert state.status == "complete"
 
@@ -1354,17 +1384,17 @@ def test_final_week_closes_audit_without_advancing_past_max_turns():
     assert {item.status for item in items} <= {"carried", "expired"}
 
 
-def test_week_eleven_advance_files_week_twelve_final_audit():
-    """Verify entering week twelve files the final audit."""
+def test_week_eleven_advance_opens_playable_week_twelve():
+    """Verify entering week twelve leaves the final docket playable."""
     state = rules.CityState(turn=11, audit_stage=1)
 
     report = rules.advance_turn(state, [])
 
-    assert "Final week closed" in report
-    assert "Final audit:" in report
+    assert "Advanced week" in report
+    assert "Final audit:" not in report
     assert state.turn == 12
-    assert state.status == "complete"
-    assert state.audit_stage == 2
+    assert state.status == "playing"
+    assert state.audit_stage == 1
 
 
 def test_completed_game_does_not_advance_again():

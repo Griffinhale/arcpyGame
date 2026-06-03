@@ -135,7 +135,7 @@ def _eligible_target(
 
     if target.prosperity >= 50:
         return False
-    if target.identity_state == "contested":
+    if target.identity_state in {"contested", "converted"}:
         return False
     if target.incident_state != "none":
         return False
