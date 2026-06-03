@@ -75,6 +75,11 @@ def generate_docket(
             break
         items.append(due)
 
+    for followup in _pending_momentum_followup_items(turn, state, count - len(items)):
+        if len(items) >= count:
+            break
+        items.append(followup)
+
     if active_features:
         followup = _maintenance_followup_item(turn, active_features)
         if followup and len(items) < count:
@@ -140,6 +145,30 @@ def _project_due_items(turn: int, projects: Iterable[ProjectRecord] | dict[str, 
         else:
             item.preview_text = f"{item.preview_text} Project step due this turn."
         out.append(item)
+    return out
+
+
+def _pending_momentum_followup_items(turn: int, state: CityState | None, limit: int) -> list[DocketItem]:
+    """Convert pending momentum follow-ups into current docket items."""
+
+    if not state or not state.pending_followups or limit <= 0:
+        return []
+    out: list[DocketItem] = []
+    consumed: list[str] = []
+    for idx, origin_item_id in enumerate(sorted(state.pending_followups), start=1):
+        if len(out) >= limit:
+            break
+        template_id = state.pending_followups[origin_item_id]
+        if template_id not in TEMPLATES:
+            consumed.append(origin_item_id)
+            continue
+        item = _make_docket_item(turn, idx, template_id, origin_item_id=f"momentum:{origin_item_id}")
+        item.preview_text = f"{item.preview_text} Follow-up from unattended city momentum."
+        item.priority = max(item.priority, 2)
+        out.append(item)
+        consumed.append(origin_item_id)
+    for origin_item_id in consumed:
+        state.pending_followups.pop(origin_item_id, None)
     return out
 
 

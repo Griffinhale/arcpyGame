@@ -7,6 +7,7 @@ from typing import Iterable
 from .models import *
 from .catalogs import *
 from .helpers import *
+from .expiration import resolve_unattended_item
 from .systems import (
     _advance_feature_lifecycle,
     _apply_recurring_economy,
@@ -185,8 +186,6 @@ def advance_turn_result(
         if item.status in ("open", "inspected"):
             template = TEMPLATES[item.template_id]
             item.stakeholder = item.stakeholder or template.stakeholder
-            if _adjust_heat(state, item.stakeholder, template.ignore_heat):
-                heated += 1
             item_pressure = max((weekly_pressure.get(cid, 0) for cid in item.target_cell_ids), default=0)
             extra_heat = (1 if item_pressure >= 2 else 0) + (1 if item_pressure >= PRESSURE_DAY_MAX else 0)
             if extra_heat and _adjust_heat(state, item.stakeholder, extra_heat):
@@ -199,12 +198,16 @@ def advance_turn_result(
                         if weekly_pressure.get(cid, 0) >= 3:
                             _apply_population_reaction(template, [districts[cid]], "ignore", False)
                             local_grievances += 1
-            if item.carryover == "expire_or_return" and (item.turn + len(item.item_id)) % 2 == 0:
-                item.status = "carried"
+            heat_before_resolution = state.stakeholder_heat.get(item.stakeholder, 0)
+            expiration = resolve_unattended_item(state, item, districts or {}, seed=2026)
+            if state.stakeholder_heat.get(item.stakeholder, 0) != heat_before_resolution:
+                heated += 1
+            if item.status == "carried":
                 carried += 1
-            else:
-                item.status = "expired"
+            elif item.status == "expired":
                 expired += 1
+            if expiration.followup_template_id:
+                state.pending_followups[item.item_id] = expiration.followup_template_id
             if projects and item.project_id in projects:
                 project = projects[item.project_id]
                 project.status = "overdue"

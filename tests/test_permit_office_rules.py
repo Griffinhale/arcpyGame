@@ -71,6 +71,62 @@ def test_templates_declare_expiration_policy_and_pressure_category():
     assert all(template.pressure_category for template in rules.TEMPLATES.values())
 
 
+def test_missed_window_expiration_closes_original_without_pressure():
+    state = rules.CityState()
+    districts = {profile.cell_id: profile for profile in rules.generate_district_profiles(rows=1, cols=1, seed=2026)}
+    item = rules.DocketItem("expire-event", "procession_route", "Licensed Procession Route", "LINE", 1)
+    item.target_cell_ids = ["D0000"]
+
+    result = rules.resolve_unattended_item(state, item, districts, seed=2026)
+
+    assert item.status == "expired"
+    assert result.policy == "missed_window"
+    assert result.followup_template_id == ""
+    assert districts["D0000"].buyout_pressure == 0
+    assert "window closed" in result.report.lower()
+
+
+def test_city_momentum_expiration_adds_pressure_and_report():
+    state = rules.CityState()
+    districts = {profile.cell_id: profile for profile in rules.generate_district_profiles(rows=1, cols=1, seed=2026)}
+    districts["D0000"].prosperity = 42
+    item = rules.DocketItem("expire-rezone", "mixed_use_rezoning", "Mixed-Use Rezoning Petition", "POLYGON", 1)
+    item.target_cell_ids = ["D0000"]
+
+    result = rules.resolve_unattended_item(state, item, districts, seed=2026)
+
+    assert item.status == "expired"
+    assert result.policy == "city_momentum"
+    assert districts["D0000"].buyout_pressure > 0
+    assert districts["D0000"].identity_state in {"stable", "vulnerable"}
+    assert "momentum" in result.report.lower()
+
+
+def test_bad_momentum_can_spawn_different_followup_template():
+    state = rules.CityState()
+    districts = {profile.cell_id: profile for profile in rules.generate_district_profiles(rows=1, cols=1, seed=2026)}
+    districts["D0000"].risk = 70
+    item = rules.DocketItem("expire-vendor", "street_vendor_compact", "Street Vendor Compact", "POINT", 1)
+    item.target_cell_ids = ["D0000"]
+
+    result = rules.resolve_unattended_item(state, item, districts, seed=1)
+
+    assert item.status == "expired"
+    assert result.policy == "momentum_with_followup_risk"
+    assert result.followup_template_id in {"", rules.CIVIC_INCIDENT_TEMPLATE_ID, rules.ENFORCEMENT_TEMPLATE_ID}
+    assert result.report
+
+
+def test_pending_momentum_followup_appears_as_different_next_docket_item():
+    state = rules.CityState()
+    state.pending_followups["expire-vendor"] = rules.CIVIC_INCIDENT_TEMPLATE_ID
+    docket = rules.generate_docket(turn=2, seed=2026, count=4, state=state, districts={})
+
+    assert docket[0].template_id == rules.CIVIC_INCIDENT_TEMPLATE_ID
+    assert docket[0].origin_item_id == "momentum:expire-vendor"
+    assert "Follow-up from unattended city momentum" in docket[0].preview_text
+
+
 def test_feature_archetype_catalog_is_valid_and_covers_all_templates():
     """Verify templates resolve to valid feature archetypes and metadata."""
     assert rules.validate_feature_catalog() == []
