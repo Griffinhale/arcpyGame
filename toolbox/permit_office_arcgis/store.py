@@ -616,11 +616,20 @@ def generate_docket_rows(paths, seed, messages):
     districts = read_districts(paths)
     active_features = read_active_features(paths)
     projects = read_projects(paths)
+    carried_items = [item for item in read_docket(paths) if item.status == "carried"]
     arcpy.management.DeleteRows(paths["docket"])
     if state.status == "complete" or state.turn > state.max_turns:
         _log(messages, "DOCKET", f"final audit complete; no week {state.turn + 1} docket generated")
         return []
-    items = rules.generate_docket(turn=state.turn, seed=seed, state=state, districts=districts, projects=projects, active_features=active_features)
+    items = rules.generate_docket(
+        turn=state.turn,
+        seed=seed,
+        state=state,
+        districts=districts,
+        projects=projects,
+        active_features=active_features,
+        carried_items=carried_items,
+    )
     # Docket rows mirror rule items exactly enough for the dashboard to reload
     # without recomputing follow-up priority or case metadata.
     with arcpy.da.InsertCursor(paths["docket"], DOCKET_FIELD_NAMES) as cursor:

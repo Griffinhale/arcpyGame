@@ -282,6 +282,7 @@ def test_generate_docket_rows_uses_rules_default_four_item_docket(monkeypatch):
     monkeypatch.setattr(store, "read_districts", lambda _paths: districts)
     monkeypatch.setattr(store, "read_active_features", lambda _paths: [])
     monkeypatch.setattr(store, "read_projects", lambda _paths: {})
+    monkeypatch.setattr(store, "read_docket", lambda _paths: [])
     monkeypatch.setattr(store, "write_state", lambda _paths, state_arg: saved_states.append(dict(state_arg.pending_followups)))
     monkeypatch.setattr(store, "_log", lambda *args: None)
     monkeypatch.setattr(store.arcpy, "management", SimpleNamespace(DeleteRows=lambda _path: None), raising=False)
@@ -378,6 +379,7 @@ def test_generate_docket_rows_persists_consumed_pending_followups(monkeypatch):
     monkeypatch.setattr(store, "read_districts", lambda _paths: {})
     monkeypatch.setattr(store, "read_active_features", lambda _paths: [])
     monkeypatch.setattr(store, "read_projects", lambda _paths: {})
+    monkeypatch.setattr(store, "read_docket", lambda _paths: [])
     monkeypatch.setattr(store, "write_state", lambda _paths, state_arg: saved_states.append(dict(state_arg.pending_followups)))
     monkeypatch.setattr(store, "_log", lambda *args: None)
     monkeypatch.setattr(store.arcpy, "management", SimpleNamespace(DeleteRows=lambda _path: None), raising=False)
@@ -395,6 +397,73 @@ def test_generate_docket_rows_persists_consumed_pending_followups(monkeypatch):
     assert state.pending_followups == {"expire-4": rules.CIVIC_INCIDENT_TEMPLATE_ID}
     assert saved_states == [{"expire-4": rules.CIVIC_INCIDENT_TEMPLATE_ID}]
     assert len(inserted) == 4
+
+
+def test_generate_docket_rows_carries_existing_mandatory_context(monkeypatch):
+    """Verify carried rows survive docket-table regeneration with context."""
+
+    inserted = []
+    paths = {"docket": "docket", "state": "state"}
+    state = rules.CityState(turn=2)
+    carried = rules.DocketItem(
+        "fire-followup",
+        "fire_budget_escalation",
+        "Fire Budget Escalation",
+        "POLYGON",
+        1,
+        status="carried",
+        target_cell_ids=["D0000", "D0001"],
+        preview_text="Prior fire budget review.",
+        stakeholder="fire_department",
+        origin_item_id="origin-fire",
+        target_rule="Select fire coverage districts.",
+        project_id="project-fire",
+        chain_step_id="fire-step",
+        priority=3,
+        due_turn=4,
+        subject_feature_id="F-fire",
+        case_json={"inspection": {"risk": "high"}},
+    )
+
+    class FakeInsertCursor:
+        """Minimal InsertCursor stand-in that records regenerated docket rows."""
+
+        def __init__(self, _path, _fields):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, _exc_type, _exc, _tb):
+            return False
+
+        def insertRow(self, row):
+            inserted.append(row)
+
+    monkeypatch.setattr(store, "read_state", lambda _paths: state)
+    monkeypatch.setattr(store, "read_districts", lambda _paths: {})
+    monkeypatch.setattr(store, "read_active_features", lambda _paths: [])
+    monkeypatch.setattr(store, "read_projects", lambda _paths: {})
+    monkeypatch.setattr(store, "read_docket", lambda _paths: [carried])
+    monkeypatch.setattr(store, "write_state", lambda *_args: None)
+    monkeypatch.setattr(store, "_log", lambda *args: None)
+    monkeypatch.setattr(store.arcpy, "management", SimpleNamespace(DeleteRows=lambda _path: None), raising=False)
+    monkeypatch.setattr(store.arcpy, "da", SimpleNamespace(InsertCursor=FakeInsertCursor), raising=False)
+    monkeypatch.setattr("toolbox.permit_office_arcgis.geometry.seed_docket_proposals", lambda *args: None)
+
+    items = store.generate_docket_rows(paths, 2026, object())
+
+    assert items[0].template_id == carried.template_id
+    assert items[0].status == "open"
+    assert items[0].turn == 2
+    assert items[0].target_cell_ids == carried.target_cell_ids
+    assert items[0].project_id == carried.project_id
+    assert items[0].case_json == carried.case_json
+    assert "Carried forward from prior week." in items[0].preview_text
+    assert inserted[0][2] == carried.template_id
+    assert inserted[0][5] == "open"
+    assert inserted[0][7] == "D0000,D0001"
+    assert inserted[0][14] == carried.project_id
 
 
 def test_deadline_timer_formats_equal_office_days(monkeypatch):

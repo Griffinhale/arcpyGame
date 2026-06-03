@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import random
 from typing import Iterable
 
@@ -59,6 +60,7 @@ def generate_docket(
     districts: dict[str, DistrictProfile] | None = None,
     projects: Iterable[ProjectRecord] | dict[str, ProjectRecord] | None = None,
     active_features: Iterable[FeatureInstance] | None = None,
+    carried_items: Iterable[DocketItem] | None = None,
 ) -> list[DocketItem]:
     """Generate the current turn docket, including due follow-up items first."""
 
@@ -74,6 +76,11 @@ def generate_docket(
         if len(items) >= count:
             break
         items.append(due)
+
+    for carried in _carried_docket_items(turn, carried_items, count - len(items), start_idx=len(items) + 1):
+        if len(items) >= count:
+            break
+        items.append(carried)
 
     for followup in _pending_momentum_followup_items(turn, state, count - len(items)):
         if len(items) >= count:
@@ -144,6 +151,48 @@ def _project_due_items(turn: int, projects: Iterable[ProjectRecord] | dict[str, 
             item.preview_text = f"{item.preview_text} Project step is overdue from turn {project.due_turn}."
         else:
             item.preview_text = f"{item.preview_text} Project step due this turn."
+        out.append(item)
+    return out
+
+
+def _carried_docket_items(
+    turn: int,
+    carried_items: Iterable[DocketItem] | None,
+    limit: int,
+    start_idx: int = 1,
+) -> list[DocketItem]:
+    """Clone carried mandatory docket work into the current week's docket."""
+
+    if not carried_items or limit <= 0:
+        return []
+    out: list[DocketItem] = []
+    for carried in carried_items:
+        if len(out) >= limit:
+            break
+        if carried.status != "carried" or carried.template_id not in TEMPLATES:
+            continue
+        item = _make_docket_item(
+            turn,
+            start_idx + len(out),
+            carried.template_id,
+            stakeholder=carried.stakeholder,
+            origin_item_id=carried.origin_item_id,
+        )
+        item.title = carried.title
+        item.geometry_type = carried.geometry_type
+        item.status = "open"
+        item.target_cell_ids = list(carried.target_cell_ids)
+        item.stakeholder = carried.stakeholder
+        item.origin_item_id = carried.origin_item_id
+        item.target_rule = carried.target_rule
+        item.project_id = carried.project_id
+        item.chain_step_id = carried.chain_step_id
+        item.priority = carried.priority
+        item.due_turn = carried.due_turn
+        item.subject_feature_id = carried.subject_feature_id
+        item.case_json = copy.deepcopy(carried.case_json)
+        carry_text = "Carried forward from prior week."
+        item.preview_text = f"{carried.preview_text} {carry_text}".strip() if carried.preview_text else carry_text
         out.append(item)
     return out
 

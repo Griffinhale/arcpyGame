@@ -176,6 +176,50 @@ def test_mandatory_followup_carries_without_pending_momentum_queue():
     assert state.pending_followups == {}
 
 
+def test_carried_mandatory_item_reopens_with_context_next_docket():
+    carried = rules.DocketItem(
+        "fire-followup",
+        "fire_budget_escalation",
+        "Fire Budget Escalation",
+        "POLYGON",
+        1,
+        status="carried",
+        target_cell_ids=["D0000", "D0001"],
+        preview_text="Prior fire budget review.",
+        stakeholder="fire_department",
+        origin_item_id="origin-fire",
+        target_rule="Select fire coverage districts.",
+        project_id="project-fire",
+        chain_step_id="fire-step",
+        priority=3,
+        due_turn=4,
+        subject_feature_id="F-fire",
+        case_json={"inspection": {"risk": "high"}},
+    )
+
+    docket = rules.generate_docket(turn=2, seed=2026, count=4, carried_items=[carried])
+
+    assert docket[0] is not carried
+    assert docket[0].template_id == carried.template_id
+    assert docket[0].title == carried.title
+    assert docket[0].geometry_type == carried.geometry_type
+    assert docket[0].status == "open"
+    assert docket[0].turn == 2
+    assert docket[0].target_cell_ids == carried.target_cell_ids
+    assert docket[0].stakeholder == carried.stakeholder
+    assert docket[0].origin_item_id == carried.origin_item_id
+    assert docket[0].target_rule == carried.target_rule
+    assert docket[0].project_id == carried.project_id
+    assert docket[0].chain_step_id == carried.chain_step_id
+    assert docket[0].priority == carried.priority
+    assert docket[0].due_turn == carried.due_turn
+    assert docket[0].subject_feature_id == carried.subject_feature_id
+    assert docket[0].case_json == carried.case_json
+    assert "Carried forward from prior week." in docket[0].preview_text
+    assert carried.status == "carried"
+    assert carried.turn == 1
+
+
 def test_feature_archetype_catalog_is_valid_and_covers_all_templates():
     """Verify templates resolve to valid feature archetypes and metadata."""
     assert rules.validate_feature_catalog() == []
