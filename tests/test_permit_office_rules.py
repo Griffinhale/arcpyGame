@@ -38,6 +38,39 @@ def test_demo_template_catalog_has_case_file_metadata():
         assert template.spawn_archetype_id in rules.FEATURE_ARCHETYPES
 
 
+def test_city_state_defaults_to_twelve_week_attention_scarcity():
+    state = rules.CityState()
+
+    assert state.max_turns == 12
+    assert state.ap == 2
+    assert state.max_ap == 2
+    assert state.type_ledger == {}
+    assert state.pending_followups == {}
+
+
+def test_district_profiles_include_identity_transition_defaults():
+    profile = rules.generate_district_profiles(rows=1, cols=1, seed=2026)[0]
+
+    assert profile.prior_district_type == ""
+    assert profile.identity_state == "stable"
+    assert profile.contesting_cell_id == ""
+    assert profile.contesting_type == ""
+    assert profile.transition_due_turn == 0
+    assert profile.buyout_pressure == 0
+    assert profile.last_buyout_report == ""
+
+
+def test_templates_declare_expiration_policy_and_pressure_category():
+    policies = {template.expiration_policy for template in rules.TEMPLATES.values()}
+
+    assert {"missed_window", "city_momentum", "momentum_with_followup_risk", "mandatory_followup"} <= policies
+    assert rules.TEMPLATES["procession_route"].expiration_policy == "missed_window"
+    assert rules.TEMPLATES["mixed_use_rezoning"].expiration_policy == "city_momentum"
+    assert rules.TEMPLATES["street_vendor_compact"].expiration_policy == "momentum_with_followup_risk"
+    assert rules.TEMPLATES[rules.MAINTENANCE_TEMPLATE_ID].expiration_policy == "mandatory_followup"
+    assert all(template.pressure_category for template in rules.TEMPLATES.values())
+
+
 def test_feature_archetype_catalog_is_valid_and_covers_all_templates():
     """Verify templates resolve to valid feature archetypes and metadata."""
     assert rules.validate_feature_catalog() == []

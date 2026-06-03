@@ -240,6 +240,8 @@ class DocketTemplate:
     money_cost: int = 10
     mitigation_cost: int = 8
     expires_after: int = 0
+    expiration_policy: str = "city_momentum"
+    pressure_category: str = "general"
     preview: str = ""
     inspect_hint: str = ""
     target_rule: str = ""
@@ -279,6 +281,13 @@ class DistrictProfile:
     risk: int
     services: int
     district_type: str
+    prior_district_type: str = ""
+    identity_state: str = "stable"
+    contesting_cell_id: str = ""
+    contesting_type: str = ""
+    transition_due_turn: int = 0
+    buyout_pressure: int = 0
+    last_buyout_report: str = ""
     display_state: str = "stable"
     population_mix: dict[str, int] = field(default_factory=dict)
     dissatisfaction: dict[str, int] = field(default_factory=dict)
@@ -302,9 +311,9 @@ class CityState:
     """Mutable citywide turn, resource, metric, and heat state."""
 
     turn: int = 1
-    max_turns: int = 6
-    ap: int = 3
-    max_ap: int = 3
+    max_turns: int = 12
+    ap: int = 2
+    max_ap: int = 2
     money: int = 60
     audit_stage: int = 0
     status: str = "playing"
@@ -320,6 +329,8 @@ class CityState:
     last_net: int = 0
     maintenance_backlog: int = 0
     stakeholder_memory: dict[str, int] = field(default_factory=dict)
+    type_ledger: dict[str, dict[str, int]] = field(default_factory=dict)
+    pending_followups: dict[str, str] = field(default_factory=dict)
     week_day: int = 0
     daily_pressure: dict[str, int] = field(default_factory=dict)
 
