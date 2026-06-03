@@ -65,26 +65,27 @@ This document describes the current per-week logic and data flow for the active 
 ### Deny
 
 1. The dashboard inserts a command and reads state, districts, active features, and projects.
-2. `rules.resolve_decision(..., "deny", ...)` records disposition, denial friction, stakeholder heat, local population reaction, and any project delay without spending AP or applying approval/project benefits.
-3. Existing feature updates are written if the denial is a maintenance deferral.
-4. Proposed rows for the docket item are marked denied or deferred.
-5. Districts, state, projects, docket item, action log, and command status are persisted.
-6. The affected layer set is rebuilt/refreshed, the filed report opens, and the dashboard reloads.
+2. `rules.resolve_decision(..., "deny", ...)` records disposition, denial friction, stakeholder heat, local population reaction, and any project delay without applying approval/project benefits.
+3. Ordinary permit denials do not spend AP; generated follow-up, maintenance, enforcement, and incident dispositions keep their branch-specific AP rules.
+4. Existing feature updates are written if the denial is a maintenance deferral.
+5. Proposed rows for the docket item are marked denied or deferred.
+6. Districts, state, projects, docket item, action log, and command status are persisted.
+7. The affected layer set is rebuilt/refreshed, the filed report opens, and the dashboard reloads.
 
 ### End Week
 
 1. The dashboard inserts an `advance_turn` command.
 2. It reads state, open docket rows, districts, active features, and projects.
 3. `rules.advance_turn_result` applies the current rules order:
-   1. Unresolved open/inspected items resolve through template-specific expiration policy.
-   2. Missed-window items expire cleanly; city-momentum items alter district pressure; bad momentum can seed later follow-up cases.
-   3. Feature lifecycle, recurring economy, network, hazard, housing, and population systems advance.
-   4. Contested buyout transitions resolve.
-   5. New buyout bids are evaluated for low-prosperity districts.
-   6. `CityState.turn` increments, AP resets, week 6 files the mid-season audit, and week 12 files the final audit.
-6. State, projects, districts, active features, old docket item statuses, and command status are written.
-7. `generate_docket_rows` replaces the visible docket with due project, maintenance, incident, stakeholder heat, and deterministic demo items in priority order unless the final audit has completed.
-8. All output layers are rebuilt/refreshed, the dashboard status updates, and the dashboard reloads.
+   a. Unresolved open/inspected items resolve through template-specific expiration policy.
+   b. Missed-window items expire cleanly; city-momentum items alter district pressure; bad momentum can seed later follow-up cases.
+   c. Feature lifecycle, recurring economy, network, hazard, housing, and population systems advance.
+   d. Contested buyout transitions resolve.
+   e. New buyout bids are evaluated for low-prosperity districts.
+   f. `CityState.turn` increments, AP resets, week 6 files the mid-season audit, and week 12 files the final audit.
+4. State, projects, districts, active features, old docket item statuses, and command status are written.
+5. `generate_docket_rows` replaces the visible docket with due project, maintenance, incident, stakeholder heat, and deterministic demo items in priority order unless the final audit has completed.
+6. All output layers are rebuilt/refreshed, the dashboard status updates, and the dashboard reloads.
 
 ## Edge Cases
 

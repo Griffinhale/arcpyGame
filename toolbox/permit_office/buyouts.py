@@ -55,7 +55,7 @@ def resolve_buyout_round(
         if _target_refuses_buyout(target, rng):
             refused.append(cell_id)
             target.last_buyout_report = (
-                f"{target.name} refused a {bidder.district_type} buyout bid; "
+                f"{target.name} refused a {bidder.district_type} buyout bid from {bidder.name}; "
                 f"local leverage remained high enough to resist."
             )
             reports.append(target.last_buyout_report)

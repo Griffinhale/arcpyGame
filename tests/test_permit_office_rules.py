@@ -237,7 +237,7 @@ def test_buyout_target_can_refuse_bid_deterministically():
     assert districts["A"].identity_state == "stable"
     assert districts["A"].contesting_cell_id == ""
     assert result.report == (
-        "A refused a mercantile buyout bid; "
+        "A refused a mercantile buyout bid from B; "
         "local leverage remained high enough to resist."
     )
     assert districts["A"].last_buyout_report == result.report
