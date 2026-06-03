@@ -1,52 +1,107 @@
 # Permit Office
 
-Permit Office is the active direction for this repo: an ArcGIS Pro / ArcPy geoprocessing game about running a municipal permit office. The player reviews docket items, selects districts on the map, previews proposed point/line/polygon work, inspects cases, approves or denies applications, and advances through audit turns while the city changes in response.
+Permit Office is a turn-based city planning game that runs inside ArcGIS Pro.
+You play as a municipal permit clerk trying to keep a strange city functional
+through inspections, approvals, denials, mitigation conditions, and weekly audit
+reports.
 
-The project uses ArcGIS Pro as the game engine:
+The joke is bureaucratic, but the game loop is real: every permit is tied to
+map geometry, district state, stakeholder pressure, recurring costs, and visible
+city consequences.
 
-- Feature classes hold districts, permit features, projects, docket rows, commands, and logs.
-- Map selections are player input.
-- ArcPy geometry and cursor operations resolve proposals, spillover, district state, and persistence.
-- Tkinter provides the docket dashboard.
-- Pure Python rules keep gameplay testable outside ArcGIS Pro.
+## How It Plays
 
-## Active Code
+Each office week gives you a small docket of permit applications, incidents, or
+follow-up orders.
 
-- `toolbox/arcpy_permit_office.pyt`: ArcGIS Pro toolbox entrypoint.
-- `toolbox/arcpy_permit_office_rules.py`: compatibility facade for the pure rules package.
-- `toolbox/permit_office/`: ArcPy-free gameplay rules, catalogs, decisions, turn systems, and audit scoring.
-- `toolbox/permit_office_arcgis/`: ArcGIS schema, persistence, geometry, dashboard, and message helpers.
-- `tests/test_permit_office_rules.py`: active automated regression coverage.
+1. Select a docket item in the dashboard.
+2. Review its proposed map exhibit and selected district targets.
+3. Optionally inspect the file to reveal risk, evidence, violations, and local
+   population context.
+4. Issue the permit, issue it with mitigation conditions, deny it, or leave it
+   unresolved until the week closes.
+5. ArcPy applies the result to districts, support features, stakeholder heat,
+   population grievances, recurring revenue/upkeep, maintenance, and audit risk.
+6. At the end of the run, the city receives an audit scorecard.
+
+Approvals can spawn points, lines, or polygons on the map: vendor markets,
+utility trenches, fire coverage areas, public art grants, corridors, reserves,
+incidents, inspection orders, and other civic paperwork with consequences.
+
+## Why I Built It
+
+Permit Office is an experiment in using ArcGIS Pro as a game engine rather than
+only a mapping tool. Feature classes are the save file, map selections are the
+input device, and ArcPy geometry operations become part of the rules system.
+
+The project is also a small design study in "paperwork as play": the player is
+not an all-powerful mayor, but an audit-facing office that shapes the city by
+filing, approving, delaying, and explaining official decisions.
+
+## What Is Interesting
+
+- **ArcGIS-native game state:** districts, docket rows, projects, commands,
+  logs, and permit features live in a file geodatabase.
+- **Spatial consequences:** selected districts, adjacency, buffers, feature
+  geometry, and support layers drive gameplay effects.
+- **Pure Python rules:** the main simulation is testable without ArcGIS Pro,
+  while ArcPy handles persistence and map operations.
+- **Procedural civic texture:** district names, populations, services,
+  grievances, hazards, housing pressure, stakeholder heat, and docket items are
+  generated from a seed.
+- **Dry municipal absurdism:** the interface is built like a cluttered permit
+  desk, with filed reports and audit language instead of fantasy UI tropes.
+
+## Quick Start
+
+### Requirements
+
+- ArcGIS Pro with ArcPy available.
+- Python 3 for the pure rules tests.
+- `pytest` if you want to run the test suite outside ArcGIS Pro.
+
+### Run In ArcGIS Pro
+
+1. Open an ArcGIS Pro project.
+2. Add `toolbox/arcpy_permit_office.pyt` as a Python toolbox.
+3. Run `Permit Office Prototype`.
+4. If no saved game exists, click `New Game` in the dashboard.
+5. Use the dashboard and map together: select docket rows, update targets from
+   map selections, inspect files, issue or deny permits, and end the week.
+
+By default the tool creates or resumes `permit_office.gdb` under the ArcGIS
+project's `data/` folder. The geodatabase is local generated state and should
+not be committed.
+
+### Run Pure Python Tests
+
+```bash
+python -m pytest -q
+```
+
+The tests cover the ArcPy-free rules and lightweight ArcGIS adapter shims. They
+do not replace a live ArcGIS Pro smoke test.
+
+## Repository Map
+
+- `toolbox/arcpy_permit_office.pyt` - ArcGIS Pro toolbox entrypoint.
+- `toolbox/permit_office/` - pure gameplay rules, catalogs, decisions, turn
+  advancement, audits, and city systems.
+- `toolbox/permit_office_arcgis/` - schema, geodatabase store helpers, geometry
+  operations, symbology, and the Tkinter dashboard.
+- `tests/` - regression tests for the rules and ArcGIS adapter shims.
+- `docs/` - design notes, architecture references, smoke tests, and demo script.
 
 ## Current Status
 
-See `docs/current-status.md` for the implemented/missing/iterate breakdown.
+Permit Office is a playable prototype. It has generated districts, seeded city
+detail, docket templates, inspections, approvals, denials, mitigation, incidents,
+maintenance follow-ups, recurring economy, projects, audits, map symbology, and
+a Tkinter dashboard.
 
-Short version:
+The next public-readiness work is focused on clarity and balance: better help
+and start flows, more varied dockets, clearer action semantics, more legible
+city-health displays, stronger map symbology, and a fairer path to winning.
 
-- Implemented: deterministic Permit Office rules, generated districts, docket templates, inspections, population/grievance, incidents, projects, active features, maintenance, audit findings, ArcGIS schema/store coverage, and a dashboard-map loop.
-- Missing: recorded live ArcGIS Pro smoke-test results, polished setup instructions for a cold demo machine, and presentation-machine confirmation for dashboard/map refresh behavior.
-- Current default check:
-
-```bash
-python3 -m pytest tests/test_permit_office_rules.py -q
-```
-
-## ArcGIS Pro Smoke Test
-
-Manual validation starts with:
-
-```text
-docs/permit-office-prototype-smoke-test.md
-```
-
-Add `toolbox/arcpy_permit_office.pyt` to ArcGIS Pro and run the `Permit Office Prototype` tool sequence from that document.
-
-## Documentation
-
-- `docs/permit-office-concept.md`: product concept and design direction.
-- `docs/permit-office-architecture.md`: module boundaries and file-size rule.
-- `docs/permit-office-turn-data-flow.md`: current per-week logic and ArcGIS data flow.
-- `docs/permit-office-docket-design.md`: docket template and consequence model.
-- `docs/permit-office-population-design.md`: population, dissatisfaction, and incident model.
-- `docs/permit-office-prototype-smoke-test.md`: manual ArcGIS Pro validation sequence.
+See `docs/current-status.md` and `docs/permit-office-prototype-smoke-test.md`
+for the latest implementation notes and manual validation checklist.
