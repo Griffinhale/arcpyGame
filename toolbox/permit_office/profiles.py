@@ -88,17 +88,17 @@ def generate_docket(
         items.append(followup)
 
     if active_features:
-        followup = _maintenance_followup_item(turn, active_features)
+        followup = _maintenance_followup_item(turn, active_features, idx=len(items) + 1)
         if followup and len(items) < count:
             items.append(followup)
 
     if districts:
-        followup = _incident_followup_item(turn, districts)
+        followup = _incident_followup_item(turn, districts, idx=len(items) + 1)
         if followup and len(items) < count:
             items.append(followup)
 
     if state:
-        followup = _heat_followup_item(turn, state)
+        followup = _heat_followup_item(turn, state, idx=len(items) + 1)
         if followup and len(items) < count:
             items.append(followup)
 
@@ -258,7 +258,7 @@ def _make_docket_item(turn: int, idx: int, template_id: str, stakeholder: str = 
     )
 
 
-def _heat_followup_item(turn: int, state: CityState) -> DocketItem | None:
+def _heat_followup_item(turn: int, state: CityState, idx: int = 1) -> DocketItem | None:
     """Return the highest-priority stakeholder heat follow-up due this turn."""
 
     hot = []
@@ -272,10 +272,10 @@ def _heat_followup_item(turn: int, state: CityState) -> DocketItem | None:
     template_id = _stakeholder_profile(stakeholder).followup_template_id
     if template_id not in TEMPLATES:
         template_id = ENFORCEMENT_TEMPLATE_ID
-    return _make_docket_item(turn, 1, template_id, stakeholder=stakeholder, origin_item_id="stakeholder_heat")
+    return _make_docket_item(turn, idx, template_id, stakeholder=stakeholder, origin_item_id="stakeholder_heat")
 
 
-def _maintenance_followup_item(turn: int, active_features: Iterable[FeatureInstance]) -> DocketItem | None:
+def _maintenance_followup_item(turn: int, active_features: Iterable[FeatureInstance], idx: int = 1) -> DocketItem | None:
     """Return the most urgent feature maintenance item, if one is due."""
 
     candidates = []
@@ -286,7 +286,7 @@ def _maintenance_followup_item(turn: int, active_features: Iterable[FeatureInsta
     if not candidates:
         return None
     _condition, _feature_id, feature = sorted(candidates, key=lambda row: (row[0], row[1]))[0]
-    item = _make_docket_item(turn, 1, MAINTENANCE_TEMPLATE_ID, stakeholder=feature.owner_group or "maintenance_office", origin_item_id=f"feature:{feature.feature_id}")
+    item = _make_docket_item(turn, idx, MAINTENANCE_TEMPLATE_ID, stakeholder=feature.owner_group or "maintenance_office", origin_item_id=f"feature:{feature.feature_id}")
     item.title = f"Maintenance Order: {feature.archetype_id.replace('_', ' ').title()}"
     item.subject_feature_id = feature.feature_id
     item.target_cell_ids = list(feature.target_cell_ids)
@@ -304,7 +304,7 @@ def _maintenance_followup_item(turn: int, active_features: Iterable[FeatureInsta
     return item
 
 
-def _incident_followup_item(turn: int, districts: dict[str, DistrictProfile]) -> DocketItem | None:
+def _incident_followup_item(turn: int, districts: dict[str, DistrictProfile], idx: int = 1) -> DocketItem | None:
     """Return the earliest visible local grievance that needs civic response."""
 
     visible = []
@@ -315,7 +315,7 @@ def _incident_followup_item(turn: int, districts: dict[str, DistrictProfile]) ->
     if not visible:
         return None
     incident_state, group, cell_id = sorted(visible, key=lambda row: (row[2], row[1], row[0]))[0]
-    item = _make_docket_item(turn, 1, CIVIC_INCIDENT_TEMPLATE_ID, stakeholder=group, origin_item_id=f"dissatisfaction:{cell_id}:{group}")
+    item = _make_docket_item(turn, idx, CIVIC_INCIDENT_TEMPLATE_ID, stakeholder=group, origin_item_id=f"dissatisfaction:{cell_id}:{group}")
     item.target_cell_ids = [cell_id]
     item.preview_text = f"{item.preview_text} Visible condition: {incident_state} in {cell_id}."
     return item

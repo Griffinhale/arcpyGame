@@ -240,6 +240,64 @@ def test_carried_and_pending_same_template_have_unique_item_ids():
     assert len({item.item_id for item in docket}) == len(docket)
 
 
+def test_carried_and_generated_maintenance_have_unique_item_ids():
+    carried = rules.DocketItem(
+        "maintenance-carried",
+        rules.MAINTENANCE_TEMPLATE_ID,
+        "Maintenance Order: Vendor Market",
+        "POINT",
+        1,
+        status="carried",
+        stakeholder="maintenance_office",
+    )
+    feature = rules.FeatureInstance(
+        "F-due",
+        "vendor_market",
+        owner_group="maintenance_office",
+        target_cell_ids=["D0000"],
+        status="maintenance_due",
+    )
+
+    docket = rules.generate_docket(turn=2, seed=2026, count=4, carried_items=[carried], active_features=[feature])
+
+    assert docket[0].template_id == rules.MAINTENANCE_TEMPLATE_ID
+    assert docket[1].template_id == rules.MAINTENANCE_TEMPLATE_ID
+    assert docket[0].item_id != docket[1].item_id
+    assert len({item.item_id for item in docket}) == len(docket)
+
+
+def test_carried_and_visible_same_group_incident_have_unique_item_ids():
+    carried = rules.DocketItem(
+        "incident-carried",
+        rules.CIVIC_INCIDENT_TEMPLATE_ID,
+        "Civic Incident Response: Renters",
+        "POINT",
+        1,
+        status="carried",
+        stakeholder="renters",
+    )
+    profile = rules.DistrictProfile(
+        "D0000",
+        "Renters Row",
+        1000,
+        45,
+        20,
+        35,
+        25,
+        50,
+        "residential",
+        population_mix={"renters": 3},
+        dissatisfaction={"renters": 4},
+    )
+
+    docket = rules.generate_docket(turn=2, seed=2026, count=4, carried_items=[carried], districts={"D0000": profile})
+
+    assert docket[0].template_id == rules.CIVIC_INCIDENT_TEMPLATE_ID
+    assert docket[1].template_id == rules.CIVIC_INCIDENT_TEMPLATE_ID
+    assert docket[0].item_id != docket[1].item_id
+    assert len({item.item_id for item in docket}) == len(docket)
+
+
 def test_feature_archetype_catalog_is_valid_and_covers_all_templates():
     """Verify templates resolve to valid feature archetypes and metadata."""
     assert rules.validate_feature_catalog() == []
