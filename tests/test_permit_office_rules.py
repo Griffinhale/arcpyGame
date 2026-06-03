@@ -193,6 +193,31 @@ def test_buyout_single_bidder_starts_contested_transition():
     assert districts["A"].contesting_type == "mercantile"
     assert districts["A"].transition_due_turn == state.turn + 1
     assert "entered contested buyout" in result.report.lower()
+    assert districts["A"].last_buyout_report == (
+        "A entered contested buyout from B; "
+        "mercantile bid cleared local leverage after weak prosperity and pressure."
+    )
+
+
+def test_buyout_reports_explain_target_bidder_and_reason():
+    state = rules.CityState()
+    districts = {
+        "A": _district_for_buyout("A", "residential", 35, ["B"]),
+        "B": _district_for_buyout("B", "mercantile", 82, ["A"]),
+    }
+    ledger = rules.rebuild_type_ledger(districts)
+    ledger["mercantile"]["capital"] = 100
+    ledger["mercantile"]["appetite"] = 20
+
+    result = rules.resolve_buyout_round(state, districts, ledger, seed=2026)
+
+    assert "A" in result.report or "A" in districts["A"].last_buyout_report
+    assert "mercantile" in result.report.lower()
+    assert any(phrase in result.report.lower() for phrase in ("bid", "leverage", "contested", "refused"))
+    assert result.report == (
+        "A entered contested buyout from B; "
+        "mercantile bid cleared local leverage after weak prosperity and pressure."
+    )
 
 
 def test_buyout_target_can_refuse_bid_deterministically():
@@ -211,7 +236,11 @@ def test_buyout_target_can_refuse_bid_deterministically():
     assert result.refused == ["A"]
     assert districts["A"].identity_state == "stable"
     assert districts["A"].contesting_cell_id == ""
-    assert "refused buyout" in result.report.lower()
+    assert result.report == (
+        "A refused a mercantile buyout bid; "
+        "local leverage remained high enough to resist."
+    )
+    assert districts["A"].last_buyout_report == result.report
 
 
 def test_contested_transition_converts_when_pressure_remains_high():
@@ -338,6 +367,19 @@ def test_missed_window_expiration_closes_original_without_pressure():
     assert result.followup_template_id == ""
     assert districts["D0000"].buyout_pressure == 0
     assert "window closed" in result.report.lower()
+    assert result.report == "Licensed Procession Route window closed without office action; the original filing expired."
+
+
+def test_expiration_reports_hint_at_original_policy():
+    state = rules.CityState()
+    districts = {profile.cell_id: profile for profile in rules.generate_district_profiles(rows=1, cols=1, seed=2026)}
+    item = rules.DocketItem("expire-event", "procession_route", "Licensed Procession Route", "LINE", 1)
+    item.target_cell_ids = ["D0000"]
+
+    result = rules.resolve_unattended_item(state, item, districts, seed=2026)
+
+    assert "window" in result.report.lower()
+    assert result.policy == "missed_window"
 
 
 def test_city_momentum_expiration_adds_pressure_and_report():

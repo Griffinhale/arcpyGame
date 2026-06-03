@@ -65,7 +65,7 @@ This document describes the current per-week logic and data flow for the active 
 ### Deny
 
 1. The dashboard inserts a command and reads state, districts, active features, and projects.
-2. `rules.resolve_decision(..., "deny", ...)` spends AP, avoids approval/project effects, applies denial friction, stakeholder heat, local population reaction, and any project delay.
+2. `rules.resolve_decision(..., "deny", ...)` records disposition, denial friction, stakeholder heat, local population reaction, and any project delay without spending AP or applying approval/project benefits.
 3. Existing feature updates are written if the denial is a maintenance deferral.
 4. Proposed rows for the docket item are marked denied or deferred.
 5. Districts, state, projects, docket item, action log, and command status are persisted.
@@ -75,9 +75,13 @@ This document describes the current per-week logic and data flow for the active 
 
 1. The dashboard inserts an `advance_turn` command.
 2. It reads state, open docket rows, districts, active features, and projects.
-3. `rules.advance_turn_result` processes unresolved open/inspected items into stakeholder heat, local grievances, carried or expired status, project overdue state, and violation deadline pressure.
-4. Active feature lifecycle advances, recurring economy applies revenue/upkeep/net, network access is recomputed, hazards advance, housing dynamics apply, population pressure changes, and new incidents can surface.
-5. `CityState.turn` increments, AP resets, audit stage can advance on week 3, and week 6 closes as the final audit without advancing to week 7.
+3. `rules.advance_turn_result` applies the current rules order:
+   1. Unresolved open/inspected items resolve through template-specific expiration policy.
+   2. Missed-window items expire cleanly; city-momentum items alter district pressure; bad momentum can seed later follow-up cases.
+   3. Feature lifecycle, recurring economy, network, hazard, housing, and population systems advance.
+   4. Contested buyout transitions resolve.
+   5. New buyout bids are evaluated for low-prosperity districts.
+   6. `CityState.turn` increments, AP resets, week 6 files the mid-season audit, and week 12 files the final audit.
 6. State, projects, districts, active features, old docket item statuses, and command status are written.
 7. `generate_docket_rows` replaces the visible docket with due project, maintenance, incident, stakeholder heat, and deterministic demo items in priority order unless the final audit has completed.
 8. All output layers are rebuilt/refreshed, the dashboard status updates, and the dashboard reloads.

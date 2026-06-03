@@ -50,7 +50,7 @@ def resolve_unattended_item(
         return ExpirationResult(
             item.item_id,
             policy,
-            f"{item.title} window closed without office action.",
+            f"{item.title} window closed without office action; the original filing expired.",
             affected,
         )
 

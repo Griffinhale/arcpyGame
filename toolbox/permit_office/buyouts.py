@@ -54,19 +54,16 @@ def resolve_buyout_round(
         bidder = bidders[0]
         if _target_refuses_buyout(target, rng):
             refused.append(cell_id)
-            target.last_buyout_report = f"{target.name} refused buyout from {bidder.name} on turn {state.turn}."
-            reports.append(
-                f"{target.name} refused buyout from {bidder.name}; "
-                f"local leverage held off {bidder.district_type.replace('_', ' ')} interests."
+            target.last_buyout_report = (
+                f"{target.name} refused a {bidder.district_type} buyout bid; "
+                f"local leverage remained high enough to resist."
             )
+            reports.append(target.last_buyout_report)
             adjust_type_ledger(ledger, bidder.district_type, appetite_delta=-1, fatigue_delta=1)
             continue
         _start_contested_transition(state, target, bidder, ledger)
         started.append(cell_id)
-        reports.append(
-            f"{target.name} entered contested buyout from {bidder.name}; "
-            f"{bidder.district_type.replace('_', ' ')} interests filed control papers."
-        )
+        reports.append(target.last_buyout_report)
 
     return BuyoutRoundResult(started, refused, " ".join(reports))
 
@@ -211,7 +208,8 @@ def _start_contested_transition(
     target.contesting_type = bidder.district_type
     target.transition_due_turn = state.turn + 1
     target.last_buyout_report = (
-        f"{target.name} entered contested buyout from {bidder.name} on turn {state.turn}."
+        f"{target.name} entered contested buyout from {bidder.name}; "
+        f"{bidder.district_type} bid cleared local leverage after weak prosperity and pressure."
     )
     adjust_type_ledger(
         ledger,
