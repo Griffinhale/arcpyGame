@@ -118,6 +118,7 @@ class DashboardController:
         self.seed = seed
         self.messages = messages
         self.status_text = ""
+        self.selected_item_id = ""
         self.last_receipt = None
         self._newgame_overlay = None
         self._deadline_week = 0
@@ -189,6 +190,8 @@ class DashboardController:
         items = read_docket(self.paths)
         active_features = read_active_features(self.paths)
         self._sync_deadline_timer(state)
+        if state.status == "complete" or state.turn > state.max_turns:
+            self._record_final_audit_receipt(state, districts, active_features, items)
         if not has_saved_game(self.paths) and not self.status_text:
             self.status_text = "No saved game found. Click New Game to create Permit Office layers and start play."
         proposal_visible_by_item = {}
@@ -220,6 +223,18 @@ class DashboardController:
             affected=tuple(affected or ()),
             metrics=receipt_metrics(state),
         )
+
+    def _record_final_audit_receipt(self, state, districts, active_features, items):
+        """Store the current final audit scorecard as the inline receipt."""
+
+        grade, scorecard = rules.scorecard(state, districts, active_features, items)
+        self._record_receipt(
+            f"Final Audit: {grade}",
+            _final_audit_report(grade, scorecard),
+            (),
+            state,
+        )
+        return grade, self.last_receipt.report
 
     def _sync_deadline_timer(self, state):
         """Start or reset the five-minute filing clock for the current week."""
@@ -667,6 +682,17 @@ class DashboardController:
                     districts = read_districts(self.paths)
                     active_features = read_active_features(self.paths)
                     projects = read_projects(self.paths)
+                if state.status == "complete" or state.turn > state.max_turns:
+                    grade, final_report = self._record_final_audit_receipt(state, districts, active_features, items)
+                    report = f"Final audit already filed. Scorecard: {grade}."
+                    command_finish(self.paths, command_id, "applied", report)
+                    rebuild_output_layers(self.paths, self.messages)
+                    self.district_layer = DISTRICTS
+                    self.status_var.set(report)
+                    self._deadline_running = False
+                    self._deadline_week = int(getattr(state, "turn", 0) or 0)
+                    self._deadline_started = 0.0
+                    return
                 with perf_block("resolve"):
                     turn_result = rules.advance_turn_result(state, items, districts, active_features, projects)
                 report = turn_result.report
@@ -683,7 +709,12 @@ class DashboardController:
                 rebuild_output_layers(self.paths, self.messages)
                 self.district_layer = DISTRICTS
                 prefix = "Auto-deadline: " if auto else ""
-                self.status_var.set(f"{prefix}{report}")
+                if state.status == "complete":
+                    _grade, final_report = self._record_final_audit_receipt(state, districts, active_features, items)
+                    self.status_var.set(f"{prefix}{final_report}")
+                    self._deadline_running = False
+                else:
+                    self.status_var.set(f"{prefix}{report}")
                 self._deadline_week = 0
                 self._deadline_started = 0.0
             except Exception as exc:
@@ -754,6 +785,21 @@ def _filed_report_text(result):
     return f"{result.report} Local changes: {local}."
 
 
+FINAL_AUDIT_FLAVOR = {
+    "PASS": "Audit accepts the closing file. The city can keep issuing permits under the current desk model.",
+    "CONDITIONAL": "Audit closes with conditions. Core services continue, but flagged pressure areas need a follow-up docket.",
+    "FAIL": "Audit rejects the closing file. City hall enters remediation with unresolved pressure and exposure findings.",
+}
+
+
+def _final_audit_report(grade, scorecard):
+    """Format final audit flavor plus the scorecard report for the receipt."""
+
+    grade = grade or "UNKNOWN"
+    flavor = FINAL_AUDIT_FLAVOR.get(grade, "Audit closes the current file.")
+    return f"Final audit: {grade}. {flavor} {scorecard}"
+
+
 def _local_changes_fragment(result):
     """Summarize district deltas and feature updates for filed receipts."""
 
@@ -783,13 +829,26 @@ def _compact_delta(delta):
 
     if not delta:
         return ""
-    ordered = sorted(delta.items(), key=lambda row: (row[0] not in ("prosperity", "unrest", "culture", "risk", "services", "dissatisfaction"), row[0]))
+    ordered = sorted(delta.items(), key=lambda row: (row[0] not in ("activity", "friction", "trust", "exposure", "services", "dissatisfaction"), row[0]))
     parts = []
     for metric, amount in ordered:
         if not amount:
             continue
-        label = "dissat" if metric == "dissatisfaction" else metric[:4]
+        label = _compact_metric_label(metric)
         parts.append(f"{label} {int(amount):+d}")
         if len(parts) == 4:
             break
     return ", ".join(parts)
+
+
+def _compact_metric_label(metric):
+    """Return stable short labels for filed local-change receipts."""
+
+    return {
+        "activity": "act",
+        "friction": "fric",
+        "trust": "trust",
+        "exposure": "expo",
+        "services": "serv",
+        "dissatisfaction": "dissat",
+    }.get(metric, metric[:4])

@@ -81,7 +81,7 @@ This document describes the current per-week logic and data flow for the active 
    b. Missed-window items expire cleanly; city-momentum items alter district pressure; bad momentum can seed later follow-up cases.
    c. Feature lifecycle, recurring economy, network, hazard, housing, and population systems advance.
    d. Contested buyout transitions resolve.
-   e. New buyout bids are evaluated for low-prosperity districts.
+   e. New buyout bids are evaluated for low-activity districts.
    f. `CityState.turn` increments, AP resets, week 6 files the mid-season audit, and closing week 12 files the final audit.
 4. State, projects, districts, active features, old docket item statuses, and command status are written.
 5. `generate_docket_rows` replaces the visible docket with due project, maintenance, incident, stakeholder heat, and deterministic demo items in priority order unless the final audit has completed.

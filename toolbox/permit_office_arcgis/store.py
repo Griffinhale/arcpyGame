@@ -21,6 +21,13 @@ DOCKET_UPDATE_FIELDS = [
     if name not in {"turn", "template_id", "title", "geometry_type"}
 ]
 
+LEGACY_STATE_METRIC_KEYS = {
+    "prosperity": "activity",
+    "unrest": "friction",
+    "culture": "trust",
+    "risk": "exposure",
+}
+
 
 def now_utc():
     """Return the current UTC timestamp for command and action rows."""
@@ -53,10 +60,10 @@ def create_district_board(paths, seed, messages):
         "cell_id",
         "district_name",
         "population",
-        "prosperity",
-        "unrest",
-        "culture",
-        "risk",
+        "activity",
+        "friction",
+        "trust",
+        "exposure",
         "services",
         "district_type",
         "prior_district_type",
@@ -94,10 +101,10 @@ def create_district_board(paths, seed, messages):
                 profile.cell_id,
                 profile.name,
                 profile.population,
-                profile.prosperity,
-                profile.unrest,
-                profile.culture,
-                profile.risk,
+                profile.activity,
+                profile.friction,
+                profile.trust,
+                profile.exposure,
                 profile.services,
                 profile.district_type,
                 profile.prior_district_type,
@@ -141,10 +148,10 @@ def write_state(paths, state):
         "audit_stage": (str(state.audit_stage), state.audit_stage),
         "status": (state.status, None),
         "last_report": (state.last_report, None),
-        "prosperity": (str(state.prosperity), state.prosperity),
-        "unrest": (str(state.unrest), state.unrest),
-        "culture": (str(state.culture), state.culture),
-        "risk": (str(state.risk), state.risk),
+        "activity": (str(state.activity), state.activity),
+        "friction": (str(state.friction), state.friction),
+        "trust": (str(state.trust), state.trust),
+        "exposure": (str(state.exposure), state.exposure),
         "scenario_id": (state.scenario_id, None),
         "stakeholder_heat": (json.dumps(state.stakeholder_heat, sort_keys=True), None),
         "last_revenue": (str(state.last_revenue), state.last_revenue),
@@ -170,8 +177,11 @@ def read_state(paths):
     with arcpy.da.SearchCursor(paths["state"], ["key", "value_text", "value_num"]) as cursor:
         for key, text, num in cursor:
             values[key] = (text, num)
+    for legacy, current in LEGACY_STATE_METRIC_KEYS.items():
+        if current not in values and legacy in values:
+            values[current] = values[legacy]
     state = rules.CityState()
-    for key in ("turn", "max_turns", "ap", "max_ap", "money", "audit_stage", "prosperity", "unrest", "culture", "risk", "last_revenue", "last_upkeep", "last_net", "maintenance_backlog", "week_day"):
+    for key in ("turn", "max_turns", "ap", "max_ap", "money", "audit_stage", "activity", "friction", "trust", "exposure", "last_revenue", "last_upkeep", "last_net", "maintenance_backlog", "week_day"):
         if key in values and values[key][1] is not None:
             setattr(state, key, int(values[key][1]))
     for key in ("status", "last_report", "scenario_id"):
@@ -288,10 +298,10 @@ def read_districts(paths):
         "cell_id",
         "district_name",
         "population",
-        "prosperity",
-        "unrest",
-        "culture",
-        "risk",
+        "activity",
+        "friction",
+        "trust",
+        "exposure",
         "services",
         "district_type",
         "prior_district_type",
@@ -324,10 +334,10 @@ def read_districts(paths):
                 cell_id=row[0],
                 name=row[1],
                 population=int(row[2] or 0),
-                prosperity=int(row[3] or 0),
-                unrest=int(row[4] or 0),
-                culture=int(row[5] or 0),
-                risk=int(row[6] or 0),
+                activity=int(row[3] or 0),
+                friction=int(row[4] or 0),
+                trust=int(row[5] or 0),
+                exposure=int(row[6] or 0),
                 services=int(row[7] or 0),
                 district_type=row[8] or "mercantile",
                 prior_district_type=row[9] or "",
@@ -369,10 +379,10 @@ def write_district_updates(paths, districts, report, affected_ids=None):
     fields = [
         "cell_id",
         "population",
-        "prosperity",
-        "unrest",
-        "culture",
-        "risk",
+        "activity",
+        "friction",
+        "trust",
+        "exposure",
         "services",
         "district_type",
         "prior_district_type",
@@ -408,10 +418,10 @@ def write_district_updates(paths, districts, report, affected_ids=None):
             profile = districts[cid]
             rules.normalize_profile(profile)
             row[1] = profile.population
-            row[2] = profile.prosperity
-            row[3] = profile.unrest
-            row[4] = profile.culture
-            row[5] = profile.risk
+            row[2] = profile.activity
+            row[3] = profile.friction
+            row[4] = profile.trust
+            row[5] = profile.exposure
             row[6] = profile.services
             row[7] = profile.district_type
             row[8] = profile.prior_district_type

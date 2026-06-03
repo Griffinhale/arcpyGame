@@ -87,12 +87,12 @@ def resolve_contested_transitions(
             continue
         if int(profile.transition_due_turn or 0) > state.turn:
             continue
-        if profile.prosperity >= 50 and profile.buyout_pressure <= 1:
+        if profile.activity >= 50 and profile.buyout_pressure <= 1:
             _cancel_transition(profile)
             cancelled.append(cell_id)
             reports.append(f"{profile.name} stabilized and cancelled its contested buyout.")
             continue
-        if profile.prosperity < 50 or profile.buyout_pressure > 1:
+        if profile.activity < 50 or profile.buyout_pressure > 1:
             new_type = _contesting_type(profile, districts)
             if not new_type:
                 _cancel_transition(profile)
@@ -133,7 +133,7 @@ def _eligible_target(
 ) -> bool:
     """Return whether a district can be targeted by a buyout bid."""
 
-    if target.prosperity >= 50:
+    if target.activity >= 50:
         return False
     if target.identity_state in {"contested", "converted"}:
         return False
@@ -159,7 +159,7 @@ def _eligible_bidders(
             continue
         if bidder.district_type == target.district_type:
             continue
-        if bidder.prosperity < target.prosperity + 8:
+        if bidder.activity < target.activity + 8:
             continue
         entry = ledger.get(bidder.district_type, {})
         if int(entry.get("capital", 0) or 0) <= 0 or int(entry.get("appetite", 0) or 0) <= 0:
@@ -173,9 +173,9 @@ def _eligible_bidders(
 def _target_refuses_buyout(target: DistrictProfile, rng: random.Random) -> bool:
     """Return whether target leverage blocks the current buyout bid."""
 
-    prosperity = max(0, min(100, int(target.prosperity or 0)))
+    activity = max(0, min(100, int(target.activity or 0)))
     pressure = max(0, min(100, int(target.buyout_pressure or 0)))
-    refusal_chance = max(0.0, min(0.65, (prosperity - 30) * 0.025 - pressure * 0.06))
+    refusal_chance = max(0.0, min(0.65, (activity - 30) * 0.025 - pressure * 0.06))
     return rng.random() < refusal_chance
 
 
@@ -183,11 +183,11 @@ def _bidder_score(
     bidder: DistrictProfile,
     ledger: Mapping[str, Mapping[str, int]],
 ) -> int:
-    """Score one bidder using visible prosperity and hidden type pressure."""
+    """Score one bidder using visible activity and hidden type pressure."""
 
     entry = ledger.get(bidder.district_type, {})
     return (
-        bidder.prosperity
+        bidder.activity
         + int(entry.get("capital", 0) or 0)
         + int(entry.get("appetite", 0) or 0) * 3
         - int(entry.get("fatigue", 0) or 0) * 2
@@ -209,7 +209,7 @@ def _start_contested_transition(
     target.transition_due_turn = state.turn + 1
     target.last_buyout_report = (
         f"{target.name} entered contested buyout from {bidder.name}; "
-        f"{bidder.district_type} bid cleared local leverage after weak prosperity and pressure."
+        f"{bidder.district_type} bid cleared local leverage after weak activity and pressure."
     )
     adjust_type_ledger(
         ledger,
@@ -250,8 +250,8 @@ def _convert_transition(
     profile.contesting_type = ""
     profile.transition_due_turn = 0
     profile.buyout_pressure = max(0, int(profile.buyout_pressure or 0) - 2)
-    profile.prosperity = max(0, min(100, int(profile.prosperity or 0) + 4))
-    profile.unrest = max(0, min(100, int(profile.unrest or 0) + 4))
+    profile.activity = max(0, min(100, int(profile.activity or 0) + 4))
+    profile.friction = max(0, min(100, int(profile.friction or 0) + 4))
     profile.last_buyout_report = f"{profile.name} converted from {old_type} to {new_type}."
     adjust_type_ledger(ledger, old_type, holdings_delta=-1, fatigue_delta=1)
     adjust_type_ledger(

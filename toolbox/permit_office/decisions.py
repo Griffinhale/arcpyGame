@@ -113,12 +113,12 @@ def resolve_decision(
         # Denials avoid project effects but still create friction, stakeholder
         # heat, and local population reactions.
         item.status = "denied"
-        delta = {"unrest": 1, "prosperity": -1}
+        delta = {"friction": 1, "activity": -1}
         _apply_city_delta(state, delta)
         district_deltas = _apply_population_reaction(template, [districts[cid] for cid in targets], "deny", mitigated)
         surfaced = _surface_new_incidents(state, [districts[cid] for cid in targets])
         if surfaced:
-            delta["unrest"] = delta.get("unrest", 0) + surfaced
+            delta["friction"] = delta.get("friction", 0) + surfaced
         heat_delta = _adjust_heat(state, item.stakeholder, template.denial_heat)
         project_note = ""
         if projects and item.project_id:
@@ -126,8 +126,8 @@ def resolve_decision(
             if project:
                 project_note = f" Project {project.project_id} delayed."
         report = (
-            f"Denied {item.title}. Certain effects: project risk avoided; city delta {_format_delta(delta)}. "
-            f"Risk/side effects: {item.stakeholder.replace('_', ' ')} heat {heat_delta:+d}."
+            f"Denied {item.title}. Certain effects: project exposure avoided; city delta {_format_delta(delta)}. "
+            f"Exposure/side effects: {item.stakeholder.replace('_', ' ')} heat {heat_delta:+d}."
             f"{project_note} {_population_report_fragment([districts[cid] for cid in targets])}"
         )
         return DecisionResult(
@@ -249,7 +249,7 @@ def resolve_decision(
     averaged = _average_city_delta(city_delta, targets, spillovers)
     _apply_city_delta(state, averaged)
     if surfaced:
-        averaged["unrest"] = averaged.get("unrest", 0) + surfaced
+        averaged["friction"] = averaged.get("friction", 0) + surfaced
     affected = affected_ids
     _settle_item_violations(item, mitigated)
     mitigation_text = " with mitigation" if mitigated else ""
@@ -277,7 +277,7 @@ def resolve_decision(
         f"Approved {item.title}{mitigation_text}. Certain effects: affected {len(affected)} district(s): "
         f"{_district_list_fragment(affected)}; immediate city delta {_format_delta(averaged)}; "
         f"{_local_cause_fragment([districts[cid] for cid in affected], district_deltas)}; {spillover_text}; recurring budget {recurring_text}. "
-        f"Risk/side effects: {failure_text} "
+        f"Exposure/side effects: {failure_text} "
         f"{_population_report_fragment([districts[cid] for cid in targets])}{project_text}"
     )
     return DecisionResult(
@@ -330,12 +330,12 @@ def _resolve_maintenance_decision(
         if blocked:
             return blocked
         # Deferral leaves the feature in the maintenance queue and raises city
-        # risk so the backlog is visible outside the docket.
+        # exposure so the backlog is visible outside the docket.
         item.status = "deferred"
         feature.status = "maintenance_due"
         feature.display_state = "maintenance_due"
         heat_delta = _adjust_heat(state, feature.owner_group or "maintenance_office", template.denial_heat)
-        delta = {"risk": 1}
+        delta = {"exposure": 1}
         _apply_city_delta(state, delta)
         return DecisionResult(
             True,
@@ -402,9 +402,9 @@ def _resolve_enforcement_decision(
         if blocked:
             return blocked
         # Deferred enforcement keeps the condition unresolved and converts
-        # stakeholder pressure into broader unrest and risk.
+        # stakeholder pressure into broader friction and exposure.
         item.status = "deferred"
-        delta = {"unrest": 2, "risk": 1}
+        delta = {"friction": 2, "exposure": 1}
         _apply_city_delta(state, delta)
         heat_delta = _adjust_heat(state, item.stakeholder, template.denial_heat)
         project_note = ""
@@ -472,12 +472,12 @@ def _resolve_enforcement_decision(
         report = (
             f"Settled {item.title} through a retroactive permit and compliance schedule. "
             f"Certain effects: city delta {_format_delta(averaged)}. "
-            f"Risk/side effects: {item.stakeholder.replace('_', ' ')} heat {heat_delta:+d}.{project_note}"
+            f"Exposure/side effects: {item.stakeholder.replace('_', ' ')} heat {heat_delta:+d}.{project_note}"
         )
     else:
         report = (
             f"Enforced {item.title}. Certain effects: city delta {_format_delta(averaged)}. "
-            f"Risk/side effects: compliance record is clearer, but local objections may increase; "
+            f"Exposure/side effects: compliance record is clearer, but local objections may increase; "
             f"{item.stakeholder.replace('_', ' ')} heat {heat_delta:+d}.{project_note}"
         )
     return DecisionResult(
@@ -521,7 +521,7 @@ def _resolve_incident_decision(
         if blocked:
             return blocked
         # Deferring an incident raises the attached group's dissatisfaction
-        # before the city-level unrest/risk penalty is applied.
+        # before the city-level friction/exposure penalty is applied.
         item.status = "deferred"
         group = identity_group if identity_group in CITIZEN_GROUPS else item.stakeholder if item.stakeholder in CITIZEN_GROUPS else _top_dissatisfaction(districts[targets[0]])[0]
         for cid in targets:
@@ -529,7 +529,7 @@ def _resolve_incident_decision(
             normalize_profile(districts[cid])
         if identity:
             write_incident_case_identity(item, targets[0], group, districts[targets[0]].incident_state)
-        delta = {"unrest": 2, "risk": 1}
+        delta = {"friction": 2, "exposure": 1}
         _apply_city_delta(state, delta)
         heat_delta = _adjust_heat(state, group, template.denial_heat)
         project_note = ""
@@ -538,7 +538,7 @@ def _resolve_incident_decision(
             if project:
                 project_note = f" Project {project.project_id} delayed."
         report = (
-            f"Deferred {item.title}. The incident remains unresolved and may affect citywide unrest. "
+            f"Deferred {item.title}. The incident remains unresolved and may affect citywide friction. "
             f"City delta: {_format_delta(delta)}. {_group_label(group).title()} heat {heat_delta:+d}.{project_note}"
         )
         return DecisionResult(
@@ -602,7 +602,7 @@ def _resolve_incident_decision(
             project_note = f" Project {project.project_id} status {project.status}."
     report = (
         f"{item.title} {mode_text}. Certain effects: Target group: {_group_label(group)}; "
-        f"city delta {_format_delta(averaged)}. Risk/side effects: local grievance may continue. "
+        f"city delta {_format_delta(averaged)}. Exposure/side effects: local grievance may continue. "
         f"{_population_report_fragment([districts[cid] for cid in targets])}{project_note}"
     )
     return DecisionResult(

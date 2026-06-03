@@ -30,10 +30,10 @@ DISTRICT_FIELDS = [
     ("cell_id", "TEXT", "District ID", 32),
     ("district_name", "TEXT", "District Name", 96),
     ("population", "LONG", "Population", None),
-    ("prosperity", "LONG", "Prosperity", None),
-    ("unrest", "LONG", "Unrest", None),
-    ("culture", "LONG", "Culture", None),
-    ("risk", "LONG", "Health / Risk", None),
+    ("activity", "LONG", "Activity", None),
+    ("friction", "LONG", "Civic Friction", None),
+    ("trust", "LONG", "Trust", None),
+    ("exposure", "LONG", "Exposure", None),
     ("services", "LONG", "Services", None),
     ("district_type", "TEXT", "Hidden District Type", 32),
     ("prior_district_type", "TEXT", "Prior District Type", 32),
@@ -162,6 +162,13 @@ ACTION_LOG_FIELDS = [
     ("city_delta", "TEXT", "City Delta", 512),
 ]
 
+LEGACY_CITY_HEALTH_FIELD_MIGRATIONS = {
+    "prosperity": "activity",
+    "unrest": "friction",
+    "culture": "trust",
+    "risk": "exposure",
+}
+
 
 def resolve_workspace(value, messages):
     """Resolve the geodatabase path from user input, project home, or scratch."""
@@ -235,6 +242,29 @@ def ensure_feature_class(gdb_path, name, geometry_type, fields, spatial_ref, mes
     return path
 
 
+def migrate_legacy_city_health_fields(table, messages):
+    """Backfill renamed city-health fields from legacy district columns."""
+
+    existing = {field.name.lower(): field.name for field in arcpy.ListFields(table)}
+    legacy_fields = [
+        (legacy, current)
+        for legacy, current in LEGACY_CITY_HEALTH_FIELD_MIGRATIONS.items()
+        if legacy in existing and current in existing
+    ]
+    if not legacy_fields:
+        return
+    for legacy, current in legacy_fields:
+        with arcpy.da.UpdateCursor(table, [existing[current], existing[legacy]]) as cursor:
+            for row in cursor:
+                if row[0] in (None, "") and row[1] not in (None, ""):
+                    row[0] = row[1]
+                    cursor.updateRow(row)
+    try:
+        arcpy.management.DeleteField(table, [existing[legacy] for legacy, _current in legacy_fields])
+    except Exception as exc:
+        _warn(messages, "SCHEMA", f"legacy city health fields retained: {exc}")
+
+
 def active_spatial_reference(messages):
     """Use the active ArcGIS map spatial reference, falling back to Web Mercator."""
 
@@ -264,6 +294,7 @@ def ensure_schema(gdb_path, messages):
         "commands": ensure_table(gdb_path, COMMANDS, COMMAND_FIELDS, messages),
         "action_log": ensure_table(gdb_path, ACTION_LOG, ACTION_LOG_FIELDS, messages),
     }
+    migrate_legacy_city_health_fields(paths["districts"], messages)
     return paths
 
 

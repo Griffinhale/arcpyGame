@@ -11,8 +11,8 @@ from .catalogs import *
 def display_state_for_profile(profile: DistrictProfile) -> str:
     """Return the map-facing primary pressure cause for a district profile.
 
-    Rules-facing stat reference: prosperity is economic activity, unrest is
-    visible civic friction, culture is trust/cohesion, risk is exposure, and
+    Rules-facing stat reference: activity is economic activity, friction is
+    visible civic friction, trust is trust/cohesion, exposure is exposure, and
     services are local capacity. Display state shows the leading cause, while
     district attributes retain severity and type.
     """
@@ -26,7 +26,7 @@ def display_state_for_profile(profile: DistrictProfile) -> str:
         return "hazard"
     if max((int(band or 0) for band in (profile.displacement or {}).values()), default=0) >= 2:
         return "housing_pressure"
-    if profile.prosperity >= 65:
+    if profile.activity >= 65:
         return "economic_growth"
     return "stable"
 
@@ -364,16 +364,16 @@ def _initial_population_mix(district_type: str, rng: random.Random) -> dict[str,
     return _normalize_bands(mix, 3)
 
 
-def _initial_dissatisfaction(population_mix: dict[str, int], prosperity: int, unrest: int, risk: int, services: int) -> dict[str, int]:
+def _initial_dissatisfaction(population_mix: dict[str, int], activity: int, friction: int, exposure: int, services: int) -> dict[str, int]:
     """Seed grievance bands from initial city metrics and local population mix."""
     dissatisfaction = {group: 0 for group, band in population_mix.items() if band > 0}
-    if unrest >= 40:
+    if friction >= 40:
         _adjust_dissatisfaction_map(dissatisfaction, ("renters", "workers", "students"), 1)
-    if risk >= 45:
+    if exposure >= 45:
         _adjust_dissatisfaction_map(dissatisfaction, ("families", "elders", "workers"), 1)
     if services < 25:
         _adjust_dissatisfaction_map(dissatisfaction, ("families", "commuters", "civil_servants"), 1)
-    if prosperity < 30:
+    if activity < 30:
         _adjust_dissatisfaction_map(dissatisfaction, ("renters", "vendors", "workers"), 1)
     return _normalize_bands(dissatisfaction, 4)
 
@@ -448,7 +448,7 @@ def _normalize_housing(profile: DistrictProfile) -> None:
 
 
 def _displacement_pressure(profile: DistrictProfile) -> int:
-    """Convert housing, prosperity, risk, and service context into pressure."""
+    """Convert housing, activity, exposure, and service context into pressure."""
     pressure = 0
     if profile.vacancy_rate <= 3:
         pressure += 2
@@ -458,9 +458,9 @@ def _displacement_pressure(profile: DistrictProfile) -> int:
         pressure += 2
     elif profile.affordability < 50:
         pressure += 1
-    if profile.prosperity >= 65 or profile.culture >= 65:
+    if profile.activity >= 65 or profile.trust >= 65:
         pressure += 1
-    if profile.unrest >= 55 or profile.risk >= 55:
+    if profile.friction >= 55 or profile.exposure >= 55:
         pressure += 1
     if profile.network_access.get("utilities", 0) >= 2:
         pressure -= 1
@@ -592,7 +592,7 @@ def _population_decision_delta(profile: DistrictProfile, template: DocketTemplat
     if not template.growth_groups:
         return 0
     base = max(8, profile.population // 100)
-    if profile.services < 25 or profile.risk > 60:
+    if profile.services < 25 or profile.exposure > 60:
         base = max(4, base // 2)
     if mitigated:
         base = max(4, round(base * 0.75))
@@ -600,13 +600,13 @@ def _population_decision_delta(profile: DistrictProfile, template: DocketTemplat
 
 
 def _advance_population_pressure(profile: DistrictProfile) -> int:
-    """Apply one turn of population drift from prosperity, risk, and services."""
+    """Apply one turn of population drift from activity, exposure, and services."""
     before = profile.population
     delta = 0
-    if profile.prosperity >= 60 and profile.risk <= 45 and profile.unrest <= 45:
+    if profile.activity >= 60 and profile.exposure <= 45 and profile.friction <= 45:
         delta += max(6, profile.population // 120)
         _shift_mix(profile, PRESSURE_DRIFT_GROUPS.get(profile.district_type, ()), 1)
-    if profile.risk >= 60 or profile.unrest >= 60 or profile.incident_state != "none":
+    if profile.exposure >= 60 or profile.friction >= 60 or profile.incident_state != "none":
         delta -= max(6, profile.population // 100)
         group, _band = _top_presence_group(profile)
         _shift_mix(profile, (group,), -1)
@@ -618,7 +618,7 @@ def _advance_population_pressure(profile: DistrictProfile) -> int:
 
 
 def _surface_new_incidents(state: CityState, profiles: Iterable[DistrictProfile]) -> int:
-    """Refresh profiles and add unrest when grievances become visible incidents."""
+    """Refresh profiles and add friction when grievances become visible incidents."""
     surfaced = 0
     for profile in profiles:
         normalize_profile(profile)
@@ -627,7 +627,7 @@ def _surface_new_incidents(state: CityState, profiles: Iterable[DistrictProfile]
             surfaced += 1
             state.stakeholder_memory[key] = state.turn
     if surfaced:
-        _apply_city_delta(state, {"unrest": surfaced})
+        _apply_city_delta(state, {"friction": surfaced})
     return surfaced
 
 
@@ -759,15 +759,15 @@ def _service_gap_for_profile(profile: DistrictProfile) -> dict[str, int]:
     gaps: dict[str, int] = {}
     if profile.population_mix.get("families", 0) >= 2:
         gaps["child_services"] = max(0, 45 - services)
-    if profile.risk >= 45 or profile.district_type in ("industrial", "civic"):
+    if profile.exposure >= 45 or profile.district_type in ("industrial", "civic"):
         gaps["fire_response"] = max(0, 50 - services)
-    if profile.risk >= 35 or profile.district_type in ("industrial", "mercantile"):
+    if profile.exposure >= 35 or profile.district_type in ("industrial", "mercantile"):
         gaps["utilities"] = max(0, 45 - services)
     if profile.population_mix.get("commuters", 0) >= 2:
         gaps["mobility"] = max(0, 40 - services)
     if profile.population_mix.get("artists", 0) >= 2 or profile.population_mix.get("students", 0) >= 2:
         gaps["culture_access"] = max(0, 35 - services)
-    if profile.district_type == "natural" or profile.risk >= 55:
+    if profile.district_type == "natural" or profile.exposure >= 55:
         gaps["green_buffer"] = max(0, 40 - services)
     for service, demand in _network_demand_for_profile(profile).items():
         access = profile.network_access.get(service, 0)
@@ -783,8 +783,8 @@ def _network_demand_for_profile(profile: DistrictProfile) -> dict[str, int]:
     demand = {
         "utilities": 1 + population_scale + housing_scale,
         "mobility": 1 + population_scale,
-        "fire_response": 1 if profile.risk >= 35 or profile.district_type in ("industrial", "civic") else 0,
-        "green_buffer": 1 if profile.risk >= 45 or profile.hazards.get("heat", 0) or profile.hazards.get("ecology", 0) else 0,
+        "fire_response": 1 if profile.exposure >= 35 or profile.district_type in ("industrial", "civic") else 0,
+        "green_buffer": 1 if profile.exposure >= 45 or profile.hazards.get("heat", 0) or profile.hazards.get("ecology", 0) else 0,
         "child_services": 1 if profile.population_mix.get("families", 0) >= 2 else 0,
         "culture_access": 1 if profile.population_mix.get("artists", 0) >= 2 or profile.population_mix.get("students", 0) >= 2 else 0,
     }
@@ -825,18 +825,18 @@ def _land_use_adjusted_effects(delta: dict[str, int], profile: DistrictProfile, 
     if profile.district_type in archetype.allowed_district_types:
         if archetype.service_type:
             adjusted["services"] = adjusted.get("services", 0) + 1
-        if adjusted.get("unrest", 0) > 0:
-            adjusted["unrest"] = max(0, adjusted["unrest"] - 1)
-        if adjusted.get("risk", 0) > 0:
-            adjusted["risk"] = max(0, adjusted["risk"] - 1)
+        if adjusted.get("friction", 0) > 0:
+            adjusted["friction"] = max(0, adjusted["friction"] - 1)
+        if adjusted.get("exposure", 0) > 0:
+            adjusted["exposure"] = max(0, adjusted["exposure"] - 1)
     if profile.district_type in archetype.conflict_district_types:
-        adjusted["unrest"] = adjusted.get("unrest", 0) + 2
-        adjusted["risk"] = adjusted.get("risk", 0) + 1
-        if adjusted.get("prosperity", 0) > 1:
-            adjusted["prosperity"] -= 1
+        adjusted["friction"] = adjusted.get("friction", 0) + 2
+        adjusted["exposure"] = adjusted.get("exposure", 0) + 1
+        if adjusted.get("activity", 0) > 1:
+            adjusted["activity"] -= 1
     if profile.zoning_overlay == "protected_reserve" and archetype.family in ("business", "land_use", "infrastructure"):
-        adjusted["unrest"] = adjusted.get("unrest", 0) + 1
-        adjusted["risk"] = adjusted.get("risk", 0) + 1
+        adjusted["friction"] = adjusted.get("friction", 0) + 1
+        adjusted["exposure"] = adjusted.get("exposure", 0) + 1
     return adjusted
 
 
@@ -864,28 +864,28 @@ def _district_adjusted_effects(base: dict[str, int], district_type: str, categor
     """Tune template effects for the receiving district archetype."""
     delta = dict(base)
     if district_type == "residential" and category in ("education", "residential"):
-        delta["culture"] = delta.get("culture", 0) + 1
-        delta["risk"] = delta.get("risk", 0) - 1
+        delta["trust"] = delta.get("trust", 0) + 1
+        delta["exposure"] = delta.get("exposure", 0) - 1
     elif district_type == "residential" and category in ("transit", "utility", "development"):
-        delta["unrest"] = delta.get("unrest", 0) + 1
+        delta["friction"] = delta.get("friction", 0) + 1
     elif district_type == "mercantile" and category in ("business", "transit", "culture"):
-        delta["prosperity"] = delta.get("prosperity", 0) + 3
-        delta["unrest"] = delta.get("unrest", 0) - 1
+        delta["activity"] = delta.get("activity", 0) + 3
+        delta["friction"] = delta.get("friction", 0) - 1
     elif district_type == "industrial" and category in ("utility", "department", "development"):
-        delta["prosperity"] = delta.get("prosperity", 0) + 2
-        delta["risk"] = delta.get("risk", 0) + 1
+        delta["activity"] = delta.get("activity", 0) + 2
+        delta["exposure"] = delta.get("exposure", 0) + 1
     elif district_type == "civic" and category in ("department", "education", "culture", "event"):
-        delta["culture"] = delta.get("culture", 0) + 2
-        delta["risk"] = delta.get("risk", 0) - 1
+        delta["trust"] = delta.get("trust", 0) + 2
+        delta["exposure"] = delta.get("exposure", 0) - 1
     elif district_type == "academic" and category in ("education", "culture", "event", "land"):
-        delta["culture"] = delta.get("culture", 0) + 3
-        delta["risk"] = delta.get("risk", 0) - 1
+        delta["trust"] = delta.get("trust", 0) + 3
+        delta["exposure"] = delta.get("exposure", 0) - 1
     elif district_type == "natural" and category == "land":
-        delta["culture"] = delta.get("culture", 0) + 3
-        delta["risk"] = delta.get("risk", 0) - 2
+        delta["trust"] = delta.get("trust", 0) + 3
+        delta["exposure"] = delta.get("exposure", 0) - 2
     elif district_type == "natural" and category in ("development", "utility", "transit", "business"):
-        delta["unrest"] = delta.get("unrest", 0) + 2
-        delta["risk"] = delta.get("risk", 0) + 1
+        delta["friction"] = delta.get("friction", 0) + 2
+        delta["exposure"] = delta.get("exposure", 0) + 1
     return delta
 
 
@@ -893,9 +893,9 @@ def _mitigate(delta: dict[str, int]) -> dict[str, int]:
     """Reduce harmful or oversized deltas for mitigated approvals."""
     out = {}
     for metric, value in delta.items():
-        if metric in ("unrest", "risk") and value > 0:
+        if metric in ("friction", "exposure") and value > 0:
             out[metric] = max(0, value - 2)
-        elif metric in ("prosperity", "culture") and value > 0:
+        elif metric in ("activity", "trust") and value > 0:
             out[metric] = max(0, value - 1)
         else:
             out[metric] = value
@@ -903,17 +903,17 @@ def _mitigate(delta: dict[str, int]) -> dict[str, int]:
 
 
 def _context_side_effect(template: DocketTemplate, target_profiles: list[DistrictProfile], rng: random.Random, mitigated: bool) -> dict[str, int]:
-    """Roll a small contextual side effect from local risk and unrest."""
+    """Roll a small contextual side effect from local exposure and friction."""
     if mitigated:
         threshold = 0.12
     else:
         threshold = 0.28
-    avg_unrest = sum(p.unrest for p in target_profiles) / max(1, len(target_profiles))
-    avg_risk = sum(p.risk for p in target_profiles) / max(1, len(target_profiles))
-    if template.category in ("event", "development", "residential", "transit", "utility", "business") and (avg_unrest > 50 or rng.random() < threshold):
-        return {"unrest": 2, "risk": 1}
-    if template.category in ("education", "department", "land") and avg_risk > 45:
-        return {"risk": -2, "unrest": -1}
+    avg_friction = sum(p.friction for p in target_profiles) / max(1, len(target_profiles))
+    avg_exposure = sum(p.exposure for p in target_profiles) / max(1, len(target_profiles))
+    if template.category in ("event", "development", "residential", "transit", "utility", "business") and (avg_friction > 50 or rng.random() < threshold):
+        return {"friction": 2, "exposure": 1}
+    if template.category in ("education", "department", "land") and avg_exposure > 45:
+        return {"exposure": -2, "friction": -1}
     return {}
 
 
@@ -941,19 +941,19 @@ def _failure_chance(template: DocketTemplate, target_profiles: list[DistrictProf
     # Failure chance combines the inspection result with local fit; the clamp
     # keeps routine approvals from becoming impossible or perfectly safe.
     avg_services = sum(p.services for p in target_profiles) / max(1, len(target_profiles))
-    avg_risk = sum(p.risk for p in target_profiles) / max(1, len(target_profiles))
-    avg_unrest = sum(p.unrest for p in target_profiles) / max(1, len(target_profiles))
+    avg_exposure = sum(p.exposure for p in target_profiles) / max(1, len(target_profiles))
+    avg_friction = sum(p.friction for p in target_profiles) / max(1, len(target_profiles))
     chance = template.failure_base_chance
     chance += {"low": -0.12, "medium": 0.02, "high": 0.25, "unknown": 0.05}.get(risk_band, 0.05)
     if avg_services < 25:
         chance += 0.16
     elif avg_services > 55:
         chance -= 0.08
-    if avg_risk > 55:
+    if avg_exposure > 55:
         chance += 0.10
-    if avg_unrest > 55:
+    if avg_friction > 55:
         chance += 0.08
-    if avg_risk >= 70 or avg_unrest >= 70:
+    if avg_exposure >= 70 or avg_friction >= 70:
         chance += 0.10
     district_types = {profile.district_type for profile in target_profiles}
     archetype = feature_archetype_for_template(template)
@@ -975,7 +975,7 @@ def _failure_chance(template: DocketTemplate, target_profiles: list[DistrictProf
         chance += 0.10
     if mitigated:
         chance -= 0.20
-    if risk_band == "high" and avg_services < 20 and avg_risk > 75 and district_types & set(template.bad_fit_types):
+    if risk_band == "high" and avg_services < 20 and avg_exposure > 75 and district_types & set(template.bad_fit_types):
         chance = 1.0
     return max(0.03, min(1.0, chance))
 

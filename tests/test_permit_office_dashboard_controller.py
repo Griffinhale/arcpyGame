@@ -167,14 +167,15 @@ def test_filed_report_text_includes_local_decision_changes():
         "approve",
         "CASE-local",
         "approved",
-        district_deltas={"D0000": {"prosperity": 2, "unrest": -1, "services": 4}},
+        district_deltas={"D0000": {"activity": 2, "friction": -1, "services": 4}},
         feature_updates={"F-market": {"status": "active", "condition": 72, "maintenance_due_turn": 5}},
     )
 
     report = dashboard._filed_report_text(result)
 
     assert report.startswith("approved Local changes:")
-    assert "D0000 pros +2" in report
+    assert "D0000 act +2" in report
+    assert "fric -1" in report
     assert "serv +4" in report
     assert "F-market active condition 72 due 5" in report
 
@@ -207,14 +208,14 @@ def test_start_new_game_replaces_rows_and_map_layers(monkeypatch):
     assert controller.status_text == "New game started with seed 99."
 
 
-def test_advance_turn_does_not_generate_week_seven_after_final_audit(monkeypatch):
-    """Verify final-audit saves do not create another docket."""
+def test_advance_turn_after_final_audit_is_idempotent(monkeypatch):
+    """Verify repeated final-audit closes do not mutate gameplay rows."""
 
     controller = dashboard.DashboardController({"state": "state"}, "district_layer", 2026, object())
     controller.status_text = ""
     controller.status_var = dashboard._StatusProxy(controller)
     controller.reload = lambda: None
-    state = rules.CityState(turn=6, status="complete")
+    state = rules.CityState(turn=12, status="complete", audit_stage=2)
     order = []
 
     monkeypatch.setattr(dashboard, "command_insert", lambda paths, action, item_id, target_ids: "CMD-1")
@@ -233,8 +234,106 @@ def test_advance_turn_does_not_generate_week_seven_after_final_audit(monkeypatch
 
     controller.advance_turn()
 
-    assert "docket" not in order
+    assert order == ["command", "rebuild"]
     assert controller.status_text == "Final audit already filed. Scorecard: CONDITIONAL."
+    assert controller.last_receipt is not None
+    assert controller.last_receipt.title.startswith("Final Audit:")
+
+
+def test_advance_turn_records_inline_final_audit_receipt(monkeypatch):
+    """Verify manual week-twelve closure shows the final audit inline."""
+
+    controller = dashboard.DashboardController({"state": "state"}, "district_layer", 2026, object())
+    controller.status_text = ""
+    controller.status_var = dashboard._StatusProxy(controller)
+    controller.reload = lambda: None
+    state = rules.CityState(turn=12)
+    districts = {"D0000": _profile("D0000")}
+    order = []
+
+    monkeypatch.setattr(dashboard, "command_insert", lambda paths, action, item_id, target_ids: "CMD-1")
+    monkeypatch.setattr(dashboard, "command_finish", lambda *args, **kwargs: order.append("command"))
+    monkeypatch.setattr(dashboard, "read_state", lambda paths: state)
+    monkeypatch.setattr(dashboard, "read_docket", lambda paths: [])
+    monkeypatch.setattr(dashboard, "read_districts", lambda paths: districts)
+    monkeypatch.setattr(dashboard, "read_active_features", lambda paths: [])
+    monkeypatch.setattr(dashboard, "read_projects", lambda paths: {})
+    monkeypatch.setattr(dashboard, "write_state", lambda *args, **kwargs: order.append("state"))
+    monkeypatch.setattr(dashboard, "write_projects", lambda *args, **kwargs: order.append("projects"))
+    monkeypatch.setattr(dashboard, "write_district_updates", lambda *args, **kwargs: order.append("districts"))
+    monkeypatch.setattr(dashboard, "write_active_features", lambda *args, **kwargs: order.append("features"))
+    monkeypatch.setattr(dashboard, "generate_docket_rows", lambda *args, **kwargs: order.append("docket"))
+    monkeypatch.setattr(dashboard, "rebuild_output_layers", lambda *args, **kwargs: order.append("rebuild"))
+
+    controller.advance_turn()
+
+    assert state.status == "complete"
+    assert "docket" not in order
+    assert controller.last_receipt is not None
+    assert controller.last_receipt.title.startswith("Final Audit:")
+    assert "Audit" in controller.last_receipt.report
+    assert controller._deadline_running is False
+
+
+def test_completed_game_reloads_inline_final_audit_receipt(monkeypatch):
+    """Verify completed saves keep the final audit visible after reload."""
+
+    controller = dashboard.DashboardController({"state": "state"}, "district_layer", 2026, object())
+    controller.status_text = ""
+    controller.status_var = dashboard._StatusProxy(controller)
+    state = rules.CityState(turn=12, status="complete", audit_stage=2)
+    districts = {"D0000": _profile("D0000")}
+
+    class FakeView:
+        def __init__(self):
+            self.model = None
+
+        def render(self, model):
+            self.model = model
+
+    controller.view = FakeView()
+    monkeypatch.setattr(dashboard, "read_state", lambda paths: state)
+    monkeypatch.setattr(dashboard, "read_districts", lambda paths: districts)
+    monkeypatch.setattr(dashboard, "read_docket", lambda paths: [])
+    monkeypatch.setattr(dashboard, "read_active_features", lambda paths: [])
+    monkeypatch.setattr(dashboard, "has_saved_game", lambda paths: True)
+
+    controller.reload()
+
+    assert controller.view.model.receipt is not None
+    assert controller.view.model.receipt.title.startswith("Final Audit:")
+    assert controller.view.model.ledger_rows[0].value == "12/12 CLOSED"
+
+
+def test_deadline_final_week_records_same_inline_final_audit_receipt(monkeypatch):
+    """Verify timer-driven final closure uses the same inline ending path."""
+
+    controller = dashboard.DashboardController({"districts": "districts", "state": "state"}, "district_layer", 2026, object())
+    controller.status_text = ""
+    controller.status_var = dashboard._StatusProxy(controller)
+    state = rules.CityState(turn=12)
+    districts = {"D0000": _profile("D0000")}
+
+    monkeypatch.setattr(dashboard, "command_insert", lambda paths, action, item_id, target_ids: "CMD-1")
+    monkeypatch.setattr(dashboard, "command_finish", lambda *args, **kwargs: None)
+    monkeypatch.setattr(dashboard, "read_state", lambda paths: state)
+    monkeypatch.setattr(dashboard, "read_docket", lambda paths: [])
+    monkeypatch.setattr(dashboard, "read_districts", lambda paths: districts)
+    monkeypatch.setattr(dashboard, "read_active_features", lambda paths: [])
+    monkeypatch.setattr(dashboard, "read_projects", lambda paths: {})
+    monkeypatch.setattr(dashboard, "write_state", lambda *args, **kwargs: None)
+    monkeypatch.setattr(dashboard, "write_projects", lambda *args, **kwargs: None)
+    monkeypatch.setattr(dashboard, "write_district_updates", lambda *args, **kwargs: None)
+    monkeypatch.setattr(dashboard, "write_active_features", lambda *args, **kwargs: None)
+    monkeypatch.setattr(dashboard, "generate_docket_rows", lambda *args, **kwargs: None)
+    monkeypatch.setattr(dashboard, "rebuild_output_layers", lambda *args, **kwargs: None)
+    controller.reload = lambda: None
+
+    controller.advance_turn(auto=True)
+
+    assert controller.status_text.startswith("Auto-deadline: Final audit:")
+    assert controller.last_receipt is not None
+    assert controller.last_receipt.title.startswith("Final Audit:")
 
 
 def test_prepare_dashboard_session_regenerates_missing_docket_for_saved_game(monkeypatch):
@@ -416,6 +515,138 @@ def test_schema_declares_buyout_identity_district_fields():
     assert fields["last_buyout_report"] == ("TEXT", "Last Buyout Report", 512)
 
 
+def test_schema_declares_renamed_city_health_district_fields():
+    """Verify persisted district health fields use the renamed model."""
+
+    fields = {name: (field_type, alias, length) for name, field_type, alias, length in schema.DISTRICT_FIELDS}
+
+    assert fields["activity"] == ("LONG", "Activity", None)
+    assert fields["friction"] == ("LONG", "Civic Friction", None)
+    assert fields["trust"] == ("LONG", "Trust", None)
+    assert fields["exposure"] == ("LONG", "Exposure", None)
+    for legacy in ("prosperity", "unrest", "culture", "risk"):
+        assert legacy not in fields
+
+
+def test_schema_migrates_legacy_city_health_fields(monkeypatch):
+    """Verify existing boards backfill renamed fields from legacy columns."""
+
+    rows = [
+        {"activity": None, "prosperity": 41, "friction": None, "unrest": 22, "trust": None, "culture": 55, "exposure": None, "risk": 18},
+        {"activity": None, "prosperity": 62, "friction": None, "unrest": 31, "trust": None, "culture": 44, "exposure": None, "risk": 27},
+    ]
+    deleted = []
+
+    class Field:
+        def __init__(self, name):
+            self.name = name
+
+    class FakeUpdateCursor:
+        def __init__(self, _path, fields):
+            self.fields = fields
+            self.index = 0
+            self.current = None
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def __iter__(self):
+            return self
+
+        def __next__(self):
+            if self.index >= len(rows):
+                raise StopIteration
+            self.current = rows[self.index]
+            self.index += 1
+            return [self.current.get(field) for field in self.fields]
+
+        def updateRow(self, values):
+            for field, value in zip(self.fields, values):
+                self.current[field] = value
+
+    monkeypatch.setattr(schema.arcpy, "ListFields", lambda _path: [Field(name) for name in rows[0]], raising=False)
+    monkeypatch.setattr(schema.arcpy, "da", SimpleNamespace(UpdateCursor=FakeUpdateCursor), raising=False)
+    monkeypatch.setattr(schema.arcpy, "management", SimpleNamespace(DeleteField=lambda _path, fields: deleted.extend(fields)), raising=False)
+    monkeypatch.setattr(schema, "_warn", lambda *args: None)
+
+    schema.migrate_legacy_city_health_fields("districts", object())
+
+    assert rows[0]["activity"] == 41
+    assert rows[0]["friction"] == 22
+    assert rows[0]["trust"] == 55
+    assert rows[0]["exposure"] == 18
+    assert deleted == ["prosperity", "unrest", "culture", "risk"]
+
+
+def test_state_storage_writes_renamed_city_health_keys(monkeypatch):
+    """Verify city state persists renamed health keys without legacy rows."""
+
+    rows = []
+    paths = {"state": "state"}
+    state = rules.CityState(activity=61, friction=23, trust=52, exposure=17)
+
+    class FakeInsertCursor:
+        def __init__(self, _path, _fields):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, _exc_type, _exc, _tb):
+            return False
+
+        def insertRow(self, row):
+            rows.append(tuple(row))
+
+    monkeypatch.setattr(store.arcpy, "management", SimpleNamespace(DeleteRows=lambda _path: rows.clear()), raising=False)
+    monkeypatch.setattr(store.arcpy, "da", SimpleNamespace(InsertCursor=FakeInsertCursor), raising=False)
+
+    store.write_state(paths, state)
+
+    keys = {row[0]: row for row in rows}
+    assert keys["activity"][2] == 61
+    assert keys["friction"][2] == 23
+    assert keys["trust"][2] == 52
+    assert keys["exposure"][2] == 17
+    for legacy in ("prosperity", "unrest", "culture", "risk"):
+        assert legacy not in keys
+
+
+def test_state_storage_reads_legacy_city_health_keys(monkeypatch):
+    """Verify legacy state rows hydrate the renamed city health fields."""
+
+    rows = [
+        ("turn", "1", 1),
+        ("prosperity", "61", 61),
+        ("unrest", "23", 23),
+        ("culture", "52", 52),
+        ("risk", "17", 17),
+    ]
+    paths = {"state": "state"}
+
+    class FakeSearchCursor:
+        def __init__(self, _path, _fields):
+            pass
+
+        def __enter__(self):
+            return iter(rows)
+
+        def __exit__(self, _exc_type, _exc, _tb):
+            return False
+
+    monkeypatch.setattr(store.arcpy, "da", SimpleNamespace(SearchCursor=FakeSearchCursor), raising=False)
+
+    restored = store.read_state(paths)
+
+    assert restored.activity == 61
+    assert restored.friction == 23
+    assert restored.trust == 52
+    assert restored.exposure == 17
+
+
 def test_district_storage_round_trips_buyout_transition_state():
     """Verify ArcGIS district rows persist Task 5 identity and conversion fields."""
 
@@ -576,7 +807,7 @@ def test_generate_docket_rows_carries_existing_mandatory_context(monkeypatch):
         priority=3,
         due_turn=4,
         subject_feature_id="F-fire",
-        case_json={"inspection": {"risk": "high"}},
+        case_json={"inspection": {"exposure": "high"}},
     )
 
     class FakeInsertCursor:

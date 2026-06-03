@@ -19,23 +19,24 @@ This file is the quick project status source for Permit Office. It separates the
 - Refresh/cache spike interpretation in `docs/permit-office-refresh-spike-benchmark.md`: main and ArcPy refresh timings were close, while the SDK add-in strategy was slower.
 - 12-week attention-scarce pacing: 2 AP per week, ordinary permit denials cost 0 AP, week 6 is the mid-season audit, and closing week 12 files the final audit.
 - Template-specific unattended-item expiration: missed windows, city momentum, mandatory carryovers, and pending follow-up cases.
-- Hidden district type ledger plus deterministic contested buyout/refusal/conversion rules for low-prosperity districts.
+- Hidden district type ledger plus deterministic contested buyout/refusal/conversion rules for low-activity districts.
 - District-weighted docket generation that varies by seed and district type distribution while preserving mandatory follow-up priority.
 - ArcGIS district identity persistence and district-type-first symbology, with district-name labels.
+- City health now uses Activity, Friction, Trust, Exposure, Services, and Dissatisfaction; legacy district fields are migrated into the renamed persisted fields.
+- Closing week 12 automatically records an inline final audit receipt with PASS/CONDITIONAL/FAIL flavor text.
 
 ## Missing
 
 - Recorded live ArcGIS Pro smoke-test results from `docs/permit-office-prototype-smoke-test.md`.
 - Final cold-start demo instructions for a clean ArcGIS Pro project.
 - Confirmation that map refresh, layer addition, and Tkinter dashboard behavior are reliable on the target presentation machine.
-- Full `pytest` verification in this environment; the current environment cannot spawn `pytest`, so direct smoke calls and `compileall` were used for the district-identity pass.
-- Resolution for the two known direct no-arg smoke failures around `families` dissatisfaction assertions.
+- Final cold-start validation of the legacy ArcGIS field migration on an existing `.gdb`.
 
 ## Iterate Later
 
 - Dashboard layout and copy polish after the live smoke test identifies real friction.
 - Docket template balance and score tuning for a fair 12-week route that can reliably PASS with competent play.
-- Revenue/city-health clarity, help/start/end-game flow, final scorecard auto-display, and report/docket/tab layout polish.
+- Help/start flow, report/docket/tab layout polish, and live scorecard presentation tuning after ArcGIS smoke testing.
 - Deeper symbology and map presentation polish for `PermitDistricts`, `PermitPoints`, `PermitLines`, and `PermitZones`.
 - Playtest whether hidden buyout pressure is legible enough through reports and map symbology without exposing a raw ledger.
 - If live display staleness remains, revisit the ArcPy refresh-only branch as a reliability fix, not as a confirmed speed improvement.
@@ -46,17 +47,14 @@ This file is the quick project status source for Permit Office. It separates the
 Run the active pure Python checks with:
 
 ```bash
-python3 -m pytest tests/test_permit_office_rules.py -q
+python3 -m pytest -q
 ```
 
-If `pytest` is unavailable, the last implementation pass used:
+If the system Python environment does not have `pytest` installed, install the
+development requirements first or run the suite through `uv run pytest -q`.
 
-```bash
-python3 -m compileall toolbox/permit_office toolbox/permit_office_arcgis docs tests
-uv run python -c "from toolbox import arcpy_permit_office_rules as r; print(r.CityState().max_turns, hasattr(r, 'resolve_buyout_round'), hasattr(r, 'resolve_unattended_item'))"
-```
-
-The seed `2026` route is now a 12-week balance target; the six-week route in
+The seed `2026` route is now locked as a 12-week balance target that should end
+with a final audit `PASS`; the six-week route in
 `docs/permit-office-demo-script.md` remains a short ArcGIS smoke path.
 
 Manual ArcGIS validation should follow:

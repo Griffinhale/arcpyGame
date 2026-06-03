@@ -19,18 +19,18 @@ def rebuild_type_ledger(districts: Mapping[str, DistrictProfile] | None) -> dict
         owned = [profile for profile in profiles if getattr(profile, "district_type", "") == dtype]
         holdings = len(owned)
         if owned:
-            capital = sum(max(0, int(getattr(profile, "prosperity", 0) or 0)) for profile in owned) // holdings
+            capital = sum(max(0, int(getattr(profile, "activity", 0) or 0)) for profile in owned) // holdings
             appetite = sum(
                 max(
                     0,
-                    int(getattr(profile, "prosperity", 0) or 0)
+                    int(getattr(profile, "activity", 0) or 0)
                     + int(getattr(profile, "services", 0) or 0)
-                    - int(getattr(profile, "unrest", 0) or 0)
+                    - int(getattr(profile, "friction", 0) or 0)
                 )
                 for profile in owned
             ) // max(1, holdings * 10)
             fatigue = sum(
-                max(0, int(getattr(profile, "unrest", 0) or 0) + int(getattr(profile, "risk", 0) or 0))
+                max(0, int(getattr(profile, "friction", 0) or 0) + int(getattr(profile, "exposure", 0) or 0))
                 for profile in owned
             ) // max(1, holdings * 12)
         else:

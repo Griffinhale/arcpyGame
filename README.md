@@ -53,7 +53,7 @@ filing, approving, delaying, and explaining official decisions.
   grievances, hazards, housing pressure, stakeholder heat, and docket items are
   generated from a seed.
 - **District identity pressure:** district type mix influences dockets, ignored
-  proposals can create hidden momentum, and low-prosperity districts can enter
+  proposals can create hidden momentum, and low-activity districts can enter
   contested buyout transitions from stronger neighbors.
 - **Dry municipal absurdism:** the interface is built like a cluttered permit
   desk, with filed reports and audit language instead of fantasy UI tropes.
@@ -104,8 +104,8 @@ do not replace a live ArcGIS Pro smoke test.
 Permit Office is a playable prototype. It has generated districts, seeded city
 detail, weighted docket templates, inspections, approvals, no-AP ordinary
 denials, mitigation, incidents, maintenance follow-ups, recurring economy,
-projects, audits, map symbology, district identity/buyout pressure, and a
-Tkinter dashboard.
+projects, audits, map symbology, district identity/buyout pressure, an inline
+final audit receipt, and a Tkinter dashboard.
 
 The next public-readiness work is focused on clarity and balance: better help
 and start flows, clearer action/exhibit semantics, more legible city-health

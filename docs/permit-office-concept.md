@@ -42,14 +42,14 @@ The main player experience should be a simple sim loop with surprising but legib
 
 ## Metrics and Audit
 
-Likely audit backbone:
+Audit backbone:
 
-- prosperity
-- unrest
-- health or risk
-- culture
+- activity
+- friction
+- exposure
+- trust
 
-Secondary or later metrics may include:
+Secondary and internal support systems include:
 
 - money
 - population

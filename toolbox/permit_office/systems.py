@@ -31,28 +31,28 @@ def apply_stat_cascade(profile: DistrictProfile) -> dict[str, int]:
             _adjust_dissatisfaction(profile, SERVICE_GAP_GROUPS.get(service, ()), 1)
         elif gap <= 10 and profile.services >= 55:
             _adjust_dissatisfaction(profile, SERVICE_GAP_GROUPS.get(service, ()), -1)
-    risk_delta = unrest_delta = 0
+    exposure_delta = friction_delta = 0
     for hazard, band in _normalize_service_map(profile.hazards, HAZARD_TYPES, maximum=4, include_zeros=False).items():
         rule = HAZARD_RULES[hazard]
-        if band >= rule.risk_threshold:
-            risk_delta += band - rule.risk_threshold + 1
+        if band >= rule.exposure_threshold:
+            exposure_delta += band - rule.exposure_threshold + 1
             _adjust_dissatisfaction(profile, rule.affected_groups, 1 if band < 4 else 2)
-        if band >= rule.unrest_threshold:
-            unrest_delta += 1
+        if band >= rule.friction_threshold:
+            friction_delta += 1
     pressure = max((int(value or 0) for value in (profile.displacement or {}).values()), default=0)
     if pressure >= 2:
         _adjust_dissatisfaction(profile, ("renters", "families", "elders", "artists"), 1 if pressure < 4 else 2)
-    if profile.culture >= 60 and profile.incident_state == "none":
+    if profile.trust >= 60 and profile.incident_state == "none":
         group, band = _top_dissatisfaction(profile)
         if 0 < band < DISSATISFACTION_INCIDENT_THRESHOLD:
             _adjust_dissatisfaction(profile, (group,), -1)
-    if profile.risk >= 70 or profile.unrest >= 70:
+    if profile.exposure >= 70 or profile.friction >= 70:
         group, _band = _top_presence_group(profile)
         _adjust_dissatisfaction(profile, (group,), 1)
         if profile.population > 100:
             profile.population = max(100, profile.population - max(4, profile.population // 150))
-    if risk_delta or unrest_delta:
-        _apply_profile_delta(profile, {"risk": risk_delta, "unrest": unrest_delta})
+    if exposure_delta or friction_delta:
+        _apply_profile_delta(profile, {"exposure": exposure_delta, "friction": friction_delta})
     normalize_profile(profile)
     out = {metric: getattr(profile, metric) - before[metric] for metric in DISTRICT_METRICS}
     out["population"] = profile.population - before["population"]
@@ -376,19 +376,19 @@ def _service_hazard_mitigation(profile: DistrictProfile) -> dict[str, int]:
 
 
 def _apply_hazard_pressure(profile: DistrictProfile) -> None:
-    """Apply risk, unrest, and grievance pressure from active hazards."""
+    """Apply exposure, friction, and grievance pressure from active hazards."""
 
-    risk_delta = 0
-    unrest_delta = 0
+    exposure_delta = 0
+    friction_delta = 0
     for hazard, band in _normalize_service_map(profile.hazards, HAZARD_TYPES, maximum=4, include_zeros=False).items():
         rule = HAZARD_RULES[hazard]
-        if band >= rule.risk_threshold:
-            risk_delta += band - rule.risk_threshold + 1
+        if band >= rule.exposure_threshold:
+            exposure_delta += band - rule.exposure_threshold + 1
             _adjust_dissatisfaction(profile, rule.affected_groups, 1 if band < 4 else 2)
-        if band >= rule.unrest_threshold:
-            unrest_delta += 1
-    if risk_delta or unrest_delta:
-        _apply_profile_delta(profile, {"risk": risk_delta, "unrest": unrest_delta})
+        if band >= rule.friction_threshold:
+            friction_delta += 1
+    if exposure_delta or friction_delta:
+        _apply_profile_delta(profile, {"exposure": exposure_delta, "friction": friction_delta})
 
 
 def _apply_housing_effects(profile: DistrictProfile, effects: dict[str, int]) -> None:
@@ -533,14 +533,14 @@ def _apply_recurring_economy(
     """Compute turn revenue, upkeep, and net money from districts and features."""
 
     district_revenue = 0
-    # District revenue rewards healthy population centers and penalizes risk or
-    # unrest before feature-specific economics are added.
+    # District revenue rewards healthy population centers and penalizes exposure or
+    # friction before feature-specific economics are added.
     for profile in districts.values():
         raw = profile.population // 1000
-        raw += max(0, profile.prosperity - 40) // 25
-        raw += max(0, profile.culture - 55) // 35
-        raw -= max(0, profile.unrest - 55) // 30
-        raw -= max(0, profile.risk - 55) // 30
+        raw += max(0, profile.activity - 40) // 25
+        raw += max(0, profile.trust - 55) // 35
+        raw -= max(0, profile.friction - 55) // 30
+        raw -= max(0, profile.exposure - 55) // 30
         district_revenue += max(0, min(2, raw))
     district_revenue = min(24, district_revenue)
 

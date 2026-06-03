@@ -143,15 +143,15 @@ def test_adjust_type_ledger_mutates_caller_ledger():
     assert ledger["residential"]["holdings"] == 1
 
 
-def _district_for_buyout(cell_id, dtype, prosperity, adjacent):
+def _district_for_buyout(cell_id, dtype, activity, adjacent):
     profile = rules.DistrictProfile(
         cell_id=cell_id,
         name=cell_id,
         population=1000,
-        prosperity=prosperity,
-        unrest=25,
-        culture=35,
-        risk=20,
+        activity=activity,
+        friction=25,
+        trust=35,
+        exposure=20,
         services=40,
         district_type=dtype,
         adjacent_cell_ids=list(adjacent),
@@ -165,10 +165,10 @@ def _incident_profile(cell_id, group="renters", band=4):
         cell_id=cell_id,
         name=f"{cell_id} Incident Row",
         population=1200,
-        prosperity=42,
-        unrest=35,
-        culture=35,
-        risk=30,
+        activity=42,
+        friction=35,
+        trust=35,
+        exposure=30,
         services=35,
         district_type="residential",
         population_mix={group: 3},
@@ -222,7 +222,7 @@ def test_buyout_single_bidder_starts_contested_transition():
     assert "entered contested buyout" in result.report.lower()
     assert districts["A"].last_buyout_report == (
         "A entered contested buyout from B; "
-        "mercantile bid cleared local leverage after weak prosperity and pressure."
+        "mercantile bid cleared local leverage after weak activity and pressure."
     )
 
 
@@ -243,7 +243,7 @@ def test_buyout_reports_explain_target_bidder_and_reason():
     assert any(phrase in result.report.lower() for phrase in ("bid", "leverage", "contested", "refused"))
     assert result.report == (
         "A entered contested buyout from B; "
-        "mercantile bid cleared local leverage after weak prosperity and pressure."
+        "mercantile bid cleared local leverage after weak activity and pressure."
     )
 
 
@@ -385,7 +385,7 @@ def test_failed_ordinary_approval_does_not_reduce_buyout_pressure():
     districts = {
         "D0000": _district_for_buyout("D0000", "natural", 35, []),
     }
-    districts["D0000"].risk = 90
+    districts["D0000"].exposure = 90
     districts["D0000"].services = 5
     districts["D0000"].identity_state = "contested"
     districts["D0000"].buyout_pressure = 5
@@ -436,7 +436,7 @@ def test_expiration_reports_hint_at_original_policy():
 def test_city_momentum_expiration_adds_pressure_and_report():
     state = rules.CityState()
     districts = {profile.cell_id: profile for profile in rules.generate_district_profiles(rows=1, cols=1, seed=2026)}
-    districts["D0000"].prosperity = 42
+    districts["D0000"].activity = 42
     item = rules.DocketItem("expire-rezone", "mixed_use_rezoning", "Mixed-Use Rezoning Petition", "POLYGON", 1)
     item.target_cell_ids = ["D0000"]
 
@@ -452,7 +452,7 @@ def test_city_momentum_expiration_adds_pressure_and_report():
 def test_bad_momentum_can_spawn_different_followup_template():
     state = rules.CityState()
     districts = {profile.cell_id: profile for profile in rules.generate_district_profiles(rows=1, cols=1, seed=2026)}
-    districts["D0000"].risk = 70
+    districts["D0000"].exposure = 70
     item = rules.DocketItem("expire-vendor", "street_vendor_compact", "Street Vendor Compact", "POINT", 1)
     item.target_cell_ids = ["D0000"]
 
@@ -561,7 +561,7 @@ def test_carried_mandatory_item_reopens_with_context_next_docket():
         priority=3,
         due_turn=4,
         subject_feature_id="F-fire",
-        case_json={"inspection": {"risk": "high"}},
+        case_json={"inspection": {"exposure": "high"}},
     )
 
     docket = rules.generate_docket(turn=2, seed=2026, count=4, carried_items=[carried])
@@ -919,16 +919,16 @@ def _route_targets(item, profiles):
             value += 100
         if profile.district_type in template.bad_fit_types:
             value -= 100
-        if template.base_effects.get("risk", 0) < 0:
-            value += profile.risk
-        if template.base_effects.get("unrest", 0) < 0:
-            value += profile.unrest
+        if template.base_effects.get("exposure", 0) < 0:
+            value += profile.exposure
+        if template.base_effects.get("friction", 0) < 0:
+            value += profile.friction
         if template.base_effects.get("services", 0) > 0:
             value += 100 - profile.services
-        if template.base_effects.get("prosperity", 0) > 0:
-            value += 50 - profile.prosperity
-        if template.base_effects.get("culture", 0) > 0:
-            value += 50 - profile.culture
+        if template.base_effects.get("activity", 0) > 0:
+            value += 50 - profile.activity
+        if template.base_effects.get("trust", 0) > 0:
+            value += 50 - profile.trust
         return (-value, profile.cell_id)
 
     count = 2 if item.geometry_type == "LINE" else 1
@@ -1001,10 +1001,10 @@ def test_inspect_item_adds_target_population_context_when_available():
         cell_id="D0000",
         name="Petition Row",
         population=1200,
-        prosperity=45,
-        unrest=25,
-        culture=40,
-        risk=25,
+        activity=45,
+        friction=25,
+        trust=40,
+        exposure=25,
         services=55,
         district_type="residential",
         population_mix={"families": 3, "renters": 2, "commuters": 1},
@@ -1057,7 +1057,7 @@ def test_approve_applies_costs_district_deltas_and_city_delta():
     assert "Certain effects:" in result.report
     assert "immediate city delta" in result.report
     assert "spillover D0001, D0100 gets" in result.report
-    assert "Risk/side effects:" in result.report
+    assert "Exposure/side effects:" in result.report
     assert "recurring budget" in result.report
     assert result.city_delta
     assert profiles["D0000"].display_state in rules.DISPLAY_STATES
@@ -1069,10 +1069,10 @@ def test_approval_adjusts_population_pressure_and_local_grievance():
         cell_id="D0000",
         name="Applicant Yard",
         population=1000,
-        prosperity=50,
-        unrest=20,
-        culture=35,
-        risk=20,
+        activity=50,
+        friction=20,
+        trust=35,
+        exposure=20,
         services=60,
         district_type="residential",
         population_mix={"families": 2, "commuters": 1},
@@ -1152,10 +1152,10 @@ def test_service_archetype_updates_services_and_land_use_overlay():
         cell_id="D0000",
         name="Undercovered Row",
         population=1800,
-        prosperity=45,
-        unrest=20,
-        culture=35,
-        risk=55,
+        activity=45,
+        friction=20,
+        trust=35,
+        exposure=55,
         services=15,
         district_type="residential",
         population_mix={"families": 3, "commuters": 1},
@@ -1227,16 +1227,16 @@ def test_stat_cascade_services_hazards_housing_and_culture_roles():
     hazard = rules.DistrictProfile("D0001", "Hazard Row", 1200, 45, 20, 30, 20, 80, "residential", population_mix={"families": 3}, hazards={"heat": 3})
     rules.normalize_profile(hazard)
     rules.apply_stat_cascade(hazard)
-    assert hazard.risk > 20
-    assert hazard.unrest > 20
+    assert hazard.exposure > 20
+    assert hazard.friction > 20
     assert hazard.dissatisfaction["families"] > 0
 
-    cultured = rules.DistrictProfile("D0002", "Civic Row", 1200, 45, 20, 70, 20, 80, "residential", population_mix={"families": 3}, dissatisfaction={"families": 2})
-    rules.normalize_profile(cultured)
-    rules.apply_stat_cascade(cultured)
-    assert cultured.dissatisfaction["families"] < 2
+    high_trust = rules.DistrictProfile("D0002", "Civic Row", 1200, 45, 20, 70, 20, 80, "residential", population_mix={"families": 3}, dissatisfaction={"families": 2})
+    rules.normalize_profile(high_trust)
+    rules.apply_stat_cascade(high_trust)
+    assert high_trust.dissatisfaction["families"] < 2
 
-    exposed = rules.DistrictProfile("D0003", "Risk Row", 1500, 45, 70, 30, 72, 80, "residential", population_mix={"families": 3}, dissatisfaction={"families": 0})
+    exposed = rules.DistrictProfile("D0003", "Exposure Row", 1500, 45, 70, 30, 72, 80, "residential", population_mix={"families": 3}, dissatisfaction={"families": 0})
     rules.normalize_profile(exposed)
     before = exposed.population
     rules.apply_stat_cascade(exposed)
@@ -1260,7 +1260,7 @@ def test_incident_visibility_and_resolution_uses_existing_civic_language():
     assert rules._surface_new_incidents(state, [profile]) == 1
     assert profile.incident_state in {"complaints", "petition", "protest", "strike", "noncompliance"}
     assert profile.incident_group == "renters"
-    assert state.unrest == 21
+    assert state.friction == 21
     assert rules._surface_new_incidents(state, [profile]) == 0
     docket = rules.generate_docket(1, count=1, districts=profiles, state=state)
     assert docket[0].template_id == rules.CIVIC_INCIDENT_TEMPLATE_ID
@@ -1279,10 +1279,10 @@ def test_land_use_overlay_is_applied_to_successful_zone_approval():
         cell_id="D0000",
         name="Rezoning Row",
         population=1300,
-        prosperity=45,
-        unrest=20,
-        culture=35,
-        risk=25,
+        activity=45,
+        friction=20,
+        trust=35,
+        exposure=25,
         services=60,
         district_type="residential",
     )
@@ -1328,8 +1328,8 @@ def test_mitigation_reduces_bad_side_effects_and_costs_more():
     assert base.ok is True
     assert mitigated.ok is True
     assert mitigated_state.money < base_state.money
-    assert mitigated.district_deltas["D0000"].get("risk", 0) <= base.district_deltas["D0000"].get("risk", 0)
-    assert mitigated.district_deltas["D0000"].get("unrest", 0) <= base.district_deltas["D0000"].get("unrest", 0)
+    assert mitigated.district_deltas["D0000"].get("exposure", 0) <= base.district_deltas["D0000"].get("exposure", 0)
+    assert mitigated.district_deltas["D0000"].get("friction", 0) <= base.district_deltas["D0000"].get("friction", 0)
 
 
 def test_deny_does_not_spend_ap_but_still_resolves_case():
@@ -1409,10 +1409,10 @@ def test_high_local_grievance_generates_civic_incident_followup():
         cell_id="D0000",
         name="Appeal Steps",
         population=1400,
-        prosperity=40,
-        unrest=35,
-        culture=35,
-        risk=30,
+        activity=40,
+        friction=35,
+        trust=35,
+        exposure=30,
         services=35,
         district_type="residential",
         population_mix={"renters": 3, "families": 1},
@@ -1435,10 +1435,10 @@ def test_civic_incident_response_lowers_dissatisfaction_and_clears_incident():
         cell_id="D0000",
         name="Formal Complaint Green",
         population=1400,
-        prosperity=40,
-        unrest=35,
-        culture=35,
-        risk=30,
+        activity=40,
+        friction=35,
+        trust=35,
+        exposure=30,
         services=35,
         district_type="residential",
         population_mix={"renters": 3, "families": 1},
@@ -1471,10 +1471,10 @@ def test_high_risk_bad_fit_approval_can_fail():
         cell_id="D0000",
         name="Low Service Reserve",
         population=1000,
-        prosperity=35,
-        unrest=30,
-        culture=30,
-        risk=90,
+        activity=35,
+        friction=30,
+        trust=30,
+        exposure=90,
         services=5,
         district_type="natural",
     )
@@ -1503,10 +1503,10 @@ def test_land_use_conflict_increases_failure_chance():
         cell_id="D0000",
         name="Market Fit",
         population=1000,
-        prosperity=45,
-        unrest=20,
-        culture=35,
-        risk=25,
+        activity=45,
+        friction=20,
+        trust=35,
+        exposure=25,
         services=60,
         district_type="mercantile",
     )
@@ -1514,10 +1514,10 @@ def test_land_use_conflict_increases_failure_chance():
         cell_id="D0001",
         name="Reserve Conflict",
         population=1000,
-        prosperity=45,
-        unrest=20,
-        culture=35,
-        risk=25,
+        activity=45,
+        friction=20,
+        trust=35,
+        exposure=25,
         services=60,
         district_type="natural",
     )
@@ -1629,10 +1629,10 @@ def test_advance_turn_applies_population_drift_and_unresolved_local_grievance():
         cell_id="D0000",
         name="Growing Annex",
         population=1200,
-        prosperity=70,
-        unrest=20,
-        culture=40,
-        risk=20,
+        activity=70,
+        friction=20,
+        trust=40,
+        exposure=20,
         services=60,
         district_type="residential",
         population_mix={"families": 2, "renters": 1},
@@ -1712,13 +1712,31 @@ def test_week_close_escalates_from_daily_pressure_and_resets():
 
 def test_scorecard_returns_audit_grade_and_metrics():
     """Verify scorecard reports a grade and key city metrics."""
-    state = rules.CityState(prosperity=70, culture=60, unrest=20, risk=15, money=45)
+    state = rules.CityState(activity=70, trust=60, friction=20, exposure=15, money=45)
 
     grade, report = rules.scorecard(state)
 
     assert grade == "PASS"
-    assert "prosperity=70" in report
-    assert "risk=15" in report
+    assert "activity=70" in report
+    assert "exposure=15" in report
+
+
+def test_scorecard_reports_renamed_city_health_metrics():
+    """Verify the city-health model uses the renamed canonical metric names."""
+
+    state = rules.CityState(activity=70, trust=60, friction=20, exposure=15, money=45)
+
+    grade, report = rules.scorecard(state)
+
+    assert grade == "PASS"
+    assert "activity=70" in report
+    assert "trust=60" in report
+    assert "friction=20" in report
+    assert "exposure=15" in report
+    assert "prosperity=" not in report
+    assert "unrest=" not in report
+    assert "culture=" not in report
+    assert "risk=" not in report
 
 
 def test_long_term_catalogs_validate_new_city_system_records():
@@ -1767,10 +1785,10 @@ def test_housing_effects_recompute_vacancy_and_displacement_pressure():
         cell_id="D0000",
         name="Lease Row",
         population=950,
-        prosperity=70,
-        unrest=25,
-        culture=66,
-        risk=20,
+        activity=70,
+        friction=25,
+        trust=66,
+        exposure=20,
         services=55,
         district_type="residential",
         population_mix={"renters": 3, "artists": 2, "families": 2},
@@ -1813,10 +1831,10 @@ def test_project_chain_spawns_due_step_and_advances_on_resolution():
         cell_id="D0000",
         name="Buildout Row",
         population=1200,
-        prosperity=50,
-        unrest=20,
-        culture=40,
-        risk=20,
+        activity=50,
+        friction=20,
+        trust=40,
+        exposure=20,
         services=65,
         district_type="residential",
     )
@@ -1870,10 +1888,10 @@ def test_inspection_creates_evidence_violations_deadlines_and_compliance_outcome
         cell_id="D0000",
         name="Inspection Row",
         population=1000,
-        prosperity=35,
-        unrest=35,
-        culture=30,
-        risk=70,
+        activity=35,
+        friction=35,
+        trust=30,
+        exposure=70,
         services=20,
         district_type="residential",
         dissatisfaction={"renters": 3},

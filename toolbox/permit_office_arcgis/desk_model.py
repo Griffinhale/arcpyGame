@@ -454,10 +454,10 @@ def _format_effects(effects) -> str:
     """Format metric deltas for a compact bucket."""
 
     labels = {
-        "prosperity": "activity",
-        "unrest": "friction",
-        "culture": "trust",
-        "risk": "risk",
+        "activity": "activity",
+        "friction": "friction",
+        "trust": "trust",
+        "exposure": "exposure",
         "services": "service",
     }
     parts = [f"{labels.get(metric, metric[:4])} {amount:+d}" for metric, amount in sorted((effects or {}).items()) if amount]
@@ -468,9 +468,9 @@ def _delta_tone(effects) -> str:
     """Return a tone for a metric delta map."""
 
     effects = effects or {}
-    if effects.get("risk", 0) > 0 or effects.get("unrest", 0) > 1:
+    if effects.get("exposure", 0) > 0 or effects.get("friction", 0) > 1:
         return "bad"
-    if effects.get("risk", 0) < 0 or effects.get("prosperity", 0) > 0 or effects.get("culture", 0) > 0:
+    if effects.get("exposure", 0) < 0 or effects.get("activity", 0) > 0 or effects.get("trust", 0) > 0:
         return "good"
     if any(value for value in effects.values()):
         return "watch"
@@ -619,17 +619,18 @@ def _ledger_rows(state, districts, active_features=None, docket=None) -> tuple[L
     housing_summary = _housing_pressure_summary(districts.values() if isinstance(districts, dict) else districts)
     maintenance = _maintenance_summary(active_features) if active_features is not None else _maintenance_count_from_state(state)
     pressure = _pressure_cause_summary(districts)
+    week_value = f"{state.turn}/{state.max_turns} CLOSED" if state.status == "complete" or state.turn > state.max_turns else f"{state.turn}/{state.max_turns}"
     return (
-        LedgerRow("Week", f"{state.turn}/{state.max_turns}", "neutral", _meter(state.turn, state.max_turns)),
+        LedgerRow("Week", week_value, "neutral", _meter(state.turn, state.max_turns)),
         LedgerRow("AP", f"{state.ap}/{state.max_ap}", "good" if state.ap else "watch", _meter(state.ap, state.max_ap)),
         LedgerRow("Money", f"${state.money}", "good" if state.money >= 20 else "watch"),
         LedgerRow("Heat", heat, "bad" if heat != "none" else "neutral"),
         LedgerRow("Audit", _short_audit_grade(audit_grade), "bad" if audit_grade == "FAIL" else "watch" if audit_grade == "CONDITIONAL" else "good"),
         LedgerRow("Pressure", pressure, "watch" if pressure != "stable" else "neutral"),
-        LedgerRow("Prosperity", str(state.prosperity), "good", state.prosperity),
-        LedgerRow("Unrest", str(state.unrest), "bad" if state.unrest >= 50 else "watch", state.unrest),
-        LedgerRow("Culture", str(state.culture), "good", state.culture),
-        LedgerRow("Risk", str(state.risk), "bad" if state.risk >= 50 else "watch", state.risk),
+        LedgerRow("Activity", str(state.activity), "good", state.activity),
+        LedgerRow("Friction", str(state.friction), "bad" if state.friction >= 50 else "watch", state.friction),
+        LedgerRow("Trust", str(state.trust), "good", state.trust),
+        LedgerRow("Exposure", str(state.exposure), "bad" if state.exposure >= 50 else "watch", state.exposure),
         LedgerRow("Economy", f"rev ${state.last_revenue}; up ${state.last_upkeep}; net {state.last_net:+d}", "watch" if state.last_net < 0 else "good" if state.last_net > 0 else "neutral"),
         LedgerRow("Services", service_summary, "bad" if "critical" in service_summary else "watch" if service_summary != "none" else "neutral"),
         LedgerRow("Hazards", hazard_summary, "watch" if hazard_summary != "no active hazards" else "neutral"),

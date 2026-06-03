@@ -127,16 +127,37 @@ def test_ledger_rows_surface_non_money_city_health():
     assert ledger["Maintenance"].value == "2 active"
 
 
+def test_ledger_rows_use_renamed_city_health_vitals():
+    """Verify the desk model surfaces renamed city-health vitals."""
+
+    item, districts = _vendor_case()
+
+    model = build_desk_model(
+        rules.CityState(activity=63, friction=28, trust=47, exposure=19),
+        districts,
+        [item],
+        item.item_id,
+    )
+    ledger = {row.label: row for row in model.ledger_rows}
+
+    assert ledger["Activity"].value == "63"
+    assert ledger["Friction"].value == "28"
+    assert ledger["Trust"].value == "47"
+    assert ledger["Exposure"].value == "19"
+    for legacy in ("Prosperity", "Unrest", "Culture", "Risk"):
+        assert legacy not in ledger
+
+
 def test_headline_metrics_hide_generic_city_builder_stats():
     """Verify headline banner focuses on desk triage signals."""
 
     labels = [label for label, _display in HEADLINE_METRICS]
 
     assert labels == ["Week", "AP", "Money", "Heat", "Audit", "Pressure"]
-    assert "Prosperity" not in labels
-    assert "Unrest" not in labels
-    assert "Culture" not in labels
-    assert "Risk" not in labels
+    assert "Activity" not in labels
+    assert "Friction" not in labels
+    assert "Trust" not in labels
+    assert "Exposure" not in labels
 
 
 def test_ledger_derives_maintenance_from_active_features_when_available():

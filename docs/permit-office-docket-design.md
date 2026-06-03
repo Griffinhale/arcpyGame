@@ -41,15 +41,15 @@ Potential permit families to draw from:
 The six-week demo uses these ten normal templates, with three items per week:
 
 - `connector_corridor`: transit/roads, line, access gain with construction failure risk.
-- `procession_route`: event, line, culture gain with crowd-control risk.
-- `utility_expansion_trench`: utility, line, risk reduction with outage risk.
-- `natural_reserve_conversion`: land use, polygon, culture/risk upside with boundary dispute risk.
-- `mixed_use_rezoning`: development, polygon, prosperity gain with zoning appeal risk.
+- `procession_route`: event, line, trust gain with crowd-control risk.
+- `utility_expansion_trench`: utility, line, exposure reduction with outage risk.
+- `natural_reserve_conversion`: land use, polygon, trust/exposure upside with boundary dispute risk.
+- `mixed_use_rezoning`: development, polygon, activity gain with zoning appeal risk.
 - `child_development_park_annex`: education/parks, point, family services with staffing risk.
-- `street_vendor_compact`: business/vendor, point, prosperity/culture with unlicensed spillover risk.
+- `street_vendor_compact`: business/vendor, point, activity/trust with unlicensed spillover risk.
 - `contractor_renovation_waiver`: residential, point, faster work with inspection failure risk.
-- `fire_budget_escalation`: department/public safety, polygon, risk reduction with coverage gap risk.
-- `public_art_museum_grant`: culture/branding, point, culture gain with procurement scandal risk.
+- `fire_budget_escalation`: department/public safety, polygon, exposure reduction with coverage gap risk.
+- `public_art_museum_grant`: culture/branding, point, trust gain with procurement scandal risk.
 
 `unpermitted_followthrough` is a generated enforcement template. It appears when a stakeholder group's heat reaches the threshold.
 
@@ -66,7 +66,7 @@ Approved permits can still fail. Failure chance is deterministic from seed and d
 - inspection risk band
 - district archetype fit
 - service capacity
-- current district risk
+- current district exposure
 - mitigation
 
 The first district archetype set is residential, mercantile, industrial, civic, academic, and natural.

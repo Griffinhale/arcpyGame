@@ -80,7 +80,7 @@ def _apply_momentum_pressure(
     for cid in affected:
         profile = districts[cid]
         profile.buyout_pressure = max(0, min(100, profile.buyout_pressure + pressure))
-        if profile.prosperity < 50:
+        if profile.activity < 50:
             profile.identity_state = "vulnerable"
         normalize_profile(profile)
     return pressure
@@ -96,7 +96,7 @@ def _followup_from_bad_momentum(
 
     if not affected:
         return ""
-    worst = max((districts[cid].risk + districts[cid].unrest for cid in affected), default=0)
+    worst = max((districts[cid].exposure + districts[cid].friction for cid in affected), default=0)
     rng = random.Random(f"momentum:{seed}:{template_id}:{','.join(affected)}:{worst}")
     if worst + rng.randrange(0, 40) < 80:
         return ""

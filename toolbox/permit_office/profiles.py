@@ -25,21 +25,21 @@ def generate_district_profiles(rows: int = 5, cols: int = 5, seed: int = 2026) -
             cell_id = f"D{row:02d}{col:02d}"
             dtype = DISTRICT_TYPES[(row + col + rng.randrange(len(DISTRICT_TYPES))) % len(DISTRICT_TYPES)]
             base = 30 + rng.randrange(36)
-            prosperity = max(10, min(90, base + rng.randrange(-12, 13)))
-            unrest = max(5, min(80, 28 + rng.randrange(-14, 15)))
-            culture = max(10, min(90, 34 + rng.randrange(-14, 22)))
-            risk = max(5, min(80, 26 + rng.randrange(-12, 18)))
+            activity = max(10, min(90, base + rng.randrange(-12, 13)))
+            friction = max(5, min(80, 28 + rng.randrange(-14, 15)))
+            trust = max(10, min(90, 34 + rng.randrange(-14, 22)))
+            exposure = max(5, min(80, 26 + rng.randrange(-12, 18)))
             services = max(5, min(90, 35 + rng.randrange(-15, 16)))
             population_mix = _initial_population_mix(dtype, rng)
-            dissatisfaction = _initial_dissatisfaction(population_mix, prosperity, unrest, risk, services)
+            dissatisfaction = _initial_dissatisfaction(population_mix, activity, friction, exposure, services)
             profile = DistrictProfile(
                 cell_id=cell_id,
                 name=f"{rng.choice(prefixes)} {rng.choice(suffixes)}",
                 population=650 + rng.randrange(2200),
-                prosperity=prosperity,
-                unrest=unrest,
-                culture=culture,
-                risk=risk,
+                activity=activity,
+                friction=friction,
+                trust=trust,
+                exposure=exposure,
                 services=services,
                 district_type=dtype,
                 population_mix=population_mix,
@@ -146,7 +146,7 @@ def _weighted_template_pool(
 ) -> list[str]:
     """Return deterministic proposal templates weighted by district mix."""
 
-    rng = random.Random(f"docket:{seed}:{turn}:{_district_mix_key(districts)}:{state.prosperity if state else 0}:{state.unrest if state else 0}:{state.risk if state else 0}")
+    rng = random.Random(f"docket:{seed}:{turn}:{_district_mix_key(districts)}:{state.activity if state else 0}:{state.friction if state else 0}:{state.exposure if state else 0}")
     weights = {template_id: 1 for template_id in DEMO_TEMPLATE_IDS}
     for template_id in scenario.docket_priority:
         if template_id in weights:
@@ -161,11 +161,11 @@ def _weighted_template_pool(
                     weights[template_id] += 2
                 if profile.district_type in template.bad_fit_types:
                     weights[template_id] = max(1, weights[template_id] - 1)
-                if profile.prosperity < 45 and template.category in {"development", "business", "residential"}:
+                if profile.activity < 45 and template.category in {"development", "business", "residential"}:
                     weights[template_id] += 2
-                if profile.unrest > 45 and template.is_incident:
+                if profile.friction > 45 and template.is_incident:
                     weights[template_id] += 3
-                if profile.risk > 45 and template.category in {"utility", "department", "compliance"}:
+                if profile.exposure > 45 and template.category in {"utility", "department", "compliance"}:
                     weights[template_id] += 2
     chosen: list[str] = []
     available = dict(weights)
@@ -458,7 +458,7 @@ def inspection_case_for_item(
     rule = INSPECTION_RULES.get(template.template_id, INSPECTION_RULES["default"])
     profiles = list(target_profiles)
     rng = random.Random(f"{seed}:{item.item_id}:evidence")
-    avg_risk = sum(profile.risk for profile in profiles) / max(1, len(profiles))
+    avg_exposure = sum(profile.exposure for profile in profiles) / max(1, len(profiles))
     avg_services = sum(profile.services for profile in profiles) / max(1, len(profiles))
     max_grievance = max((_top_dissatisfaction(profile)[1] for profile in profiles), default=0)
 
@@ -478,12 +478,12 @@ def inspection_case_for_item(
             else:
                 note = "Service capacity can absorb the request."
         elif code == "unsafe_work":
-            if avg_risk >= 65:
+            if avg_exposure >= 65:
                 severity = "critical"
-                note = "Site risk is high enough to require follow-through."
-            elif avg_risk >= 45:
+                note = "Site exposure is high enough to require follow-through."
+            elif avg_exposure >= 45:
                 severity = "warning"
-                note = "Site risk is visible in the inspection worksheet."
+                note = "Site exposure is visible in the inspection worksheet."
             else:
                 note = "No acute site safety concern is visible."
         elif code == "public_nuisance":
@@ -560,13 +560,13 @@ def _inspection_summary_text(inspection_case: dict[str, object]) -> str:
 def _inspection_consequence_text(template: DocketTemplate, inspection_case: dict[str, object]) -> str:
     """Format sharper post-inspection consequence hints for previews."""
 
-    risk = str(inspection_case.get("risk_band") or "unknown").lower()
+    exposure = str(inspection_case.get("risk_band") or "unknown").lower()
     violations = inspection_case.get("violations", [])
-    if risk == "high":
-        base = f"{template.failure_mode or 'approval failure'} is a live risk"
-    elif risk == "medium":
+    if exposure == "high":
+        base = f"{template.failure_mode or 'approval failure'} is a live exposure"
+    elif exposure == "medium":
         base = f"{template.failure_mode or 'side effects'} should be watched"
-    elif risk == "low":
+    elif exposure == "low":
         base = "no acute side-effect flag"
     else:
         base = "side-effect review is incomplete"

@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 
-CORE_METRICS = ("prosperity", "unrest", "culture", "risk")
+CORE_METRICS = ("activity", "friction", "trust", "exposure")
 DISTRICT_METRICS = CORE_METRICS + ("services",)
 
 DISTRICT_TYPES = ("residential", "mercantile", "industrial", "civic", "academic", "natural")
@@ -92,10 +92,10 @@ DISPLAY_STATES = (
     "hazard",
     "housing_pressure",
     "economic_growth",
-    "prosperous",
-    "restless",
-    "cultured",
-    "at_risk",
+    "high_activity",
+    "high_friction",
+    "high_trust",
+    "high_exposure",
     "strained",
     "aggrieved",
 )
@@ -161,8 +161,8 @@ class HazardRule:
 
     hazard_type: str
     affected_groups: tuple[str, ...]
-    risk_threshold: int = 2
-    unrest_threshold: int = 3
+    exposure_threshold: int = 2
+    friction_threshold: int = 3
     decay: int = 1
     source_effects: dict[str, int] = field(default_factory=dict)
     mitigation_service_types: dict[str, int] = field(default_factory=dict)
@@ -275,10 +275,10 @@ class DistrictProfile:
     cell_id: str
     name: str
     population: int
-    prosperity: int
-    unrest: int
-    culture: int
-    risk: int
+    activity: int
+    friction: int
+    trust: int
+    exposure: int
     services: int
     district_type: str
     prior_district_type: str = ""
@@ -318,10 +318,10 @@ class CityState:
     audit_stage: int = 0
     status: str = "playing"
     last_report: str = ""
-    prosperity: int = 50
-    unrest: int = 20
-    culture: int = 35
-    risk: int = 25
+    activity: int = 50
+    friction: int = 20
+    trust: int = 35
+    exposure: int = 25
     scenario_id: str = "default"
     stakeholder_heat: dict[str, int] = field(default_factory=dict)
     last_revenue: int = 0

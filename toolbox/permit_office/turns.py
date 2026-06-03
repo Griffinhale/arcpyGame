@@ -104,14 +104,14 @@ def _scenario_score(
     """Calculate audit score using either default or scenario-specific weights."""
 
     if scenario.scenario_id == "default":
-        return state.prosperity + state.culture - state.unrest - state.risk + state.money // 3
+        return state.activity + state.trust - state.friction - state.exposure + state.money // 3
     weights = scenario.score_weights or SCENARIO_RULES["default"].score_weights
     score = 0
     metric_values = {
-        "prosperity": state.prosperity,
-        "culture": state.culture,
-        "unrest": state.unrest,
-        "risk": state.risk,
+        "activity": state.activity,
+        "trust": state.trust,
+        "friction": state.friction,
+        "exposure": state.exposure,
         "money": state.money // 3,
     }
     # Scenario weights can inspect district-level systems, so fold those
@@ -346,20 +346,20 @@ def generate_audit_result(
         findings.append(AuditFinding("money.low", "warning", "money", "Budget is below the operating reserve.", -10))
     if state.last_net < 0:
         findings.append(AuditFinding("money.net_negative", "warning", "economy", "Recurring economy is losing money.", -5))
-    if state.unrest >= 70:
-        findings.append(AuditFinding("city.unrest", "critical", "city", "Citywide unrest is audit-critical.", -20))
-    if state.risk >= 70:
-        findings.append(AuditFinding("city.risk", "critical", "city", "Citywide risk is audit-critical.", -20))
+    if state.friction >= 70:
+        findings.append(AuditFinding("city.friction", "critical", "city", "Citywide friction is audit-critical.", -20))
+    if state.exposure >= 70:
+        findings.append(AuditFinding("city.exposure", "critical", "city", "Citywide exposure is audit-critical.", -20))
 
     # Audit findings aggregate citywide signals but keep severe district facts visible.
     for profile in profiles:
         normalize_profile(profile)
         if profile.incident_state != "none":
             incident_count += 1
-        if profile.risk >= 70:
-            findings.append(AuditFinding(f"risk.{profile.cell_id}", "critical", "district", f"{profile.cell_id} risk is critical.", -12))
-        if profile.unrest >= 70:
-            findings.append(AuditFinding(f"unrest.{profile.cell_id}", "critical", "district", f"{profile.cell_id} unrest is critical.", -12))
+        if profile.exposure >= 70:
+            findings.append(AuditFinding(f"exposure.{profile.cell_id}", "critical", "district", f"{profile.cell_id} exposure is critical.", -12))
+        if profile.friction >= 70:
+            findings.append(AuditFinding(f"friction.{profile.cell_id}", "critical", "district", f"{profile.cell_id} friction is critical.", -12))
         for service, gap in profile.service_gap.items():
             if gap >= AUDIT_THRESHOLDS["service_gap_critical"]:
                 service_gap_total += 1
@@ -467,8 +467,8 @@ def generate_audit_result(
     finding_text = "no findings" if not findings else f"{len(findings)} finding(s), {critical_count} critical"
     scenario_text = "" if state.scenario_id == "default" else f"; scenario={state.scenario_id}; priorities={', '.join(scenario.audit_priorities)}"
     report = (
-        f"Audit {grade}: score={score}; prosperity={state.prosperity}, unrest={state.unrest}, "
-        f"culture={state.culture}, risk={state.risk}, money={state.money}; net={state.last_net}{scenario_text}; {finding_text}."
+        f"Audit {grade}: score={score}; activity={state.activity}, friction={state.friction}, "
+        f"trust={state.trust}, exposure={state.exposure}, money={state.money}; net={state.last_net}{scenario_text}; {finding_text}."
     )
     return AuditResult(grade, score, tuple(findings), report)
 

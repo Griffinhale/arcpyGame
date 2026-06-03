@@ -564,7 +564,7 @@ class PermitDeskView:
 
         # Vitals: the four core meters that have no home in the banner.
         by_label = {row.label: row for row in self.model.ledger_rows}
-        vitals = [by_label[name] for name in ("Prosperity", "Unrest", "Culture", "Risk") if name in by_label]
+        vitals = [by_label[name] for name in ("Activity", "Friction", "Trust", "Exposure") if name in by_label]
         if vitals:
             c.create_text(inner_x0, y, text="VITALS", anchor="nw", fill=Palette.MUTED, font=self._font(8, "bold"))
             y += 18
@@ -575,7 +575,7 @@ class PermitDeskView:
             y += 10
 
         # System rows: label + left-grouped value so each reads as one unit.
-        banner_labels = {"Week", "AP", "Money", "Prosperity", "Unrest", "Culture", "Risk", "Heat"}
+        banner_labels = {"Week", "AP", "Money", "Activity", "Friction", "Trust", "Exposure", "Heat"}
         rows = [r for r in self.model.ledger_rows if r.label not in banner_labels]
         value_x = inner_x0 + 104
         shown = 0
@@ -863,10 +863,10 @@ def _status_color(status):
     return Palette.MUTED
 
 
-def _risk_color(risk):
-    """Map inspection risk bands to a palette color."""
+def _risk_color(exposure):
+    """Map inspection exposure bands to a palette color."""
 
-    value = (risk or "").lower()
+    value = (exposure or "").lower()
     if value == "high":
         return Palette.RED
     if value == "medium":
