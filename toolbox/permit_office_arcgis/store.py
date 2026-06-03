@@ -59,6 +59,13 @@ def create_district_board(paths, seed, messages):
         "risk",
         "services",
         "district_type",
+        "prior_district_type",
+        "identity_state",
+        "contesting_cell_id",
+        "contesting_type",
+        "transition_due_turn",
+        "buyout_pressure",
+        "last_buyout_report",
         "land_use",
         "zoning_overlay",
         "display_state",
@@ -93,6 +100,13 @@ def create_district_board(paths, seed, messages):
                 profile.risk,
                 profile.services,
                 profile.district_type,
+                profile.prior_district_type,
+                profile.identity_state,
+                profile.contesting_cell_id,
+                profile.contesting_type,
+                profile.transition_due_turn,
+                profile.buyout_pressure,
+                profile.last_buyout_report,
                 profile.land_use,
                 profile.zoning_overlay,
                 profile.display_state,
@@ -280,6 +294,13 @@ def read_districts(paths):
         "risk",
         "services",
         "district_type",
+        "prior_district_type",
+        "identity_state",
+        "contesting_cell_id",
+        "contesting_type",
+        "transition_due_turn",
+        "buyout_pressure",
+        "last_buyout_report",
         "land_use",
         "zoning_overlay",
         "display_state",
@@ -309,22 +330,29 @@ def read_districts(paths):
                 risk=int(row[6] or 0),
                 services=int(row[7] or 0),
                 district_type=row[8] or "mercantile",
-                land_use=row[9] or "",
-                zoning_overlay=row[10] or "",
-                display_state=row[11] or "stable",
-                service_gap=decode_service_gap(row[12]),
-                adjacent_cell_ids=[part for part in (row[13] or "").split(",") if part],
-                network_access=decode_json(row[14]),
-                hazards=decode_json(row[15]),
-                housing_capacity=int(row[16] or 0),
-                affordability=int(row[17] or 0),
-                vacancy_rate=int(row[18] or 0),
-                displacement=decode_json(row[19]),
-                population_mix=decode_group_bands(row[20], maximum=3),
-                dissatisfaction=decode_group_bands(row[21], maximum=4),
-                incident_state=row[22] or "none",
-                incident_group=row[23] or "",
-                public_profile=row[24] or "",
+                prior_district_type=row[9] or "",
+                identity_state=row[10] or "stable",
+                contesting_cell_id=row[11] or "",
+                contesting_type=row[12] or "",
+                transition_due_turn=int(row[13] or 0),
+                buyout_pressure=int(row[14] or 0),
+                last_buyout_report=row[15] or "",
+                land_use=row[16] or "",
+                zoning_overlay=row[17] or "",
+                display_state=row[18] or "stable",
+                service_gap=decode_service_gap(row[19]),
+                adjacent_cell_ids=[part for part in (row[20] or "").split(",") if part],
+                network_access=decode_json(row[21]),
+                hazards=decode_json(row[22]),
+                housing_capacity=int(row[23] or 0),
+                affordability=int(row[24] or 0),
+                vacancy_rate=int(row[25] or 0),
+                displacement=decode_json(row[26]),
+                population_mix=decode_group_bands(row[27], maximum=3),
+                dissatisfaction=decode_group_bands(row[28], maximum=4),
+                incident_state=row[29] or "none",
+                incident_group=row[30] or "",
+                public_profile=row[31] or "",
             )
             rules.normalize_profile(profile)
             out[profile.cell_id] = profile
@@ -346,6 +374,14 @@ def write_district_updates(paths, districts, report, affected_ids=None):
         "culture",
         "risk",
         "services",
+        "district_type",
+        "prior_district_type",
+        "identity_state",
+        "contesting_cell_id",
+        "contesting_type",
+        "transition_due_turn",
+        "buyout_pressure",
+        "last_buyout_report",
         "land_use",
         "zoning_overlay",
         "display_state",
@@ -377,24 +413,32 @@ def write_district_updates(paths, districts, report, affected_ids=None):
             row[4] = profile.culture
             row[5] = profile.risk
             row[6] = profile.services
-            row[7] = profile.land_use
-            row[8] = profile.zoning_overlay
-            row[9] = profile.display_state
-            row[10] = encode_service_gap(profile.service_gap)
-            row[11] = ",".join(profile.adjacent_cell_ids)
-            row[12] = encode_json(profile.network_access, limit=1024)
-            row[13] = encode_json(profile.hazards, limit=1024)
-            row[14] = profile.housing_capacity
-            row[15] = profile.affordability
-            row[16] = profile.vacancy_rate
-            row[17] = encode_json(profile.displacement, limit=1024)
-            row[18] = encode_group_bands(profile.population_mix, maximum=3)
-            row[19] = encode_group_bands(profile.dissatisfaction, maximum=4)
-            row[20] = profile.incident_state
-            row[21] = profile.incident_group
-            row[22] = profile.public_profile
+            row[7] = profile.district_type
+            row[8] = profile.prior_district_type
+            row[9] = profile.identity_state
+            row[10] = profile.contesting_cell_id
+            row[11] = profile.contesting_type
+            row[12] = profile.transition_due_turn
+            row[13] = profile.buyout_pressure
+            row[14] = profile.last_buyout_report[:512]
+            row[15] = profile.land_use
+            row[16] = profile.zoning_overlay
+            row[17] = profile.display_state
+            row[18] = encode_service_gap(profile.service_gap)
+            row[19] = ",".join(profile.adjacent_cell_ids)
+            row[20] = encode_json(profile.network_access, limit=1024)
+            row[21] = encode_json(profile.hazards, limit=1024)
+            row[22] = profile.housing_capacity
+            row[23] = profile.affordability
+            row[24] = profile.vacancy_rate
+            row[25] = encode_json(profile.displacement, limit=1024)
+            row[26] = encode_group_bands(profile.population_mix, maximum=3)
+            row[27] = encode_group_bands(profile.dissatisfaction, maximum=4)
+            row[28] = profile.incident_state
+            row[29] = profile.incident_group
+            row[30] = profile.public_profile
             if cid in affected:
-                row[23] = report[:512]
+                row[31] = report[:512]
             cursor.updateRow(row)
 
 

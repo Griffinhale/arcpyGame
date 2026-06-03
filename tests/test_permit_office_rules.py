@@ -257,7 +257,7 @@ def test_contested_transition_cancels_when_target_stabilizes():
     assert districts["A"].identity_state == "stable"
 
 
-def test_successful_attention_reduces_buyout_pressure_on_target():
+def test_unmitigated_ordinary_approval_reduces_buyout_pressure_by_two():
     state = rules.CityState(money=100)
     districts = {
         "D0000": _district_for_buyout("D0000", "residential", 42, []),
@@ -272,10 +272,57 @@ def test_successful_attention_reduces_buyout_pressure_on_target():
         1,
     )
 
+    result = rules.resolve_decision(state, item, districts, "approve", ["D0000"], seed=2026)
+
+    assert result.ok is True
+    assert districts["D0000"].buyout_pressure == 3
+
+
+def test_mitigated_ordinary_approval_reduces_buyout_pressure_by_three():
+    state = rules.CityState(money=100)
+    districts = {
+        "D0000": _district_for_buyout("D0000", "residential", 42, []),
+    }
+    districts["D0000"].identity_state = "contested"
+    districts["D0000"].buyout_pressure = 5
+    item = rules.DocketItem(
+        "stabilize-annex",
+        "child_development_park_annex",
+        rules.TEMPLATES["child_development_park_annex"].title,
+        "POINT",
+        1,
+        risk_band="low",
+    )
+
     result = rules.resolve_decision(state, item, districts, "approve_mitigated", ["D0000"], seed=2026, mitigated=True)
 
     assert result.ok is True
-    assert districts["D0000"].buyout_pressure < 5
+    assert districts["D0000"].buyout_pressure == 2
+
+
+def test_failed_ordinary_approval_does_not_reduce_buyout_pressure():
+    state = rules.CityState(money=100, ap=3)
+    districts = {
+        "D0000": _district_for_buyout("D0000", "natural", 35, []),
+    }
+    districts["D0000"].risk = 90
+    districts["D0000"].services = 5
+    districts["D0000"].identity_state = "contested"
+    districts["D0000"].buyout_pressure = 5
+    item = rules.DocketItem(
+        "failed-stabilization",
+        "contractor_renovation_waiver",
+        rules.TEMPLATES["contractor_renovation_waiver"].title,
+        "POINT",
+        1,
+        risk_band="high",
+    )
+
+    result = rules.resolve_decision(state, item, districts, "approve", ["D0000"], seed=2026)
+
+    assert result.ok is True
+    assert result.failure_triggered is True
+    assert districts["D0000"].buyout_pressure == 5
 
 
 def test_missed_window_expiration_closes_original_without_pressure():

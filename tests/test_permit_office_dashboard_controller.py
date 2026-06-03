@@ -17,6 +17,7 @@ sys.modules.setdefault(
 
 from toolbox import arcpy_permit_office_rules as rules
 from toolbox.permit_office_arcgis import dashboard
+from toolbox.permit_office_arcgis import schema
 from toolbox.permit_office_arcgis import store
 
 
@@ -399,6 +400,106 @@ def test_state_persists_type_ledger_json(monkeypatch):
     restored = store.read_state(paths)
 
     assert restored.type_ledger == state.type_ledger
+
+
+def test_schema_declares_buyout_identity_district_fields():
+    """Verify district storage has columns for Task 5 buyout transition state."""
+
+    fields = {name: (field_type, alias, length) for name, field_type, alias, length in schema.DISTRICT_FIELDS}
+
+    assert fields["prior_district_type"] == ("TEXT", "Prior District Type", 32)
+    assert fields["identity_state"] == ("TEXT", "Identity State", 32)
+    assert fields["contesting_cell_id"] == ("TEXT", "Contesting District ID", 32)
+    assert fields["contesting_type"] == ("TEXT", "Contesting District Type", 32)
+    assert fields["transition_due_turn"] == ("LONG", "Transition Due Turn", None)
+    assert fields["buyout_pressure"] == ("LONG", "Buyout Pressure", None)
+    assert fields["last_buyout_report"] == ("TEXT", "Last Buyout Report", 512)
+
+
+def test_district_storage_round_trips_buyout_transition_state():
+    """Verify ArcGIS district rows persist Task 5 identity and conversion fields."""
+
+    paths = {"districts": "districts"}
+    rows = [
+        {"cell_id": "A"},
+        {"cell_id": "B"},
+    ]
+    converted = rules.DistrictProfile("A", "Converted Row", 1000, 46, 30, 35, 20, 40, "mercantile")
+    converted.prior_district_type = "residential"
+    converted.identity_state = "converted"
+    converted.buyout_pressure = 3
+    converted.last_buyout_report = "A converted from residential to mercantile."
+    contested = rules.DistrictProfile("B", "Contested Row", 1000, 38, 25, 35, 20, 40, "residential")
+    contested.identity_state = "contested"
+    contested.contesting_cell_id = "A"
+    contested.contesting_type = "mercantile"
+    contested.transition_due_turn = 4
+    contested.buyout_pressure = 6
+    contested.last_buyout_report = "B entered contested buyout from A."
+    districts = {"A": converted, "B": contested}
+
+    class FakeSearchCursor:
+        """Dictionary-backed SearchCursor for district storage tests."""
+
+        def __init__(self, _path, fields):
+            self.projected = [[row.get(field) for field in fields] for row in rows]
+
+        def __enter__(self):
+            return iter(self.projected)
+
+        def __exit__(self, *_args):
+            return False
+
+    class FakeUpdateCursor:
+        """Dictionary-backed UpdateCursor for district storage tests."""
+
+        def __init__(self, _path, fields):
+            self.fields = fields
+            self.index = 0
+            self.current = None
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def __iter__(self):
+            return self
+
+        def __next__(self):
+            if self.index >= len(rows):
+                raise StopIteration
+            self.current = rows[self.index]
+            self.index += 1
+            return [self.current.get(field) for field in self.fields]
+
+        def updateRow(self, values):
+            for field, value in zip(self.fields, values):
+                self.current[field] = value
+
+    previous_da = getattr(store.arcpy, "da", None)
+    store.arcpy.da = SimpleNamespace(SearchCursor=FakeSearchCursor, UpdateCursor=FakeUpdateCursor)
+    try:
+        store.write_district_updates(paths, districts, "Buyout report")
+        restored = store.read_districts(paths)
+    finally:
+        if previous_da is None:
+            delattr(store.arcpy, "da")
+        else:
+            store.arcpy.da = previous_da
+
+    assert rows[0]["district_type"] == "mercantile"
+    assert restored["A"].district_type == "mercantile"
+    assert restored["A"].prior_district_type == "residential"
+    assert restored["A"].identity_state == "converted"
+    assert restored["A"].buyout_pressure == 3
+    assert restored["A"].last_buyout_report == "A converted from residential to mercantile."
+    assert restored["B"].identity_state == "contested"
+    assert restored["B"].contesting_cell_id == "A"
+    assert restored["B"].contesting_type == "mercantile"
+    assert restored["B"].transition_due_turn == 4
+    assert restored["B"].buyout_pressure == 6
 
 
 def test_generate_docket_rows_persists_consumed_pending_followups(monkeypatch):
