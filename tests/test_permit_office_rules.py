@@ -127,6 +127,55 @@ def test_pending_momentum_followup_appears_as_different_next_docket_item():
     assert "Follow-up from unattended city momentum" in docket[0].preview_text
 
 
+def test_city_momentum_week_close_applies_one_ignore_reaction():
+    profile = rules.DistrictProfile(
+        "D0000",
+        "Rezoning Row",
+        1200,
+        42,
+        20,
+        35,
+        25,
+        50,
+        "residential",
+        population_mix={"developers": 1},
+        dissatisfaction={"developers": 0},
+    )
+    rules.normalize_profile(profile)
+    state = rules.CityState()
+    item = rules.DocketItem(
+        "expire-rezone",
+        "mixed_use_rezoning",
+        "Mixed-Use Rezoning Petition",
+        "POLYGON",
+        1,
+        target_cell_ids=["D0000"],
+    )
+
+    rules.advance_turn_result(state, [item], {"D0000": profile})
+
+    assert item.status == "expired"
+    assert profile.buyout_pressure == 1
+    assert profile.identity_state == "vulnerable"
+    assert profile.dissatisfaction["developers"] == 1
+
+
+def test_mandatory_followup_carries_without_pending_momentum_queue():
+    state = rules.CityState()
+    item = rules.DocketItem(
+        "fire-followup",
+        "fire_budget_escalation",
+        "Fire Budget Escalation",
+        "POLYGON",
+        1,
+    )
+
+    rules.advance_turn_result(state, [item], {})
+
+    assert item.status == "carried"
+    assert state.pending_followups == {}
+
+
 def test_feature_archetype_catalog_is_valid_and_covers_all_templates():
     """Verify templates resolve to valid feature archetypes and metadata."""
     assert rules.validate_feature_catalog() == []

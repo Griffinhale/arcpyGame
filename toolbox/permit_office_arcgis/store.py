@@ -138,6 +138,7 @@ def write_state(paths, state):
         "last_net": (str(state.last_net), state.last_net),
         "maintenance_backlog": (str(state.maintenance_backlog), state.maintenance_backlog),
         "stakeholder_memory": (json.dumps(state.stakeholder_memory, sort_keys=True), None),
+        "pending_followups": (json.dumps(state.pending_followups, sort_keys=True), None),
         "week_day": (str(getattr(state, "week_day", 0)), getattr(state, "week_day", 0)),
         "daily_pressure": (json.dumps(getattr(state, "daily_pressure", {}) or {}, sort_keys=True), None),
     }
@@ -173,6 +174,12 @@ def read_state(paths):
             state.stakeholder_memory = {str(key): int(value) for key, value in parsed.items()}
         except Exception:
             state.stakeholder_memory = {}
+    if "pending_followups" in values and values["pending_followups"][0]:
+        try:
+            parsed = json.loads(values["pending_followups"][0])
+            state.pending_followups = {str(key): str(value) for key, value in parsed.items()}
+        except Exception:
+            state.pending_followups = {}
     if "daily_pressure" in values and values["daily_pressure"][0]:
         try:
             parsed = json.loads(values["daily_pressure"][0])
@@ -642,6 +649,7 @@ def generate_docket_rows(paths, seed, messages):
                 encode_json(item.case_json),
             ])
     seed_docket_proposals(paths, items, seed, messages)
+    write_state(paths, state)
     _log(messages, "DOCKET", f"generated {len(items)} docket item(s) for turn {state.turn}")
     return items
 

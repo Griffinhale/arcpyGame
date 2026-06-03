@@ -6,7 +6,7 @@ from dataclasses import dataclass
 import random
 
 from .catalogs import CIVIC_INCIDENT_TEMPLATE_ID, ENFORCEMENT_TEMPLATE_ID, TEMPLATES
-from .helpers import _adjust_heat, _apply_population_reaction, normalize_profile
+from .helpers import _adjust_heat, normalize_profile
 from .models import CityState, DistrictProfile, DocketItem, DocketTemplate
 
 
@@ -82,7 +82,6 @@ def _apply_momentum_pressure(
         profile.buyout_pressure = max(0, min(100, profile.buyout_pressure + pressure))
         if profile.prosperity < 50:
             profile.identity_state = "vulnerable"
-        _apply_population_reaction(template, [profile], "ignore", False)
         normalize_profile(profile)
     return pressure
 

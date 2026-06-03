@@ -206,7 +206,7 @@ def advance_turn_result(
                 carried += 1
             elif item.status == "expired":
                 expired += 1
-            if expiration.followup_template_id:
+            if expiration.policy == "momentum_with_followup_risk" and expiration.followup_template_id:
                 state.pending_followups[item.item_id] = expiration.followup_template_id
             if projects and item.project_id in projects:
                 project = projects[item.project_id]

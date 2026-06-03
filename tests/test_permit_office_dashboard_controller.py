@@ -258,7 +258,8 @@ def test_generate_docket_rows_uses_rules_default_four_item_docket(monkeypatch):
     """Verify persisted ArcGIS dockets follow the rules default row count."""
 
     inserted = []
-    paths = {"docket": "docket"}
+    saved_states = []
+    paths = {"docket": "docket", "state": "state"}
     state = rules.CityState()
     districts = {profile.cell_id: profile for profile in rules.generate_district_profiles(seed=2026)}
 
@@ -281,6 +282,7 @@ def test_generate_docket_rows_uses_rules_default_four_item_docket(monkeypatch):
     monkeypatch.setattr(store, "read_districts", lambda _paths: districts)
     monkeypatch.setattr(store, "read_active_features", lambda _paths: [])
     monkeypatch.setattr(store, "read_projects", lambda _paths: {})
+    monkeypatch.setattr(store, "write_state", lambda _paths, state_arg: saved_states.append(dict(state_arg.pending_followups)))
     monkeypatch.setattr(store, "_log", lambda *args: None)
     monkeypatch.setattr(store.arcpy, "management", SimpleNamespace(DeleteRows=lambda _path: None), raising=False)
     monkeypatch.setattr(store.arcpy, "da", SimpleNamespace(InsertCursor=FakeInsertCursor), raising=False)
@@ -289,6 +291,109 @@ def test_generate_docket_rows_uses_rules_default_four_item_docket(monkeypatch):
     items = store.generate_docket_rows(paths, 2026, object())
 
     assert len(items) == 4
+    assert len(inserted) == 4
+    assert saved_states == [{}]
+
+
+def test_state_persists_pending_followups_json(monkeypatch):
+    """Verify ArcGIS state rows round-trip pending momentum follow-ups."""
+
+    rows = []
+    paths = {"state": "state"}
+    state = rules.CityState()
+    state.pending_followups = {
+        "expire-vendor": rules.CIVIC_INCIDENT_TEMPLATE_ID,
+        "expire-site": rules.ENFORCEMENT_TEMPLATE_ID,
+    }
+
+    class FakeInsertCursor:
+        """Minimal InsertCursor stand-in for state rows."""
+
+        def __init__(self, _path, _fields):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, _exc_type, _exc, _tb):
+            return False
+
+        def insertRow(self, row):
+            rows.append(tuple(row))
+
+    class FakeSearchCursor:
+        """Minimal SearchCursor stand-in for state rows."""
+
+        def __init__(self, _path, _fields):
+            pass
+
+        def __enter__(self):
+            return iter(rows)
+
+        def __exit__(self, _exc_type, _exc, _tb):
+            return False
+
+    monkeypatch.setattr(store.arcpy, "management", SimpleNamespace(DeleteRows=lambda _path: rows.clear()), raising=False)
+    monkeypatch.setattr(
+        store.arcpy,
+        "da",
+        SimpleNamespace(InsertCursor=FakeInsertCursor, SearchCursor=FakeSearchCursor),
+        raising=False,
+    )
+
+    store.write_state(paths, state)
+    restored = store.read_state(paths)
+
+    assert restored.pending_followups == state.pending_followups
+
+
+def test_generate_docket_rows_persists_consumed_pending_followups(monkeypatch):
+    """Verify generated momentum rows are removed from saved state."""
+
+    inserted = []
+    saved_states = []
+    paths = {"docket": "docket", "state": "state"}
+    state = rules.CityState()
+    state.pending_followups = {
+        f"expire-{idx}": rules.CIVIC_INCIDENT_TEMPLATE_ID
+        for idx in range(5)
+    }
+
+    class FakeInsertCursor:
+        """Minimal InsertCursor stand-in that records docket rows."""
+
+        def __init__(self, _path, _fields):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, _exc_type, _exc, _tb):
+            return False
+
+        def insertRow(self, row):
+            inserted.append(row)
+
+    monkeypatch.setattr(store, "read_state", lambda _paths: state)
+    monkeypatch.setattr(store, "read_districts", lambda _paths: {})
+    monkeypatch.setattr(store, "read_active_features", lambda _paths: [])
+    monkeypatch.setattr(store, "read_projects", lambda _paths: {})
+    monkeypatch.setattr(store, "write_state", lambda _paths, state_arg: saved_states.append(dict(state_arg.pending_followups)))
+    monkeypatch.setattr(store, "_log", lambda *args: None)
+    monkeypatch.setattr(store.arcpy, "management", SimpleNamespace(DeleteRows=lambda _path: None), raising=False)
+    monkeypatch.setattr(store.arcpy, "da", SimpleNamespace(InsertCursor=FakeInsertCursor), raising=False)
+    monkeypatch.setattr("toolbox.permit_office_arcgis.geometry.seed_docket_proposals", lambda *args: None)
+
+    items = store.generate_docket_rows(paths, 2026, object())
+
+    assert [item.origin_item_id for item in items] == [
+        "momentum:expire-0",
+        "momentum:expire-1",
+        "momentum:expire-2",
+        "momentum:expire-3",
+    ]
+    assert state.pending_followups == {"expire-4": rules.CIVIC_INCIDENT_TEMPLATE_ID}
+    assert saved_states == [{"expire-4": rules.CIVIC_INCIDENT_TEMPLATE_ID}]
     assert len(inserted) == 4
 
 
