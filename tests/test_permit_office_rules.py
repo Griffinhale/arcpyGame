@@ -143,6 +143,122 @@ def test_adjust_type_ledger_mutates_caller_ledger():
     assert ledger["residential"]["holdings"] == 1
 
 
+def _district_for_buyout(cell_id, dtype, prosperity, adjacent):
+    profile = rules.DistrictProfile(
+        cell_id=cell_id,
+        name=cell_id,
+        population=1000,
+        prosperity=prosperity,
+        unrest=25,
+        culture=35,
+        risk=20,
+        services=40,
+        district_type=dtype,
+        adjacent_cell_ids=list(adjacent),
+    )
+    rules.normalize_profile(profile)
+    return profile
+
+
+def test_buyout_no_eligible_target_does_nothing():
+    state = rules.CityState()
+    districts = {
+        "A": _district_for_buyout("A", "residential", 60, ["B"]),
+        "B": _district_for_buyout("B", "mercantile", 70, ["A"]),
+    }
+    ledger = rules.rebuild_type_ledger(districts)
+
+    result = rules.resolve_buyout_round(state, districts, ledger, seed=2026)
+
+    assert result.started == []
+    assert districts["A"].identity_state == "stable"
+    assert districts["B"].identity_state == "stable"
+
+
+def test_buyout_single_bidder_starts_contested_transition():
+    state = rules.CityState()
+    districts = {
+        "A": _district_for_buyout("A", "residential", 35, ["B"]),
+        "B": _district_for_buyout("B", "mercantile", 78, ["A"]),
+    }
+    ledger = rules.rebuild_type_ledger(districts)
+    ledger["mercantile"]["capital"] = 100
+    ledger["mercantile"]["appetite"] = 20
+
+    result = rules.resolve_buyout_round(state, districts, ledger, seed=2026)
+
+    assert result.started == ["A"]
+    assert districts["A"].identity_state == "contested"
+    assert districts["A"].contesting_cell_id == "B"
+    assert districts["A"].contesting_type == "mercantile"
+    assert districts["A"].transition_due_turn == state.turn + 1
+    assert "entered contested buyout" in result.report.lower()
+
+
+def test_contested_transition_converts_when_pressure_remains_high():
+    state = rules.CityState(turn=2)
+    target = _district_for_buyout("A", "residential", 32, ["B"])
+    target.identity_state = "contested"
+    target.contesting_cell_id = "B"
+    target.contesting_type = "mercantile"
+    target.transition_due_turn = 2
+    target.buyout_pressure = 5
+    districts = {
+        "A": target,
+        "B": _district_for_buyout("B", "mercantile", 80, ["A"]),
+    }
+    ledger = rules.rebuild_type_ledger(districts)
+
+    result = rules.resolve_contested_transitions(state, districts, ledger)
+
+    assert result.converted == ["A"]
+    assert districts["A"].district_type == "mercantile"
+    assert districts["A"].prior_district_type == "residential"
+    assert districts["A"].identity_state == "converted"
+
+
+def test_contested_transition_cancels_when_target_stabilizes():
+    state = rules.CityState(turn=2)
+    target = _district_for_buyout("A", "residential", 57, ["B"])
+    target.identity_state = "contested"
+    target.contesting_cell_id = "B"
+    target.contesting_type = "mercantile"
+    target.transition_due_turn = 2
+    target.buyout_pressure = 0
+    districts = {
+        "A": target,
+        "B": _district_for_buyout("B", "mercantile", 80, ["A"]),
+    }
+    ledger = rules.rebuild_type_ledger(districts)
+
+    result = rules.resolve_contested_transitions(state, districts, ledger)
+
+    assert result.cancelled == ["A"]
+    assert districts["A"].district_type == "residential"
+    assert districts["A"].identity_state == "stable"
+
+
+def test_successful_attention_reduces_buyout_pressure_on_target():
+    state = rules.CityState(money=100)
+    districts = {
+        "D0000": _district_for_buyout("D0000", "residential", 42, []),
+    }
+    districts["D0000"].identity_state = "contested"
+    districts["D0000"].buyout_pressure = 5
+    item = rules.DocketItem(
+        "stabilize-annex",
+        "child_development_park_annex",
+        rules.TEMPLATES["child_development_park_annex"].title,
+        "POINT",
+        1,
+    )
+
+    result = rules.resolve_decision(state, item, districts, "approve_mitigated", ["D0000"], seed=2026, mitigated=True)
+
+    assert result.ok is True
+    assert districts["D0000"].buyout_pressure < 5
+
+
 def test_missed_window_expiration_closes_original_without_pressure():
     state = rules.CityState()
     districts = {profile.cell_id: profile for profile in rules.generate_district_profiles(rows=1, cols=1, seed=2026)}
@@ -230,6 +346,22 @@ def test_city_momentum_week_close_applies_one_ignore_reaction():
     assert profile.buyout_pressure == 1
     assert profile.identity_state == "vulnerable"
     assert profile.dissatisfaction["developers"] == 1
+
+
+def test_week_close_can_start_buyout_transition_from_unattended_pressure():
+    state = rules.CityState()
+    districts = {
+        "A": _district_for_buyout("A", "residential", 35, ["B"]),
+        "B": _district_for_buyout("B", "mercantile", 82, ["A"]),
+    }
+    item = rules.DocketItem("ignored-rezone", "mixed_use_rezoning", "Mixed-Use Rezoning Petition", "POLYGON", 1)
+    item.target_cell_ids = ["A"]
+
+    result = rules.advance_turn_result(state, [item], districts)
+
+    assert state.turn == 2
+    assert districts["A"].identity_state in {"vulnerable", "contested"}
+    assert "expired" in result.report.lower()
 
 
 def test_mandatory_followup_carries_without_pending_momentum_queue():

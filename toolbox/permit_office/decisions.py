@@ -9,6 +9,7 @@ from .models import *
 from .catalogs import *
 from .helpers import *
 from .profiles import inspect_item, inspection_case_for_item
+from .buyouts import reduce_buyout_pressure
 from .systems import (
     advance_project_from_item,
     apply_stat_cascade,
@@ -217,6 +218,10 @@ def resolve_decision(
         long_term_deltas = apply_template_long_term_effects(template, [districts[cid] for cid in targets], mitigated)
         for cid, delta in long_term_deltas.items():
             _merge_delta(district_deltas.setdefault(cid, {}), delta)
+    if not failure_triggered:
+        for cid in targets:
+            reduction = 3 if mitigated else 2
+            reduce_buyout_pressure(districts[cid], reduction)
     affected_ids = targets + spillovers
     for cid in affected_ids:
         cascade_delta = apply_stat_cascade(districts[cid])

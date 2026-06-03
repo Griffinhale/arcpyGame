@@ -8,6 +8,8 @@ from .models import *
 from .catalogs import *
 from .helpers import *
 from .expiration import resolve_unattended_item
+from .buyouts import resolve_buyout_round, resolve_contested_transitions
+from .type_pressure import read_type_ledger, write_type_ledger
 from .systems import (
     _advance_feature_lifecycle,
     _apply_recurring_economy,
@@ -235,6 +237,14 @@ def advance_turn_result(
         for profile in districts.values():
             population_delta += _advance_population_pressure(profile)
         new_incidents = _surface_new_incidents(state, districts.values())
+        ledger = read_type_ledger(state, districts)
+        transition_result = resolve_contested_transitions(state, districts, ledger)
+        buyout_result = resolve_buyout_round(state, districts, ledger, seed=2026)
+        write_type_ledger(state, ledger)
+        if transition_result.report:
+            system_notes.append(transition_result.report)
+        if buyout_result.report:
+            system_notes.append(buyout_result.report)
     final_week = state.turn >= state.max_turns
     if not final_week:
         state.turn += 1
