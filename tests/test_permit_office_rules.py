@@ -220,6 +220,26 @@ def test_carried_mandatory_item_reopens_with_context_next_docket():
     assert carried.turn == 1
 
 
+def test_carried_and_pending_same_template_have_unique_item_ids():
+    state = rules.CityState()
+    state.pending_followups["expire-vendor"] = rules.CIVIC_INCIDENT_TEMPLATE_ID
+    carried = rules.DocketItem(
+        "incident-carried",
+        rules.CIVIC_INCIDENT_TEMPLATE_ID,
+        "Civic Incident Response",
+        "POINT",
+        1,
+        status="carried",
+    )
+
+    docket = rules.generate_docket(turn=2, seed=2026, count=4, state=state, carried_items=[carried])
+
+    assert docket[0].template_id == rules.CIVIC_INCIDENT_TEMPLATE_ID
+    assert docket[1].template_id == rules.CIVIC_INCIDENT_TEMPLATE_ID
+    assert docket[0].item_id != docket[1].item_id
+    assert len({item.item_id for item in docket}) == len(docket)
+
+
 def test_feature_archetype_catalog_is_valid_and_covers_all_templates():
     """Verify templates resolve to valid feature archetypes and metadata."""
     assert rules.validate_feature_catalog() == []

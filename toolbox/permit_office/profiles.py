@@ -82,7 +82,7 @@ def generate_docket(
             break
         items.append(carried)
 
-    for followup in _pending_momentum_followup_items(turn, state, count - len(items)):
+    for followup in _pending_momentum_followup_items(turn, state, count - len(items), start_idx=len(items) + 1):
         if len(items) >= count:
             break
         items.append(followup)
@@ -197,14 +197,19 @@ def _carried_docket_items(
     return out
 
 
-def _pending_momentum_followup_items(turn: int, state: CityState | None, limit: int) -> list[DocketItem]:
+def _pending_momentum_followup_items(
+    turn: int,
+    state: CityState | None,
+    limit: int,
+    start_idx: int = 1,
+) -> list[DocketItem]:
     """Convert pending momentum follow-ups into current docket items."""
 
     if not state or not state.pending_followups or limit <= 0:
         return []
     out: list[DocketItem] = []
     consumed: list[str] = []
-    for idx, origin_item_id in enumerate(sorted(state.pending_followups), start=1):
+    for idx, origin_item_id in enumerate(sorted(state.pending_followups), start=start_idx):
         if len(out) >= limit:
             break
         template_id = state.pending_followups[origin_item_id]
