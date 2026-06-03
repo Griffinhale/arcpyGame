@@ -81,6 +81,10 @@ def adjust_type_ledger(
     """Apply bounded deltas to one district type entry and return the ledger."""
 
     normalized = _normalize_ledger(ledger, None)
+    if isinstance(ledger, dict):
+        ledger.clear()
+        ledger.update(normalized)
+        normalized = ledger
     if dtype not in DISTRICT_TYPES:
         return normalized
     entry = normalized[dtype]

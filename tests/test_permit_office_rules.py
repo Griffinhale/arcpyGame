@@ -115,6 +115,20 @@ def test_type_pressure_summary_is_qualitative_not_table_data():
     assert "$" not in summary
 
 
+def test_adjust_type_ledger_mutates_caller_ledger():
+    ledger = {
+        dtype: {"capital": 0, "appetite": 0, "fatigue": 0, "holdings": 0, "overextension": 0}
+        for dtype in rules.DISTRICT_TYPES
+    }
+
+    returned = rules.adjust_type_ledger(ledger, "residential", capital_delta=5, appetite_delta=2, holdings_delta=1)
+
+    assert returned is ledger
+    assert ledger["residential"]["capital"] == 5
+    assert ledger["residential"]["appetite"] == 2
+    assert ledger["residential"]["holdings"] == 1
+
+
 def test_missed_window_expiration_closes_original_without_pressure():
     state = rules.CityState()
     districts = {profile.cell_id: profile for profile in rules.generate_district_profiles(rows=1, cols=1, seed=2026)}
