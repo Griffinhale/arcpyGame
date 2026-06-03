@@ -71,6 +71,50 @@ def test_templates_declare_expiration_policy_and_pressure_category():
     assert all(template.pressure_category for template in rules.TEMPLATES.values())
 
 
+def test_type_ledger_rebuilds_from_district_holdings():
+    districts = {
+        profile.cell_id: profile
+        for profile in rules.generate_district_profiles(rows=2, cols=2, seed=2026)
+    }
+
+    ledger = rules.rebuild_type_ledger(districts)
+
+    assert set(ledger) == set(rules.DISTRICT_TYPES)
+    assert sum(entry["holdings"] for entry in ledger.values()) == 4
+    assert all(entry["capital"] >= 0 for entry in ledger.values())
+    assert all("appetite" in entry for entry in ledger.values())
+    assert all("fatigue" in entry for entry in ledger.values())
+    assert all("overextension" in entry for entry in ledger.values())
+
+
+def test_type_ledger_round_trips_through_city_state_memory():
+    state = rules.CityState()
+    districts = {
+        profile.cell_id: profile
+        for profile in rules.generate_district_profiles(rows=2, cols=2, seed=2026)
+    }
+    ledger = rules.rebuild_type_ledger(districts)
+
+    rules.write_type_ledger(state, ledger)
+    loaded = rules.read_type_ledger(state, districts)
+
+    assert loaded == ledger
+    assert state.type_ledger == ledger
+
+
+def test_type_pressure_summary_is_qualitative_not_table_data():
+    ledger = {
+        "mercantile": {"capital": 85, "appetite": 12, "fatigue": 1, "holdings": 4, "overextension": 0},
+        "residential": {"capital": 20, "appetite": 2, "fatigue": 4, "holdings": 2, "overextension": 5},
+    }
+
+    summary = rules.type_pressure_summary(ledger)
+
+    assert "Mercantile" in summary
+    assert "expansion pressure" in summary
+    assert "$" not in summary
+
+
 def test_missed_window_expiration_closes_original_without_pressure():
     state = rules.CityState()
     districts = {profile.cell_id: profile for profile in rules.generate_district_profiles(rows=1, cols=1, seed=2026)}

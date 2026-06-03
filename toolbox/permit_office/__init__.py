@@ -5,6 +5,7 @@ from .catalogs import *
 from .helpers import *
 from .systems import *
 from .profiles import *
+from .type_pressure import *
 from .expiration import *
 from .turns import *
 from .decisions import *
