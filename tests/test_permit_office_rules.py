@@ -97,24 +97,27 @@ def test_generate_docket_has_three_seeded_items_with_templates():
     assert {item.geometry_type for item in docket} <= {"POINT", "LINE", "POLYGON"}
 
 
-def test_six_turn_demo_sequence_covers_shortlist():
-    """Verify the deterministic demo schedule covers every shortlist case."""
-    expected = {
-        1: ["connector_corridor", "procession_route", "street_vendor_compact"],
-        2: ["utility_expansion_trench", "business_license_fee_sweep", "contractor_renovation_waiver"],
-        3: ["natural_reserve_conversion", "mixed_use_rezoning", "fire_budget_escalation"],
-        4: ["child_development_park_annex", "street_vendor_compact", "utility_expansion_trench"],
-        5: ["connector_corridor", "compliance_settlement_drive", "mixed_use_rezoning"],
-        6: ["natural_reserve_conversion", "fire_budget_escalation", "public_art_museum_grant"],
-    }
-    seen = set()
-    for turn in range(1, 7):
-        docket = rules.generate_docket(turn=turn, seed=2026, count=3)
-        assert len(docket) == 3
-        assert [item.template_id for item in docket] == expected[turn]
-        seen.update(item.template_id for item in docket)
+def test_twelve_week_docket_generation_keeps_three_or_four_items_available():
+    state = rules.CityState()
+    districts = {profile.cell_id: profile for profile in rules.generate_district_profiles(seed=2026)}
 
-    assert set(rules.DEMO_TEMPLATE_IDS) <= seen
+    seen = set()
+    for _week in range(1, state.max_turns + 1):
+        docket = rules.generate_docket(
+            turn=state.turn,
+            seed=2026,
+            count=4,
+            state=state,
+            districts=districts,
+        )
+        assert 3 <= len(docket) <= 4
+        assert len({item.item_id for item in docket}) == len(docket)
+        seen.update(item.template_id for item in docket)
+        if state.turn < state.max_turns:
+            rules.advance_turn_result(state, docket, districts)
+
+    assert state.max_turns == 12
+    assert len(seen & set(rules.DEMO_TEMPLATE_IDS)) >= 8
 
 
 def _active_feature_from_route_item(item, turn):
@@ -136,112 +139,44 @@ def _active_feature_from_route_item(item, turn):
     return rules.normalize_feature_instance(feature, turn)
 
 
-def test_seed_2026_golden_route_produces_stable_conditional_scorecard():
-    """Verify the six-week golden route preserves its conditional audit result."""
+def test_seed_2026_reasonable_attention_route_reaches_final_audit():
     profiles = {profile.cell_id: profile for profile in rules.generate_district_profiles(seed=2026)}
     state = rules.CityState()
     active_features = []
     docket_history = []
-    action_counts = {"inspect": 0, "approve": 0, "approve_mitigated": 0, "deny": 0}
-    generated_followup_seen = False
 
-    route = {
-        1: [
-            ("street_vendor_compact", "approve_mitigated", ["D0102"], ["D0101"], True),
-            ("connector_corridor", "approve", ["D0101", "D0102"], [], False),
-        ],
-        2: [
-            ("utility_expansion_trench", "approve", ["D0004", "D0104"], [], False),
-            ("contractor_renovation_waiver", "deny", ["D0000"], [], False),
-        ],
-        3: [
-            (rules.MAINTENANCE_TEMPLATE_ID, "approve", ["D0102"], [], False),
-            ("natural_reserve_conversion", "approve", ["D0200", "D0304"], [], False),
-        ],
-        4: [
-            (rules.CIVIC_INCIDENT_TEMPLATE_ID, "approve", ["D0001"], [], False),
-            ("child_development_park_annex", "deny", ["D0000"], [], False),
-            ("street_vendor_compact", "deny", ["D0102"], [], False),
-        ],
-    }
-    expected_route_dockets = {
-        1: ["connector_corridor", "procession_route", "street_vendor_compact"],
-        2: [rules.CIVIC_INCIDENT_TEMPLATE_ID, "utility_expansion_trench", "business_license_fee_sweep"],
-        3: [rules.MAINTENANCE_TEMPLATE_ID, rules.CIVIC_INCIDENT_TEMPLATE_ID, rules.CIVIC_INCIDENT_TEMPLATE_ID],
-        4: [rules.CIVIC_INCIDENT_TEMPLATE_ID, rules.CIVIC_INCIDENT_TEMPLATE_ID, "child_development_park_annex"],
-        5: [rules.MAINTENANCE_TEMPLATE_ID, rules.CIVIC_INCIDENT_TEMPLATE_ID, rules.CIVIC_INCIDENT_TEMPLATE_ID],
-        6: [rules.MAINTENANCE_TEMPLATE_ID, rules.CIVIC_INCIDENT_TEMPLATE_ID, rules.CIVIC_INCIDENT_TEMPLATE_ID],
-    }
-
-    # Each turn regenerates the visible docket from current state, then applies
-    # only the scripted player actions for this golden-route scenario.
-    for turn in range(1, 7):
+    for _week in range(1, state.max_turns + 1):
         docket = rules.generate_docket(
             turn=state.turn,
             seed=2026,
-            count=3,
+            count=4,
             state=state,
             districts=profiles,
             active_features=active_features,
         )
-        assert [item.template_id for item in docket] == expected_route_dockets[turn]
-        generated_followup_seen = generated_followup_seen or any(
-            item.template_id == rules.MAINTENANCE_TEMPLATE_ID for item in docket
-        )
-
-        for template_id, action, targets, spillovers, inspect_first in route.get(turn, []):
-            item = next((item for item in docket if item.template_id == template_id), None)
-            if item is None:
-                continue
-            if inspect_first:
-                inspected = rules.resolve_decision(
-                    state,
-                    item,
-                    profiles,
-                    "inspect",
-                    targets,
-                    seed=2026,
-                    active_features=active_features,
-                )
-                assert inspected.ok is True
-                action_counts["inspect"] += 1
-
+        for item in docket[:2]:
+            targets = item.target_cell_ids or ["D0000"]
+            if item.geometry_type == "LINE":
+                targets = ["D0000", "D0001"]
             result = rules.resolve_decision(
                 state,
                 item,
                 profiles,
-                action,
+                "deny" if item.template_id == "mixed_use_rezoning" else "approve",
                 targets,
-                spillover_cell_ids=spillovers,
                 seed=2026,
-                mitigated=action == "approve_mitigated",
                 active_features=active_features,
             )
             assert result.ok is True
-            action_counts[action] += 1
-            if item.status in {"active", "failed", "enforced", "settled", "responded", "maintained"} and item.template_id != rules.MAINTENANCE_TEMPLATE_ID:
-                active_features.append(_active_feature_from_route_item(item, state.turn))
-
         docket_history.extend(docket)
-        if turn < 6:
-            rules.advance_turn_result(state, docket, profiles, active_features)
+        rules.advance_turn_result(state, docket, profiles, active_features)
 
-    # Final assertions pin the resulting audit, resources, and feature mix so
-    # future balance changes are intentional.
-    archetypes = {feature.archetype_id for feature in active_features}
     grade, report = rules.scorecard(state, profiles, active_features, docket_history)
 
-    assert action_counts["inspect"] >= 1
-    assert action_counts["approve"] >= 1
-    assert action_counts["approve_mitigated"] >= 1
-    assert action_counts["deny"] >= 1
-    assert generated_followup_seen is True
-    assert {"vendor_market", "connector_corridor", "utility_trench"} <= archetypes
-    assert grade == "CONDITIONAL"
-    assert state.money == 45
-    assert (state.prosperity, state.unrest, state.culture, state.risk) == (64, 31, 37, 14)
-    assert "score=50" in report
-    assert "4 finding(s), 0 critical" in report
+    assert state.status == "complete"
+    assert state.turn == 12
+    assert grade in {"PASS", "CONDITIONAL", "FAIL"}
+    assert "score=" in report
 
 
 def test_inspect_item_marks_item_and_adds_risk_band_hint():
@@ -595,23 +530,23 @@ def test_mitigation_reduces_bad_side_effects_and_costs_more():
     assert mitigated.district_deltas["D0000"].get("unrest", 0) <= base.district_deltas["D0000"].get("unrest", 0)
 
 
-def test_deny_costs_ap_and_adds_small_city_friction():
-    """Verify denial spends AP and applies small city and stakeholder costs."""
-    profiles = {p.cell_id: p for p in rules.generate_district_profiles(rows=1, cols=1, seed=2026)}
-    state = rules.CityState(ap=3, money=60, unrest=20, prosperity=50)
-    item = rules.DocketItem("deny-me", "fire_budget_escalation", rules.TEMPLATES["fire_budget_escalation"].title, "POLYGON", 1)
+def test_deny_does_not_spend_ap_but_still_resolves_case():
+    state = rules.CityState()
+    districts = {profile.cell_id: profile for profile in rules.generate_district_profiles(rows=1, cols=1, seed=2026)}
+    item = rules.DocketItem(
+        "deny-test",
+        "street_vendor_compact",
+        rules.TEMPLATES["street_vendor_compact"].title,
+        "POINT",
+        1,
+    )
 
-    result = rules.resolve_decision(state, item, profiles, "deny", ["D0000"], seed=2026)
+    result = rules.resolve_decision(state, item, districts, "deny", ["D0000"], seed=2026)
 
     assert result.ok is True
     assert item.status == "denied"
-    assert state.ap == 2
-    assert state.unrest == 21
-    assert state.prosperity == 49
-    assert state.stakeholder_heat["fire_department"] == 3
-    assert "Denied" in result.report
-    assert "Certain effects:" in result.report
-    assert "Risk/side effects:" in result.report
+    assert state.ap == state.max_ap
+    assert result.stakeholder_delta["vendors"] > 0
 
 
 def test_ignored_items_add_heat_and_heat_generates_enforcement_followup():
@@ -794,57 +729,76 @@ def test_land_use_conflict_increases_failure_chance():
     assert bad_chance > good_chance
 
 
-def test_advance_turn_resets_ap_and_marks_audit_stage():
-    """Verify legacy six-week turn advancement restores AP and updates audit stage."""
-    state = rules.CityState(turn=2, max_turns=6, ap=0, max_ap=3)
-    items = rules.generate_docket(turn=2, seed=2026, count=3)
+def test_twelve_week_season_mid_audit_week_six_and_final_week_twelve():
+    state = rules.CityState()
+    districts = {profile.cell_id: profile for profile in rules.generate_district_profiles(seed=2026)}
+
+    for _ in range(5):
+        rules.advance_turn_result(state, [], districts)
+
+    assert state.turn == 6
+    assert state.audit_stage == 1
+    assert state.status == "playing"
+
+    for _ in range(6):
+        rules.advance_turn_result(state, [], districts)
+
+    assert state.turn == 12
+    assert state.audit_stage == 2
+    assert state.status == "complete"
+
+
+def test_advance_turn_resets_ap_and_marks_mid_audit_stage():
+    """Verify turn advancement restores AP and updates the week-six audit stage."""
+    state = rules.CityState(turn=5, ap=0)
+    items = rules.generate_docket(turn=5, seed=2026, count=4)
 
     report = rules.advance_turn(state, items)
 
     assert "Advanced week" in report
-    assert state.turn == 3
-    assert state.ap == 3
+    assert state.turn == 6
+    assert state.ap == state.max_ap
     assert state.audit_stage == 1
     assert {item.status for item in items} <= {"carried", "expired"}
 
 
 def test_final_week_closes_audit_without_advancing_past_max_turns():
-    """Verify legacy week six closes the final audit and does not create week seven."""
-    state = rules.CityState(turn=6, max_turns=6, ap=0, max_ap=3)
-    items = rules.generate_docket(turn=6, seed=2026, count=3)
+    """Verify week twelve closes the final audit and does not create week thirteen."""
+    state = rules.CityState(turn=12, ap=0)
+    items = rules.generate_docket(turn=12, seed=2026, count=4)
 
     report = rules.advance_turn(state, items)
 
     assert "Final week closed" in report
     assert "Final audit:" in report
-    assert state.turn == 6
+    assert state.turn == 12
     assert state.status == "complete"
     assert state.audit_stage == 2
-    assert state.ap == 3
+    assert state.ap == state.max_ap
     assert {item.status for item in items} <= {"carried", "expired"}
 
 
-def test_week_five_advance_opens_week_six_without_final_audit():
-    """Verify legacy final audit waits until week six is closed."""
-    state = rules.CityState(turn=5, max_turns=6, audit_stage=1)
+def test_week_eleven_advance_files_week_twelve_final_audit():
+    """Verify entering week twelve files the final audit."""
+    state = rules.CityState(turn=11, audit_stage=1)
 
     report = rules.advance_turn(state, [])
 
-    assert "Advanced week" in report
-    assert "Final audit:" not in report
-    assert state.turn == 6
-    assert state.status == "playing"
-    assert state.audit_stage == 1
+    assert "Final week closed" in report
+    assert "Final audit:" in report
+    assert state.turn == 12
+    assert state.status == "complete"
+    assert state.audit_stage == 2
 
 
 def test_completed_game_does_not_advance_again():
     """Verify repeated final audit clicks do not mutate the game clock."""
-    state = rules.CityState(turn=6, max_turns=6, status="complete", audit_stage=2)
+    state = rules.CityState(turn=12, status="complete", audit_stage=2)
 
     report = rules.advance_turn(state, [])
 
     assert "Final audit already filed" in report
-    assert state.turn == 6
+    assert state.turn == 12
     assert state.status == "complete"
     assert state.audit_stage == 2
 

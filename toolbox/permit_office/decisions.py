@@ -104,9 +104,10 @@ def resolve_decision(
         )
 
     if action_key == "deny":
-        blocked = _spend_ap(state, action, item.item_id, "Denial")
-        if blocked:
-            return blocked
+        # Denial records an office disposition but does not consume scarce
+        # attention. Inspecting, issuing, and mitigating remain AP-gated.
+        if state.ap < 0:
+            return _blocked(action, item.item_id, "Invalid AP state.")
         # Denials avoid project effects but still create friction, stakeholder
         # heat, and local population reactions.
         item.status = "denied"

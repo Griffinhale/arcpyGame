@@ -54,7 +54,7 @@ def generate_district_profiles(rows: int = 5, cols: int = 5, seed: int = 2026) -
 def generate_docket(
     turn: int,
     seed: int = 2026,
-    count: int = 3,
+    count: int = 4,
     state: CityState | None = None,
     districts: dict[str, DistrictProfile] | None = None,
     projects: Iterable[ProjectRecord] | dict[str, ProjectRecord] | None = None,

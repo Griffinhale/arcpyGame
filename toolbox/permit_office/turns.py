@@ -235,9 +235,11 @@ def advance_turn_result(
     final_week = state.turn >= state.max_turns
     if not final_week:
         state.turn += 1
+        final_week = state.turn >= state.max_turns
     state.ap = state.max_ap
-    if not final_week and state.turn == 3:
-        state.audit_stage += 1
+    mid_audit_turn = max(2, state.max_turns // 2)
+    if not final_week and state.turn == mid_audit_turn:
+        state.audit_stage = max(state.audit_stage, 1)
     if final_week:
         state.status = "complete"
         state.audit_stage = max(state.audit_stage, 2)
@@ -257,7 +259,13 @@ def advance_turn_result(
     population_text = f" Population drift {population_delta:+d}." if population_delta else ""
     incident_text = f" New civic incident file(s): {new_incidents}." if new_incidents else ""
     system_text = f" {' '.join(system_notes)}" if system_notes else ""
-    audit_text = f" Final audit: {audit.grade}." if state.status == "complete" else f" Audit snapshot: {audit.grade}." if state.turn == 3 else ""
+    audit_text = (
+        f" Final audit: {audit.grade}."
+        if state.status == "complete"
+        else f" Audit snapshot: {audit.grade}."
+        if state.turn == mid_audit_turn
+        else ""
+    )
     report = (
         f"{'Final week closed' if state.status == 'complete' else 'Advanced week'}. Carried {carried} item(s), expired {expired} item(s)."
         f"{heat_text}{grievance_text}{violation_text}{feature_text}{economy_text}{population_text}{incident_text}{system_text}{audit_text}"
