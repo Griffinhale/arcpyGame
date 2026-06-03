@@ -795,8 +795,8 @@ def test_land_use_conflict_increases_failure_chance():
 
 
 def test_advance_turn_resets_ap_and_marks_audit_stage():
-    """Verify turn advancement restores AP and updates audit stage."""
-    state = rules.CityState(turn=2, ap=0, max_ap=3)
+    """Verify legacy six-week turn advancement restores AP and updates audit stage."""
+    state = rules.CityState(turn=2, max_turns=6, ap=0, max_ap=3)
     items = rules.generate_docket(turn=2, seed=2026, count=3)
 
     report = rules.advance_turn(state, items)
@@ -809,8 +809,8 @@ def test_advance_turn_resets_ap_and_marks_audit_stage():
 
 
 def test_final_week_closes_audit_without_advancing_past_max_turns():
-    """Verify week six closes the final audit and does not create week seven."""
-    state = rules.CityState(turn=6, ap=0, max_ap=3)
+    """Verify legacy week six closes the final audit and does not create week seven."""
+    state = rules.CityState(turn=6, max_turns=6, ap=0, max_ap=3)
     items = rules.generate_docket(turn=6, seed=2026, count=3)
 
     report = rules.advance_turn(state, items)
@@ -825,8 +825,8 @@ def test_final_week_closes_audit_without_advancing_past_max_turns():
 
 
 def test_week_five_advance_opens_week_six_without_final_audit():
-    """Verify the final audit waits until week six is closed."""
-    state = rules.CityState(turn=5, audit_stage=1)
+    """Verify legacy final audit waits until week six is closed."""
+    state = rules.CityState(turn=5, max_turns=6, audit_stage=1)
 
     report = rules.advance_turn(state, [])
 
@@ -839,7 +839,7 @@ def test_week_five_advance_opens_week_six_without_final_audit():
 
 def test_completed_game_does_not_advance_again():
     """Verify repeated final audit clicks do not mutate the game clock."""
-    state = rules.CityState(turn=6, status="complete", audit_stage=2)
+    state = rules.CityState(turn=6, max_turns=6, status="complete", audit_stage=2)
 
     report = rules.advance_turn(state, [])
 
@@ -850,8 +850,8 @@ def test_completed_game_does_not_advance_again():
 
 
 def test_legacy_week_seven_save_is_clamped_to_final_audit():
-    """Verify old saves past the final week stop at week six."""
-    state = rules.CityState(turn=7, status="playing", audit_stage=1)
+    """Verify old six-week saves past the final week stop at week six."""
+    state = rules.CityState(turn=7, max_turns=6, status="playing", audit_stage=1)
 
     report = rules.advance_turn(state, [])
 
