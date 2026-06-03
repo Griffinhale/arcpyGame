@@ -18,6 +18,7 @@ sys.modules.setdefault(
 
 from toolbox import arcpy_permit_office_rules as rules
 from toolbox.permit_office_arcgis import geometry
+from toolbox.permit_office_arcgis.schema import DISTRICT_FIELDS
 
 
 @dataclass
@@ -186,6 +187,20 @@ def _rows():
     """Return empty fake feature-class row containers."""
 
     return {"districts": [], "points": [], "lines": [], "zones": []}
+
+
+def test_district_identity_persistence_field_aliases_are_configured():
+    """Verify district identity persistence fields use Task 7 aliases."""
+
+    fields = {name: (field_type, alias, length) for name, field_type, alias, length in DISTRICT_FIELDS}
+
+    assert fields["prior_district_type"] == ("TEXT", "Prior District Type", 32)
+    assert fields["identity_state"] == ("TEXT", "Identity State", 32)
+    assert fields["contesting_cell_id"] == ("TEXT", "Contesting District ID", 32)
+    assert fields["contesting_type"] == ("TEXT", "Contesting Type", 32)
+    assert fields["transition_due_turn"] == ("LONG", "Transition Due Week", None)
+    assert fields["buyout_pressure"] == ("LONG", "Buyout Pressure", None)
+    assert fields["last_buyout_report"] == ("TEXT", "Last Buyout Report", 512)
 
 
 def test_select_case_context_creates_proposal_and_selects_support_feature(monkeypatch):

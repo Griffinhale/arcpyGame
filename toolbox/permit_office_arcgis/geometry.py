@@ -985,7 +985,7 @@ def _tune_layer_visibility(layer, key):
 
 
 def _configure_labels(layer, key):
-    """Enable district cell-id labels when label APIs are available."""
+    """Enable district-name labels when label APIs are available."""
 
     if key != "districts":
         return
@@ -999,7 +999,7 @@ def _configure_labels(layer, key):
         return
     for label_class in label_classes or []:
         try:
-            label_class.expression = "$feature.cell_id"
+            label_class.expression = "$feature.district_name"
         except Exception:
             pass
         try:
