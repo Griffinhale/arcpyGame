@@ -63,6 +63,14 @@ WORK_DAY_SECONDS = WEEK_DEADLINE_SECONDS // len(WORK_WEEK_DAYS)
 
 
 def prepare_dashboard_session(paths, seed, messages):
+    """Resume or stage a session before the dashboard opens.
+
+    Treats the geodatabase as the canonical save: if districts+state rows exist
+    we re-add the output layers and regenerate the docket only if it is empty;
+    otherwise we leave the dashboard to open on its start screen. Returns the
+    seed unchanged so the caller can thread it into the controller.
+    """
+
     if has_saved_game(paths):
         add_outputs_to_map(paths, messages)
         if _row_count(paths["docket"]) == 0:
@@ -75,10 +83,22 @@ def prepare_dashboard_session(paths, seed, messages):
 
 
 def has_saved_game(paths):
+    """Return True when both the district board and city state have rows.
+
+    Those two tables are written together by New Game, so their joint presence
+    is the cheapest reliable "a game exists here" signal.
+    """
+
     return _row_count(paths.get("districts", "")) > 0 and _row_count(paths.get("state", "")) > 0
 
 
 def _row_count(path):
+    """Return the feature/row count for a table, or 0 if it can't be counted.
+
+    Swallows arcpy errors (missing/locked table) so callers can treat an
+    unreadable table as simply empty rather than crashing dashboard startup.
+    """
+
     try:
         return int(arcpy.management.GetCount(path)[0])
     except Exception:
@@ -86,6 +106,15 @@ def _row_count(path):
 
 
 def _configure_dashboard_window(root):
+    """Apply the startup window size, re-asserting it once after Tk lays out.
+
+    Tk/Windows can shrink the window below our minimum during initial mapping,
+    so we re-check 80ms later (after the event loop has processed layout) and
+    restore the geometry if it came up too small. The delay is the smallest that
+    reliably lands after layout; falls back to an immediate enforce if `after`
+    is unavailable (e.g. a fake root in tests).
+    """
+
     root.minsize(*STARTUP_MIN_SIZE)
     root.geometry(STARTUP_GEOMETRY)
 
@@ -103,18 +132,48 @@ def _configure_dashboard_window(root):
 
 
 class _StatusProxy:
+    """Tk-StringVar-shaped adapter that reads/writes controller.status_text.
+
+    Lets view code use the familiar `.set()`/`.get()` status-variable API while
+    the single source of truth stays the controller attribute (so a reload can
+    render the current status without a separate Tk variable to keep in sync).
+    """
+
     def __init__(self, controller):
+        """Bind the proxy to the controller whose status_text it mirrors."""
+
         self.controller = controller
 
     def set(self, value):
+        """Store a coerced, non-None status string on the controller."""
+
         self.controller.status_text = str(value or "")
 
     def get(self):
+        """Return the controller's current status string."""
+
         return self.controller.status_text
 
 
 class DashboardController:
+    """Owns the Tkinter desk UI and the per-action command flow.
+
+    This is the seam between the pure rules (toolbox/permit_office/) and ArcGIS:
+    every player action reads game rows via store.py, resolves effects through
+    `rules`, writes the results back, rebuilds/refreshes the affected map layers,
+    and reloads the desk view. All work runs on the single Tk thread; there is
+    no background I/O (see docs/decisions.md). The geodatabase, not this object,
+    is the source of truth — instance state here is just UI selection/session
+    bookkeeping that `reload()` re-derives from persisted rows.
+    """
+
     def __init__(self, paths, district_layer, seed, messages):
+        """Wire paths, the district layer name, the run seed, and GP messages.
+
+        Initializes UI/session state (selection, report tabs, deadline timer,
+        command-busy guard); the geodatabase rows are read later in reload().
+        """
+
         self.paths = paths
         self.district_layer = district_layer
         self.seed = seed

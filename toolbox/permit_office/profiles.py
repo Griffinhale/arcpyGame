@@ -170,6 +170,11 @@ def _weighted_template_pool(
                     weights[template_id] += 2 + round(2 * pop_bonus)
                 if profile.district_type in template.bad_fit_types:
                     weights[template_id] = max(1, weights[template_id] - 1)
+                # Stat-driven nudges: a district in trouble on one axis pulls the
+                # docket toward the templates that address it, so the generated
+                # work reads as a response to city condition. 45 is the mid-band
+                # threshold on the 0-100 stat scale (below = struggling activity,
+                # above = elevated friction/exposure).
                 if profile.activity < 45 and template.category in {"development", "business", "residential"}:
                     weights[template_id] += 2
                 if profile.friction > 45 and template.is_incident:
@@ -193,6 +198,9 @@ def _weighted_template_pool(
         chosen.append(template_id)
         available.pop(template_id, None)
     while available and len(chosen) < count:
+        # Weighted sampling without replacement: pick a point in [0, total) and
+        # walk the cumulative weight sum until we pass it (sorted for determinism
+        # given the seeded rng). Higher-weighted templates own a wider slice.
         total = sum(available.values())
         pick = rng.randrange(total)
         running = 0
@@ -208,6 +216,12 @@ def _weighted_template_pool(
 
 
 def _district_mix_key(districts: dict[str, DistrictProfile] | None) -> str:
+    """Return a stable type-distribution signature (e.g. "civic:3,natural:2").
+
+    Folded into the docket RNG seed so two boards with different type mixes
+    generate different dockets while a given board stays deterministic.
+    """
+
     if not districts:
         return "none"
     counts = {}

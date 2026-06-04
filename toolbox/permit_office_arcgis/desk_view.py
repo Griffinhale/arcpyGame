@@ -368,7 +368,10 @@ class PermitDeskView:
         row_h = 28
         gap = 6
         header_h = 16
-        card_min = 280
+        card_min = 280  # floor height reserved for the active decision card
+        # Rows that fit = leftover height after the top inset (16), the active
+        # card floor, the queue header, and bottom padding (18), divided by a
+        # collapsed row + its gap. Hard-capped at 8 so a huge docket still reads.
         stack_capacity = max(0, (y1 - (y0 + 16) - card_min - header_h - 18) // (row_h + gap))
         visible_count = min(len(others), max(0, stack_capacity), 8)
         stack_overflow = len(others) - visible_count
@@ -776,6 +779,11 @@ class PermitDeskView:
             return _clip(text, max(4, int(max_px // (size * 0.62))))
         if measure(text) <= max_px:
             return text
+        # Binary-search the largest prefix length whose text+"..." still fits.
+        # Invariant: lo = a known-fitting length, hi = an upper bound; the
+        # `mid = (lo+hi+1)//2` rounding-up biases toward lo so the loop can't
+        # stall when hi == lo+1. Measuring per-candidate (not estimating) keeps
+        # it exact across proportional fonts.
         lo, hi = 0, len(text)
         while lo < hi:
             mid = (lo + hi + 1) // 2
