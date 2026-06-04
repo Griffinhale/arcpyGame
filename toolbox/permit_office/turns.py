@@ -117,15 +117,30 @@ def _scenario_score(
     # Scenario weights can inspect district-level systems, so fold those
     # aggregate values into the same metric map as citywide fields.
     if profiles:
-        metric_values["housing_capacity"] = sum(profile.housing_capacity for profile in profiles) // max(1, len(profiles) * 100)
-        metric_values["affordability"] = sum(profile.affordability for profile in profiles) // max(1, len(profiles))
-        metric_values["vacancy_rate"] = sum(profile.vacancy_rate for profile in profiles) // max(1, len(profiles))
-        metric_values["displacement"] = sum(max(profile.displacement.values(), default=0) for profile in profiles)
-        metric_values["renter_dissatisfaction"] = sum(profile.dissatisfaction.get("renters", 0) for profile in profiles)
-        for service in SERVICE_TYPES:
-            metric_values[service] = sum(profile.network_access.get(service, 0) for profile in profiles)
-        for hazard in HAZARD_TYPES:
-            metric_values[hazard] = sum(profile.hazards.get(hazard, 0) for profile in profiles)
+        # Accumulate every district aggregate in one pass instead of ~17 separate
+        # sum() scans over the same profile list.
+        count = len(profiles)
+        housing_capacity = affordability = vacancy_rate = 0
+        displacement = renter_dissatisfaction = 0
+        service_totals = {service: 0 for service in SERVICE_TYPES}
+        hazard_totals = {hazard: 0 for hazard in HAZARD_TYPES}
+        for profile in profiles:
+            housing_capacity += profile.housing_capacity
+            affordability += profile.affordability
+            vacancy_rate += profile.vacancy_rate
+            displacement += max(profile.displacement.values(), default=0)
+            renter_dissatisfaction += profile.dissatisfaction.get("renters", 0)
+            for service in SERVICE_TYPES:
+                service_totals[service] += profile.network_access.get(service, 0)
+            for hazard in HAZARD_TYPES:
+                hazard_totals[hazard] += profile.hazards.get(hazard, 0)
+        metric_values["housing_capacity"] = housing_capacity // max(1, count * 100)
+        metric_values["affordability"] = affordability // max(1, count)
+        metric_values["vacancy_rate"] = vacancy_rate // max(1, count)
+        metric_values["displacement"] = displacement
+        metric_values["renter_dissatisfaction"] = renter_dissatisfaction
+        metric_values.update(service_totals)
+        metric_values.update(hazard_totals)
     for metric, weight in weights.items():
         score += metric_values.get(metric, 0) * int(weight)
     return score

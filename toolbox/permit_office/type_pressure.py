@@ -14,25 +14,32 @@ def rebuild_type_ledger(districts: Mapping[str, DistrictProfile] | None) -> dict
     """Build a complete hidden type ledger from current district holdings."""
 
     profiles = list((districts or {}).values())
+    # Bucket per-type sums in a single pass instead of filtering the profile
+    # list once per district type (was O(types * profiles) with repeated sums).
+    holdings_by_type = {dtype: 0 for dtype in DISTRICT_TYPES}
+    capital_sum = {dtype: 0 for dtype in DISTRICT_TYPES}
+    appetite_sum = {dtype: 0 for dtype in DISTRICT_TYPES}
+    fatigue_sum = {dtype: 0 for dtype in DISTRICT_TYPES}
+    for profile in profiles:
+        dtype = getattr(profile, "district_type", "")
+        if dtype not in holdings_by_type:
+            continue
+        activity = int(getattr(profile, "activity", 0) or 0)
+        services = int(getattr(profile, "services", 0) or 0)
+        friction = int(getattr(profile, "friction", 0) or 0)
+        exposure = int(getattr(profile, "exposure", 0) or 0)
+        holdings_by_type[dtype] += 1
+        capital_sum[dtype] += max(0, activity)
+        appetite_sum[dtype] += max(0, activity + services - friction)
+        fatigue_sum[dtype] += max(0, friction + exposure)
+
     ledger: dict[str, dict[str, int]] = {}
     for dtype in DISTRICT_TYPES:
-        owned = [profile for profile in profiles if getattr(profile, "district_type", "") == dtype]
-        holdings = len(owned)
-        if owned:
-            capital = sum(max(0, int(getattr(profile, "activity", 0) or 0)) for profile in owned) // holdings
-            appetite = sum(
-                max(
-                    0,
-                    int(getattr(profile, "activity", 0) or 0)
-                    + int(getattr(profile, "services", 0) or 0)
-                    - int(getattr(profile, "friction", 0) or 0)
-                )
-                for profile in owned
-            ) // max(1, holdings * 10)
-            fatigue = sum(
-                max(0, int(getattr(profile, "friction", 0) or 0) + int(getattr(profile, "exposure", 0) or 0))
-                for profile in owned
-            ) // max(1, holdings * 12)
+        holdings = holdings_by_type[dtype]
+        if holdings:
+            capital = capital_sum[dtype] // holdings
+            appetite = appetite_sum[dtype] // max(1, holdings * 10)
+            fatigue = fatigue_sum[dtype] // max(1, holdings * 12)
         else:
             capital = 0
             appetite = 0

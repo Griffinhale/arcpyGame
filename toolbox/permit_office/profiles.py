@@ -151,6 +151,13 @@ def _weighted_template_pool(
     if districts:
         populations = [max(0, int(getattr(profile, "population", 0) or 0)) for profile in districts.values()]
         avg_population = (sum(populations) / len(populations)) if populations else 0
+        # The weightable template set is district-independent, so resolve it once
+        # instead of re-scanning all TEMPLATES (skipping non-demo ids) per district.
+        relevant_templates = [
+            (template_id, template)
+            for template_id, template in TEMPLATES.items()
+            if template_id in weights
+        ]
         for profile in districts.values():
             # Above-average-population districts pull the docket harder toward
             # their type, so dominant cultures see more related proposals and can
@@ -160,10 +167,11 @@ def _weighted_template_pool(
             pop_bonus = 0.0
             if avg_population > 0:
                 pop_bonus = max(0.0, min(1.0, int(profile.population or 0) / avg_population - 1.0))
-            for template_id, template in TEMPLATES.items():
-                if template_id not in weights:
-                    continue
-                type_weight = TYPE_CATEGORY_WEIGHTS.get(profile.district_type, {}).get(template.category, 0)
+            # The category weight map depends only on the district type; hoist it
+            # out of the per-template loop.
+            type_weights = TYPE_CATEGORY_WEIGHTS.get(profile.district_type, {})
+            for template_id, template in relevant_templates:
+                type_weight = type_weights.get(template.category, 0)
                 if type_weight:
                     weights[template_id] += type_weight + round(type_weight * pop_bonus)
                 if profile.district_type in template.good_fit_types:
@@ -544,10 +552,19 @@ def inspection_case_for_item(
 
     # Risk bands intentionally derive from evidence, then violations inherit
     # the band so inspections and later compliance audits agree.
-    severity_score = sum({"watch": 1, "warning": 2, "critical": 4}.get(record.severity, 1) for record in evidence)
-    if any(record.severity == "critical" for record in evidence) or severity_score >= 6:
+    severity_weights = {"watch": 1, "warning": 2, "critical": 4}
+    severity_score = 0
+    has_critical = False
+    has_warning = False
+    for record in evidence:
+        severity_score += severity_weights.get(record.severity, 1)
+        if record.severity == "critical":
+            has_critical = True
+        elif record.severity == "warning":
+            has_warning = True
+    if has_critical or severity_score >= 6:
         risk_band = "high"
-    elif any(record.severity == "warning" for record in evidence) or severity_score >= 3:
+    elif has_warning or severity_score >= 3:
         risk_band = "medium"
     else:
         risk_band = fallback_risk_band if fallback_risk_band in {"low", "medium", "high"} else "low"

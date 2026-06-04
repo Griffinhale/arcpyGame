@@ -163,13 +163,17 @@ def advance_project_from_item(
     return project
 
 
+_ACTIVE_FEATURE_STATUSES = frozenset(
+    {"active", "settled", "enforced", "responded", "maintenance_due", "degraded"}
+)
+
+
 def active_feature_instances(features: Iterable[FeatureInstance], turn: int | None = None) -> list[FeatureInstance]:
     """Return features that still participate in city systems."""
 
-    active_status = {"active", "settled", "enforced", "responded", "maintenance_due", "degraded"}
     out = []
     for feature in features:
-        if feature.status not in active_status:
+        if feature.status not in _ACTIVE_FEATURE_STATUSES:
             continue
         if turn is not None and feature.expires_turn not in (-1, 0, None) and feature.expires_turn < turn:
             continue
@@ -252,8 +256,9 @@ def apply_hazard_turn(
             if band >= 4:
                 severe += 1
         profile.hazards = next_hazards
+        # apply_stat_cascade already ends with normalize_profile and nothing
+        # mutates the profile afterward, so a second normalize here is a no-op.
         apply_stat_cascade(profile)
-        normalize_profile(profile)
     return {"severe_hazards": severe}
 
 

@@ -415,9 +415,10 @@ def _normalize_service_map(
 ) -> dict[str, int]:
     """Clamp a typed service or hazard map to allowed keys and bands."""
     allowed_tuple = tuple(allowed)
+    allowed_keys = frozenset(allowed_tuple)
     out = {key: 0 for key in allowed_tuple} if include_zeros else {}
     for key, value in (values or {}).items():
-        if key not in allowed_tuple:
+        if key not in allowed_keys:
             continue
         band = max(0, min(maximum, int(value or 0)))
         if band or include_zeros:
@@ -694,7 +695,7 @@ def _shift_mix(profile: DistrictProfile, groups: Iterable[str], amount: int) -> 
 def _top_presence_group(profile: DistrictProfile) -> tuple[str, int]:
     """Return the most present citizen group on one profile."""
     profile.population_mix = _normalize_bands(profile.population_mix, 3)
-    return sorted(profile.population_mix.items(), key=lambda pair: (-pair[1], pair[0]))[0]
+    return min(profile.population_mix.items(), key=lambda pair: (-pair[1], pair[0]))
 
 
 def _top_presence_groups(profiles: list[DistrictProfile], limit: int = 3) -> tuple[str, ...]:
@@ -710,7 +711,7 @@ def _top_presence_groups(profiles: list[DistrictProfile], limit: int = 3) -> tup
 def _top_dissatisfaction(profile: DistrictProfile) -> tuple[str, int]:
     """Return the highest dissatisfaction band on one profile."""
     profile.dissatisfaction = _normalize_bands(profile.dissatisfaction, 4)
-    return sorted(profile.dissatisfaction.items(), key=lambda pair: (-pair[1], pair[0]))[0]
+    return min(profile.dissatisfaction.items(), key=lambda pair: (-pair[1], pair[0]))
 
 
 def _top_dissatisfaction_for_profiles(profiles: list[DistrictProfile]) -> tuple[str, int]:
@@ -719,7 +720,7 @@ def _top_dissatisfaction_for_profiles(profiles: list[DistrictProfile]) -> tuple[
     for profile in profiles:
         for group, band in _normalize_bands(profile.dissatisfaction, 4).items():
             totals[group] += band
-    return sorted(totals.items(), key=lambda pair: (-pair[1], pair[0]))[0]
+    return min(totals.items(), key=lambda pair: (-pair[1], pair[0]))
 
 
 def _present_template_groups(profiles: list[DistrictProfile], groups: Iterable[str]) -> tuple[str, ...]:
@@ -741,7 +742,7 @@ def _strongest_template_group(profiles: list[DistrictProfile], groups: Iterable[
     scores = [score for score in scores if score[0] > 0]
     if not scores:
         return ""
-    return sorted(scores, key=lambda pair: (-pair[0], pair[1]))[0][1]
+    return min(scores, key=lambda pair: (-pair[0], pair[1]))[1]
 
 
 def _group_label(group: str) -> str:

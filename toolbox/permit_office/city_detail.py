@@ -66,9 +66,10 @@ def generate_city_detail_features(
 
     park_profiles = _park_profiles(profiles, rng)
     park_slots = {profile.cell_id: _park_slot(idx) for idx, profile in enumerate(park_profiles, start=1)}
+    corridor_cells = set(horizontal + vertical)
     for profile in profiles:
         out.extend(_district_block_features(profile, seed, rng, reserved_slots={park_slots.get(profile.cell_id)}))
-        if profile.cell_id not in set(horizontal + vertical):
+        if profile.cell_id not in corridor_cells:
             out.append(_local_street_stub(profile, seed, rng))
 
     for idx, profile in enumerate(park_profiles, start=1):
