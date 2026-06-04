@@ -1,0 +1,125 @@
+# How Permit Office Uses Stock arcpy
+
+A map of which ArcPy APIs we lean on, the params we pass, and the patterns we
+follow. All ArcPy lives in the adapter layer (`toolbox/permit_office_arcgis/` +
+the `.pyt`); the pure rules never import arcpy. For *why* the refresh/cursor
+choices were made, see `decisions.md`.
+
+## 1. Cursors (`arcpy.da`) — game I/O
+
+All persistence is `arcpy.da` cursors, always under a `with` block. We pass an
+explicit field list (never `"*"`) and use the `SHAPE@` token for geometry.
+
+- **SearchCursor** — `store.py` reads (state, districts, docket, projects, active
+  features) and `geometry.py` lookups. District geometry uses
+  `["cell_id", "SHAPE@"]`.
+- **UpdateCursor** — district/feature updates (`updateRow`), proposal deletes
+  (`deleteRow`), proposal status changes.
+- **InsertCursor** — board creation, feature inserts, state/docket/command/log
+  rows; geometry rows pass `["SHAPE@"] + attrs` to `insertRow`.
+
+**where_clause as a hint, guard as the truth.** Single-row ops pass a where
+clause (built from `_where_equals` / `_where_item_status` / `_sql_quote`, e.g.
+`item_id = 'CASE-1' AND status = 'proposed'`) *and* keep an in-Python row check.
+The SQL narrows the scan on a real geodatabase; the Python guard guarantees
+correctness even if a backend ignores the predicate (see `decisions.md`).
+
+**Read once.** `reload()` opens a fixed set of cursors (and the batch
+`proposal_visible_map` instead of per-item scans); command handlers hand already-
+persisted `state`/`districts` back to `reload()` to skip re-reads. Immutable
+district `SHAPE@` geometry is memoized per session (`district_geometry_lookup`,
+cleared on New Game).
+
+## 2. Schema / geodatabase (`schema.py`)
+
+Idempotent creation guarded by `arcpy.Exists`:
+
+- `arcpy.management.CreateFileGDB(folder, name)`
+- `arcpy.management.CreateTable(gdb_path, name)` — non-spatial tables.
+- `arcpy.management.CreateFeatureclass(gdb_path, name, geometry_type, spatial_reference=sr)`
+  — `POINT` / `POLYLINE` / `POLYGON`.
+- `arcpy.management.AddField(table, name, type, field_alias=…, field_length=…)`
+  via an `add_field_if_missing` wrapper; types are `TEXT/LONG/DOUBLE/SHORT/DATE`.
+  Wide JSON blobs are `TEXT` with explicit lengths (e.g. `state_json` 4000).
+- `arcpy.ListFields(table)` to diff existing fields (case-insensitive).
+- `arcpy.management.DeleteRows(table)` to reset gameplay while keeping schema
+  (`clear_game_rows`); `DeleteField` for the legacy city-health field migration.
+
+## 3. Geometry construction
+
+District board and proposals are built by hand from coordinates:
+
+- `arcpy.Point(x, y)` → `arcpy.Array([...])` → `arcpy.Polygon(arr, sr)` /
+  `arcpy.Polyline(arr, sr)`.
+- `arcpy.PointGeometry(geom.centroid, geom.spatialReference)` for point permits
+  (placed at a district centroid); lines connect two centroids.
+- `geom.extent` (XMin/XMax/YMin/YMax) + normalized hint offsets place seeded
+  city-detail features inside a district.
+- Spatial reference comes from `arcpy.Describe(fc).spatialReference` or the active
+  map; fallback is `arcpy.SpatialReference(3857)` (Web Mercator).
+
+## 4. Map / display & refresh-redraw (`geometry.py`, `dashboard.py`)
+
+Map access is via `arcpy.mp.ArcGISProject("CURRENT").activeMap` (None-checked —
+the dashboard must tolerate no open map).
+
+- **Add:** `active_map.addDataFromPath(path)` then set `.name`; idempotent —
+  guarded by `if name not in existing` over `active_map.listLayers()`. Layers are
+  tuned (`transparency`, labels via `showLabels`/`listLabelClasses`/
+  `label_class.expression`), symbolized, and ordered with
+  `active_map.moveLayer(ref, layer, "AFTER")`.
+- **Remove:** `active_map.removeLayer(layer)` for our known output names.
+- **Refresh:** `arcpy.RefreshLayer(name)` per layer.
+
+**Refresh/redraw strategy.** `rebuild_output_layers()` defaults to **refresh-only**
+for data-only edits: it skips `remove_outputs_from_map` (the add is already
+idempotent) and just re-adds-any-missing + `RefreshLayer`. `force_readd=True`
+does the full remove→add→refresh, used only when the layer set or symbology
+changes (New Game). This avoids the costly `addDataFromPath` churn every turn —
+the dominant per-turn cost. Timings are visible under `PERMIT_OFFICE_PERF=1`.
+
+**Symbology** (`symbology_config.py` + `geometry.py`): a `UniqueValueRenderer` set
+via `sym.updateRenderer("UniqueValueRenderer")`, with the render field assigned
+through multiple fallbacks (`renderer.fields` list → `renderer.field` string →
+CIM `getDefinition("V3"/"V2")` + `setDefinition`) because the accessible property
+varies by ArcGIS build. Districts render by `district_type`, support layers by
+`display_state`.
+
+## 5. Selection & analysis
+
+- `SelectLayerByAttribute(layer, "NEW_SELECTION"|"CLEAR_SELECTION", where)` — drives
+  district/support selection from docket context and clears it after commands.
+- Spillover: `MakeFeatureLayer` → `arcpy.analysis.Buffer(layer, mem_fc, "{r} Meters")`
+  → `SelectLayerByLocation(districts, "INTERSECT", buffer, selection_type="NEW_SELECTION")`
+  → read ids → `arcpy.management.Delete` the temp layers.
+- Reading a selection: `arcpy.da.Describe(layer).get("FIDSet")` (fallback to
+  `arcpy.Describe(layer).FIDSet`), then a `SearchCursor` over the cell-id field.
+
+## 6. Geoprocessing tool plumbing (`arcpy_permit_office.pyt`)
+
+- `Toolbox` (label/alias/tools) + `PermitOfficePrototype` tool with
+  `getParameterInfo` / `execute`, and `canRunInBackground = False`.
+- Parameters via `arcpy.Parameter(displayName=, name=, datatype=, parameterType=,
+  direction=)`: an optional `DEWorkspace`, a derived `GPFeatureLayer` output, and
+  an optional `GPBoolean` perf toggle.
+- `execute` resolves workspace → `ensure_schema` → add layers → open the
+  dashboard → `arcpy.SetParameterAsText(P_OUTPUT, paths["districts"])`.
+- Messages go through `messages.py` helpers wrapping `AddMessage`/`AddWarning`/
+  `AddError`.
+
+## 7. Environment / workspace (`schema.py: resolve_workspace`)
+
+Prefers an explicit `.gdb` arg; else the active project's
+`homeFolder/data/permit_office.gdb`; else
+`arcpy.env.scratchWorkspace or scratchFolder or os.getcwd()`. We do **not** set
+`arcpy.env.workspace` — all paths are absolute and passed in a `paths` dict.
+
+## Patterns worth keeping
+
+- One `paths` dict threads every absolute GDB path through the adapter.
+- Cursors are always `with`-scoped, field-explicit, and where-narrowed for
+  single-row ops (with a Python guard).
+- ArcPy calls that touch the live map are wrapped in try/except + a `messages`
+  warning, so a missing map or layer degrades gracefully instead of crashing.
+- We avoid Feature Set drawing and any ArcGIS Pro pane automation (see
+  `decisions.md`); proposals are seeded geometry, retargeted from selections.

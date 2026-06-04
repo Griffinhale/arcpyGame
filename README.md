@@ -97,7 +97,17 @@ do not replace a live ArcGIS Pro smoke test.
 - `toolbox/permit_office_arcgis/` - schema, geodatabase store helpers, geometry
   operations, symbology, and the Tkinter dashboard.
 - `tests/` - regression tests for the rules and ArcGIS adapter shims.
-- `docs/` - design notes, architecture references, smoke tests, and demo script.
+- `docs/` - the core reference set (see below).
+
+## Documentation
+
+- `docs/systems-overview.md` - architecture, persisted state, stat model, and the
+  turn loop. Start here.
+- `docs/docket-items.md` - docket template/item shape with worked examples.
+- `docs/arcpy-usage.md` - which stock ArcPy APIs we use and how (cursors, schema,
+  geometry, map refresh/redraw, selection).
+- `docs/writing-and-tone.md` - the municipal voice and real copy examples.
+- `docs/decisions.md` - concise ADRs: choices made and alternatives rejected.
 
 ## Current Status
 
@@ -113,5 +123,5 @@ live ArcGIS Pro smoke test, validating cold-start resume behavior on the target
 machine, tuning a fair 12-week route, and deepening map symbology only where the
 live map proves it is still hard to read.
 
-See `docs/current-status.md` and `docs/permit-office-prototype-smoke-test.md`
-for the latest implementation notes and manual validation checklist.
+See `docs/systems-overview.md` for the implementation map, current status, and
+the live ArcGIS validation walkthrough.
