@@ -2,18 +2,13 @@
 
 DISPLAY_STATE_SYMBOLS = {
     "stable": ([226, 232, 222, 100], "Stable"),
+    "daily_pressure": ([205, 132, 78, 100], "Daily Pressure"),
     "incident": ([206, 54, 52, 100], "Civic Incident"),
     "grievance": ([150, 72, 90, 100], "Local Grievance"),
     "service_gap": ([64, 126, 180, 100], "Service Gap"),
     "hazard": ([196, 90, 74, 100], "Hazard Pressure"),
     "housing_pressure": ([177, 126, 88, 100], "Housing Pressure"),
     "economic_growth": ([106, 162, 114, 100], "Economic Growth"),
-    "prosperous": ([106, 162, 114, 100], "Prosperous"),
-    "restless": ([216, 159, 84, 100], "Restless"),
-    "cultured": ([140, 126, 188, 100], "Cultured"),
-    "at_risk": ([196, 90, 74, 100], "At Risk"),
-    "strained": ([205, 132, 78, 100], "Strained"),
-    "aggrieved": ([150, 72, 90, 100], "Aggrieved"),
     "proposed": ([45, 196, 199, 100], "Proposed"),
     "active": ([52, 150, 100, 100], "Active"),
     "denied": ([112, 112, 112, 100], "Denied"),
@@ -100,7 +95,7 @@ def symbol_style_for(layer_key, value):
     if value == "proposed":
         outline_color = [31, 220, 222, 100]
         outline_width = max(outline_width, 3.2)
-    elif value in ("incident", "failed", "at_risk", "aggrieved", "grievance", "hazard"):
+    elif value in ("incident", "failed", "daily_pressure", "grievance", "hazard"):
         outline_color = [93, 48, 48, 100]
     elif value in ("road", "utility"):
         outline_width = max(outline_width, 2.8)

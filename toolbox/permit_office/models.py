@@ -86,18 +86,13 @@ DISSATISFACTION_INCIDENT_THRESHOLD = 4
 
 DISPLAY_STATES = (
     "stable",
+    "daily_pressure",
     "incident",
     "grievance",
     "service_gap",
     "hazard",
     "housing_pressure",
     "economic_growth",
-    "prosperous",
-    "restless",
-    "cultured",
-    "at_risk",
-    "strained",
-    "aggrieved",
 )
 
 

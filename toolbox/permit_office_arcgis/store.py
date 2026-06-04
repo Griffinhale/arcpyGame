@@ -414,12 +414,8 @@ def _daily_overlay_state(profile, pressure):
         return "housing_pressure"
     if profile and rules._top_dissatisfaction(profile)[1] >= rules.DISSATISFACTION_AGGRIEVED_THRESHOLD:
         return "grievance"
-    if pressure >= 3:
-        return "at_risk"
-    if pressure >= 2:
-        return "aggrieved"
-    if pressure >= 1:
-        return "strained"
+    if pressure:
+        return "daily_pressure"
     return profile.display_state if profile else "stable"
 
 
@@ -430,7 +426,7 @@ def _daily_overlay_report(cid, overlay, pressure, profile):
         return f"{cid}: active civic incident remains visible."[:512]
     if overlay in {"hazard", "service_gap", "housing_pressure", "grievance"}:
         return f"{cid}: {overlay.replace('_', ' ')} condition remains visible."[:512]
-    if pressure:
+    if overlay == "daily_pressure":
         return f"{cid}: daily docket pressure {pressure}/4."[:512]
     if profile:
         return f"{cid}: no daily pressure filed."[:512]

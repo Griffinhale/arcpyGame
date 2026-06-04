@@ -334,12 +334,17 @@ def test_apply_simple_symbology_seeds_and_styles_display_state_classes():
 
     items = {item.values[0][0]: item for item in renderer.groups[0].items}
     assert "stable" in items
+    assert "daily_pressure" in items
     assert "service_gap" in items
     assert "hazard" in items
     assert "housing_pressure" in items
     assert "incident" in items
     assert items["stable"].label == "Stable"
+    assert items["daily_pressure"].label == "Daily Pressure"
     assert items["service_gap"].label == "Service Gap"
+    assert "strained" not in items
+    assert "aggrieved" not in items
+    assert "at_risk" not in items
     assert items["hazard"].symbol.color == {"RGB": [196, 90, 74, 100]}
     assert items["stable"].symbol.outlineColor == {"RGB": [242, 238, 226, 100]}
     assert items["stable"].symbol.outlineWidth == 3.0
