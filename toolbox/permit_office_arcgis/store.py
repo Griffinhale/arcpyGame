@@ -21,6 +21,13 @@ DOCKET_UPDATE_FIELDS = [
     if name not in {"turn", "template_id", "title", "geometry_type"}
 ]
 
+LEGACY_STATE_METRIC_KEYS = {
+    "prosperity": "activity",
+    "unrest": "friction",
+    "culture": "trust",
+    "risk": "exposure",
+}
+
 
 def now_utc():
     """Return the current UTC timestamp for command and action rows."""
@@ -53,12 +60,19 @@ def create_district_board(paths, seed, messages):
         "cell_id",
         "district_name",
         "population",
-        "prosperity",
-        "unrest",
-        "culture",
-        "risk",
+        "activity",
+        "friction",
+        "trust",
+        "exposure",
         "services",
         "district_type",
+        "prior_district_type",
+        "identity_state",
+        "contesting_cell_id",
+        "contesting_type",
+        "transition_due_turn",
+        "buyout_pressure",
+        "last_buyout_report",
         "land_use",
         "zoning_overlay",
         "display_state",
@@ -87,12 +101,19 @@ def create_district_board(paths, seed, messages):
                 profile.cell_id,
                 profile.name,
                 profile.population,
-                profile.prosperity,
-                profile.unrest,
-                profile.culture,
-                profile.risk,
+                profile.activity,
+                profile.friction,
+                profile.trust,
+                profile.exposure,
                 profile.services,
                 profile.district_type,
+                profile.prior_district_type,
+                profile.identity_state,
+                profile.contesting_cell_id,
+                profile.contesting_type,
+                profile.transition_due_turn,
+                profile.buyout_pressure,
+                profile.last_buyout_report,
                 profile.land_use,
                 profile.zoning_overlay,
                 profile.display_state,
@@ -127,10 +148,10 @@ def write_state(paths, state):
         "audit_stage": (str(state.audit_stage), state.audit_stage),
         "status": (state.status, None),
         "last_report": (state.last_report, None),
-        "prosperity": (str(state.prosperity), state.prosperity),
-        "unrest": (str(state.unrest), state.unrest),
-        "culture": (str(state.culture), state.culture),
-        "risk": (str(state.risk), state.risk),
+        "activity": (str(state.activity), state.activity),
+        "friction": (str(state.friction), state.friction),
+        "trust": (str(state.trust), state.trust),
+        "exposure": (str(state.exposure), state.exposure),
         "scenario_id": (state.scenario_id, None),
         "stakeholder_heat": (json.dumps(state.stakeholder_heat, sort_keys=True), None),
         "last_revenue": (str(state.last_revenue), state.last_revenue),
@@ -138,6 +159,8 @@ def write_state(paths, state):
         "last_net": (str(state.last_net), state.last_net),
         "maintenance_backlog": (str(state.maintenance_backlog), state.maintenance_backlog),
         "stakeholder_memory": (json.dumps(state.stakeholder_memory, sort_keys=True), None),
+        "type_ledger": (json.dumps(state.type_ledger, sort_keys=True), None),
+        "pending_followups": (json.dumps(state.pending_followups, sort_keys=True), None),
         "week_day": (str(getattr(state, "week_day", 0)), getattr(state, "week_day", 0)),
         "daily_pressure": (json.dumps(getattr(state, "daily_pressure", {}) or {}, sort_keys=True), None),
     }
@@ -154,8 +177,11 @@ def read_state(paths):
     with arcpy.da.SearchCursor(paths["state"], ["key", "value_text", "value_num"]) as cursor:
         for key, text, num in cursor:
             values[key] = (text, num)
+    for legacy, current in LEGACY_STATE_METRIC_KEYS.items():
+        if current not in values and legacy in values:
+            values[current] = values[legacy]
     state = rules.CityState()
-    for key in ("turn", "max_turns", "ap", "max_ap", "money", "audit_stage", "prosperity", "unrest", "culture", "risk", "last_revenue", "last_upkeep", "last_net", "maintenance_backlog", "week_day"):
+    for key in ("turn", "max_turns", "ap", "max_ap", "money", "audit_stage", "activity", "friction", "trust", "exposure", "last_revenue", "last_upkeep", "last_net", "maintenance_backlog", "week_day"):
         if key in values and values[key][1] is not None:
             setattr(state, key, int(values[key][1]))
     for key in ("status", "last_report", "scenario_id"):
@@ -173,6 +199,18 @@ def read_state(paths):
             state.stakeholder_memory = {str(key): int(value) for key, value in parsed.items()}
         except Exception:
             state.stakeholder_memory = {}
+    if "type_ledger" in values and values["type_ledger"][0]:
+        try:
+            parsed = json.loads(values["type_ledger"][0])
+            rules.write_type_ledger(state, parsed)
+        except Exception:
+            state.type_ledger = {}
+    if "pending_followups" in values and values["pending_followups"][0]:
+        try:
+            parsed = json.loads(values["pending_followups"][0])
+            state.pending_followups = {str(key): str(value) for key, value in parsed.items()}
+        except Exception:
+            state.pending_followups = {}
     if "daily_pressure" in values and values["daily_pressure"][0]:
         try:
             parsed = json.loads(values["daily_pressure"][0])
@@ -260,12 +298,19 @@ def read_districts(paths):
         "cell_id",
         "district_name",
         "population",
-        "prosperity",
-        "unrest",
-        "culture",
-        "risk",
+        "activity",
+        "friction",
+        "trust",
+        "exposure",
         "services",
         "district_type",
+        "prior_district_type",
+        "identity_state",
+        "contesting_cell_id",
+        "contesting_type",
+        "transition_due_turn",
+        "buyout_pressure",
+        "last_buyout_report",
         "land_use",
         "zoning_overlay",
         "display_state",
@@ -289,28 +334,35 @@ def read_districts(paths):
                 cell_id=row[0],
                 name=row[1],
                 population=int(row[2] or 0),
-                prosperity=int(row[3] or 0),
-                unrest=int(row[4] or 0),
-                culture=int(row[5] or 0),
-                risk=int(row[6] or 0),
+                activity=int(row[3] or 0),
+                friction=int(row[4] or 0),
+                trust=int(row[5] or 0),
+                exposure=int(row[6] or 0),
                 services=int(row[7] or 0),
                 district_type=row[8] or "mercantile",
-                land_use=row[9] or "",
-                zoning_overlay=row[10] or "",
-                display_state=row[11] or "stable",
-                service_gap=decode_service_gap(row[12]),
-                adjacent_cell_ids=[part for part in (row[13] or "").split(",") if part],
-                network_access=decode_json(row[14]),
-                hazards=decode_json(row[15]),
-                housing_capacity=int(row[16] or 0),
-                affordability=int(row[17] or 0),
-                vacancy_rate=int(row[18] or 0),
-                displacement=decode_json(row[19]),
-                population_mix=decode_group_bands(row[20], maximum=3),
-                dissatisfaction=decode_group_bands(row[21], maximum=4),
-                incident_state=row[22] or "none",
-                incident_group=row[23] or "",
-                public_profile=row[24] or "",
+                prior_district_type=row[9] or "",
+                identity_state=row[10] or "stable",
+                contesting_cell_id=row[11] or "",
+                contesting_type=row[12] or "",
+                transition_due_turn=int(row[13] or 0),
+                buyout_pressure=int(row[14] or 0),
+                last_buyout_report=row[15] or "",
+                land_use=row[16] or "",
+                zoning_overlay=row[17] or "",
+                display_state=row[18] or "stable",
+                service_gap=decode_service_gap(row[19]),
+                adjacent_cell_ids=[part for part in (row[20] or "").split(",") if part],
+                network_access=decode_json(row[21]),
+                hazards=decode_json(row[22]),
+                housing_capacity=int(row[23] or 0),
+                affordability=int(row[24] or 0),
+                vacancy_rate=int(row[25] or 0),
+                displacement=decode_json(row[26]),
+                population_mix=decode_group_bands(row[27], maximum=3),
+                dissatisfaction=decode_group_bands(row[28], maximum=4),
+                incident_state=row[29] or "none",
+                incident_group=row[30] or "",
+                public_profile=row[31] or "",
             )
             rules.normalize_profile(profile)
             out[profile.cell_id] = profile
@@ -327,11 +379,19 @@ def write_district_updates(paths, districts, report, affected_ids=None):
     fields = [
         "cell_id",
         "population",
-        "prosperity",
-        "unrest",
-        "culture",
-        "risk",
+        "activity",
+        "friction",
+        "trust",
+        "exposure",
         "services",
+        "district_type",
+        "prior_district_type",
+        "identity_state",
+        "contesting_cell_id",
+        "contesting_type",
+        "transition_due_turn",
+        "buyout_pressure",
+        "last_buyout_report",
         "land_use",
         "zoning_overlay",
         "display_state",
@@ -358,29 +418,37 @@ def write_district_updates(paths, districts, report, affected_ids=None):
             profile = districts[cid]
             rules.normalize_profile(profile)
             row[1] = profile.population
-            row[2] = profile.prosperity
-            row[3] = profile.unrest
-            row[4] = profile.culture
-            row[5] = profile.risk
+            row[2] = profile.activity
+            row[3] = profile.friction
+            row[4] = profile.trust
+            row[5] = profile.exposure
             row[6] = profile.services
-            row[7] = profile.land_use
-            row[8] = profile.zoning_overlay
-            row[9] = profile.display_state
-            row[10] = encode_service_gap(profile.service_gap)
-            row[11] = ",".join(profile.adjacent_cell_ids)
-            row[12] = encode_json(profile.network_access, limit=1024)
-            row[13] = encode_json(profile.hazards, limit=1024)
-            row[14] = profile.housing_capacity
-            row[15] = profile.affordability
-            row[16] = profile.vacancy_rate
-            row[17] = encode_json(profile.displacement, limit=1024)
-            row[18] = encode_group_bands(profile.population_mix, maximum=3)
-            row[19] = encode_group_bands(profile.dissatisfaction, maximum=4)
-            row[20] = profile.incident_state
-            row[21] = profile.incident_group
-            row[22] = profile.public_profile
+            row[7] = profile.district_type
+            row[8] = profile.prior_district_type
+            row[9] = profile.identity_state
+            row[10] = profile.contesting_cell_id
+            row[11] = profile.contesting_type
+            row[12] = profile.transition_due_turn
+            row[13] = profile.buyout_pressure
+            row[14] = profile.last_buyout_report[:512]
+            row[15] = profile.land_use
+            row[16] = profile.zoning_overlay
+            row[17] = profile.display_state
+            row[18] = encode_service_gap(profile.service_gap)
+            row[19] = ",".join(profile.adjacent_cell_ids)
+            row[20] = encode_json(profile.network_access, limit=1024)
+            row[21] = encode_json(profile.hazards, limit=1024)
+            row[22] = profile.housing_capacity
+            row[23] = profile.affordability
+            row[24] = profile.vacancy_rate
+            row[25] = encode_json(profile.displacement, limit=1024)
+            row[26] = encode_group_bands(profile.population_mix, maximum=3)
+            row[27] = encode_group_bands(profile.dissatisfaction, maximum=4)
+            row[28] = profile.incident_state
+            row[29] = profile.incident_group
+            row[30] = profile.public_profile
             if cid in affected:
-                row[23] = report[:512]
+                row[31] = report[:512]
             cursor.updateRow(row)
 
 
@@ -414,7 +482,7 @@ def _daily_overlay_state(profile, pressure):
         return "housing_pressure"
     if profile and rules._top_dissatisfaction(profile)[1] >= rules.DISSATISFACTION_AGGRIEVED_THRESHOLD:
         return "grievance"
-    if pressure:
+    if pressure >= 1:
         return "daily_pressure"
     return profile.display_state if profile else "stable"
 
@@ -605,11 +673,20 @@ def generate_docket_rows(paths, seed, messages):
     districts = read_districts(paths)
     active_features = read_active_features(paths)
     projects = read_projects(paths)
+    carried_items = [item for item in read_docket(paths) if item.status == "carried"]
     arcpy.management.DeleteRows(paths["docket"])
     if state.status == "complete" or state.turn > state.max_turns:
         _log(messages, "DOCKET", f"final audit complete; no week {state.turn + 1} docket generated")
         return []
-    items = rules.generate_docket(turn=state.turn, seed=seed, count=3, state=state, districts=districts, projects=projects, active_features=active_features)
+    items = rules.generate_docket(
+        turn=state.turn,
+        seed=seed,
+        state=state,
+        districts=districts,
+        projects=projects,
+        active_features=active_features,
+        carried_items=carried_items,
+    )
     # Docket rows mirror rule items exactly enough for the dashboard to reload
     # without recomputing follow-up priority or case metadata.
     with arcpy.da.InsertCursor(paths["docket"], DOCKET_FIELD_NAMES) as cursor:
@@ -638,6 +715,7 @@ def generate_docket_rows(paths, seed, messages):
                 encode_json(item.case_json),
             ])
     seed_docket_proposals(paths, items, seed, messages)
+    write_state(paths, state)
     _log(messages, "DOCKET", f"generated {len(items)} docket item(s) for turn {state.turn}")
     return items
 

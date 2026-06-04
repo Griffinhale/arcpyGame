@@ -7,6 +7,9 @@ from typing import Iterable
 from .models import *
 from .catalogs import *
 from .helpers import *
+from .expiration import resolve_unattended_item
+from .buyouts import resolve_buyout_round, resolve_contested_transitions
+from .type_pressure import read_type_ledger, write_type_ledger
 from .systems import (
     _advance_feature_lifecycle,
     _apply_recurring_economy,
@@ -101,14 +104,14 @@ def _scenario_score(
     """Calculate audit score using either default or scenario-specific weights."""
 
     if scenario.scenario_id == "default":
-        return state.prosperity + state.culture - state.unrest - state.risk + state.money // 3
+        return state.activity + state.trust - state.friction - state.exposure + state.money // 3
     weights = scenario.score_weights or SCENARIO_RULES["default"].score_weights
     score = 0
     metric_values = {
-        "prosperity": state.prosperity,
-        "culture": state.culture,
-        "unrest": state.unrest,
-        "risk": state.risk,
+        "activity": state.activity,
+        "trust": state.trust,
+        "friction": state.friction,
+        "exposure": state.exposure,
         "money": state.money // 3,
     }
     # Scenario weights can inspect district-level systems, so fold those
@@ -174,6 +177,7 @@ def advance_turn_result(
     district_deltas: dict[str, dict[str, int]] = {}
     money_before_recurring = state.money
     permit_spend = int(state.stakeholder_memory.pop(TURN_PERMIT_SPEND_KEY, 0) or 0)
+    ignored_grievance_floors: dict[str, dict[str, int]] = {}
     weekly_pressure = {
         str(cid): max(0, min(PRESSURE_DAY_MAX, int(value or 0)))
         for cid, value in (getattr(state, "daily_pressure", {}) or {}).items()
@@ -185,8 +189,6 @@ def advance_turn_result(
         if item.status in ("open", "inspected"):
             template = TEMPLATES[item.template_id]
             item.stakeholder = item.stakeholder or template.stakeholder
-            if _adjust_heat(state, item.stakeholder, template.ignore_heat):
-                heated += 1
             item_pressure = max((weekly_pressure.get(cid, 0) for cid in item.target_cell_ids), default=0)
             extra_heat = (1 if item_pressure >= 2 else 0) + (1 if item_pressure >= PRESSURE_DAY_MAX else 0)
             if extra_heat and _adjust_heat(state, item.stakeholder, extra_heat):
@@ -194,17 +196,26 @@ def advance_turn_result(
             if districts:
                 for cid in item.target_cell_ids:
                     if cid in districts:
+                        reaction_groups = template.supporter_groups or (template.stakeholder,)
+                        floors = _dissatisfaction_floor(districts[cid], reaction_groups, 1)
                         _apply_population_reaction(template, [districts[cid]], "ignore", False)
+                        _merge_dissatisfaction_floors(ignored_grievance_floors, cid, floors)
                         local_grievances += 1
                         if weekly_pressure.get(cid, 0) >= 3:
+                            floors = _dissatisfaction_floor(districts[cid], reaction_groups, 1)
                             _apply_population_reaction(template, [districts[cid]], "ignore", False)
+                            _merge_dissatisfaction_floors(ignored_grievance_floors, cid, floors)
                             local_grievances += 1
-            if item.carryover == "expire_or_return" and (item.turn + len(item.item_id)) % 2 == 0:
-                item.status = "carried"
+            heat_before_resolution = state.stakeholder_heat.get(item.stakeholder, 0)
+            expiration = resolve_unattended_item(state, item, districts or {}, seed=2026)
+            if state.stakeholder_heat.get(item.stakeholder, 0) != heat_before_resolution:
+                heated += 1
+            if item.status == "carried":
                 carried += 1
-            else:
-                item.status = "expired"
+            elif item.status == "expired":
                 expired += 1
+            if expiration.policy == "momentum_with_followup_risk" and expiration.followup_template_id:
+                state.pending_followups[item.item_id] = expiration.followup_template_id
             if projects and item.project_id in projects:
                 project = projects[item.project_id]
                 project.status = "overdue"
@@ -231,13 +242,27 @@ def advance_turn_result(
             system_notes.append(f"Displacement pressure in {housing_report['displacement_pressure']} district(s).")
         for profile in districts.values():
             population_delta += _advance_population_pressure(profile)
+        for cid, floors in ignored_grievance_floors.items():
+            if cid in districts:
+                delta = _apply_dissatisfaction_floors(districts[cid], floors)
+                if delta:
+                    _merge_delta(district_deltas.setdefault(cid, {}), {"dissatisfaction": delta})
         new_incidents = _surface_new_incidents(state, districts.values())
+        ledger = read_type_ledger(state, districts)
+        transition_result = resolve_contested_transitions(state, districts, ledger)
+        buyout_result = resolve_buyout_round(state, districts, ledger, seed=2026)
+        write_type_ledger(state, ledger)
+        if transition_result.report:
+            system_notes.append(transition_result.report)
+        if buyout_result.report:
+            system_notes.append(buyout_result.report)
     final_week = state.turn >= state.max_turns
     if not final_week:
         state.turn += 1
     state.ap = state.max_ap
-    if not final_week and state.turn == 3:
-        state.audit_stage += 1
+    mid_audit_turn = max(2, state.max_turns // 2)
+    if not final_week and state.turn == mid_audit_turn:
+        state.audit_stage = max(state.audit_stage, 1)
     if final_week:
         state.status = "complete"
         state.audit_stage = max(state.audit_stage, 2)
@@ -257,7 +282,13 @@ def advance_turn_result(
     population_text = f" Population drift {population_delta:+d}." if population_delta else ""
     incident_text = f" New civic incident file(s): {new_incidents}." if new_incidents else ""
     system_text = f" {' '.join(system_notes)}" if system_notes else ""
-    audit_text = f" Final audit: {audit.grade}." if state.status == "complete" else f" Audit snapshot: {audit.grade}." if state.turn == 3 else ""
+    audit_text = (
+        f" Final audit: {audit.grade}."
+        if state.status == "complete"
+        else f" Audit snapshot: {audit.grade}."
+        if state.turn == mid_audit_turn
+        else ""
+    )
     report = (
         f"{'Final week closed' if state.status == 'complete' else 'Advanced week'}. Carried {carried} item(s), expired {expired} item(s)."
         f"{heat_text}{grievance_text}{violation_text}{feature_text}{economy_text}{population_text}{incident_text}{system_text}{audit_text}"
@@ -315,20 +346,20 @@ def generate_audit_result(
         findings.append(AuditFinding("money.low", "warning", "money", "Budget is below the operating reserve.", -10))
     if state.last_net < 0:
         findings.append(AuditFinding("money.net_negative", "warning", "economy", "Recurring economy is losing money.", -5))
-    if state.unrest >= 70:
-        findings.append(AuditFinding("city.unrest", "critical", "city", "Citywide unrest is audit-critical.", -20))
-    if state.risk >= 70:
-        findings.append(AuditFinding("city.risk", "critical", "city", "Citywide risk is audit-critical.", -20))
+    if state.friction >= 70:
+        findings.append(AuditFinding("city.friction", "critical", "city", "Citywide friction is audit-critical.", -20))
+    if state.exposure >= 70:
+        findings.append(AuditFinding("city.exposure", "critical", "city", "Citywide exposure is audit-critical.", -20))
 
     # Audit findings aggregate citywide signals but keep severe district facts visible.
     for profile in profiles:
         normalize_profile(profile)
         if profile.incident_state != "none":
             incident_count += 1
-        if profile.risk >= 70:
-            findings.append(AuditFinding(f"risk.{profile.cell_id}", "critical", "district", f"{profile.cell_id} risk is critical.", -12))
-        if profile.unrest >= 70:
-            findings.append(AuditFinding(f"unrest.{profile.cell_id}", "critical", "district", f"{profile.cell_id} unrest is critical.", -12))
+        if profile.exposure >= 70:
+            findings.append(AuditFinding(f"exposure.{profile.cell_id}", "critical", "district", f"{profile.cell_id} exposure is critical.", -12))
+        if profile.friction >= 70:
+            findings.append(AuditFinding(f"friction.{profile.cell_id}", "critical", "district", f"{profile.cell_id} friction is critical.", -12))
         for service, gap in profile.service_gap.items():
             if gap >= AUDIT_THRESHOLDS["service_gap_critical"]:
                 service_gap_total += 1
@@ -436,8 +467,8 @@ def generate_audit_result(
     finding_text = "no findings" if not findings else f"{len(findings)} finding(s), {critical_count} critical"
     scenario_text = "" if state.scenario_id == "default" else f"; scenario={state.scenario_id}; priorities={', '.join(scenario.audit_priorities)}"
     report = (
-        f"Audit {grade}: score={score}; prosperity={state.prosperity}, unrest={state.unrest}, "
-        f"culture={state.culture}, risk={state.risk}, money={state.money}; net={state.last_net}{scenario_text}; {finding_text}."
+        f"Audit {grade}: score={score}; activity={state.activity}, friction={state.friction}, "
+        f"trust={state.trust}, exposure={state.exposure}, money={state.money}; net={state.last_net}{scenario_text}; {finding_text}."
     )
     return AuditResult(grade, score, tuple(findings), report)
 

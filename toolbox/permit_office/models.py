@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 
-CORE_METRICS = ("prosperity", "unrest", "culture", "risk")
+CORE_METRICS = ("activity", "friction", "trust", "exposure")
 DISTRICT_METRICS = CORE_METRICS + ("services",)
 
 DISTRICT_TYPES = ("residential", "mercantile", "industrial", "civic", "academic", "natural")
@@ -93,6 +93,12 @@ DISPLAY_STATES = (
     "hazard",
     "housing_pressure",
     "economic_growth",
+    "high_activity",
+    "high_friction",
+    "high_trust",
+    "high_exposure",
+    "strained",
+    "aggrieved",
 )
 
 
@@ -156,8 +162,8 @@ class HazardRule:
 
     hazard_type: str
     affected_groups: tuple[str, ...]
-    risk_threshold: int = 2
-    unrest_threshold: int = 3
+    exposure_threshold: int = 2
+    friction_threshold: int = 3
     decay: int = 1
     source_effects: dict[str, int] = field(default_factory=dict)
     mitigation_service_types: dict[str, int] = field(default_factory=dict)
@@ -235,6 +241,8 @@ class DocketTemplate:
     money_cost: int = 10
     mitigation_cost: int = 8
     expires_after: int = 0
+    expiration_policy: str = "city_momentum"
+    pressure_category: str = "general"
     preview: str = ""
     inspect_hint: str = ""
     target_rule: str = ""
@@ -268,12 +276,19 @@ class DistrictProfile:
     cell_id: str
     name: str
     population: int
-    prosperity: int
-    unrest: int
-    culture: int
-    risk: int
+    activity: int
+    friction: int
+    trust: int
+    exposure: int
     services: int
     district_type: str
+    prior_district_type: str = ""
+    identity_state: str = "stable"
+    contesting_cell_id: str = ""
+    contesting_type: str = ""
+    transition_due_turn: int = 0
+    buyout_pressure: int = 0
+    last_buyout_report: str = ""
     display_state: str = "stable"
     population_mix: dict[str, int] = field(default_factory=dict)
     dissatisfaction: dict[str, int] = field(default_factory=dict)
@@ -297,17 +312,17 @@ class CityState:
     """Mutable citywide turn, resource, metric, and heat state."""
 
     turn: int = 1
-    max_turns: int = 6
-    ap: int = 3
-    max_ap: int = 3
+    max_turns: int = 12
+    ap: int = 2
+    max_ap: int = 2
     money: int = 60
     audit_stage: int = 0
     status: str = "playing"
     last_report: str = ""
-    prosperity: int = 50
-    unrest: int = 20
-    culture: int = 35
-    risk: int = 25
+    activity: int = 50
+    friction: int = 20
+    trust: int = 35
+    exposure: int = 25
     scenario_id: str = "default"
     stakeholder_heat: dict[str, int] = field(default_factory=dict)
     last_revenue: int = 0
@@ -315,6 +330,8 @@ class CityState:
     last_net: int = 0
     maintenance_backlog: int = 0
     stakeholder_memory: dict[str, int] = field(default_factory=dict)
+    type_ledger: dict[str, dict[str, int]] = field(default_factory=dict)
+    pending_followups: dict[str, str] = field(default_factory=dict)
     week_day: int = 0
     daily_pressure: dict[str, int] = field(default_factory=dict)
 

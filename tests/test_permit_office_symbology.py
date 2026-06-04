@@ -292,8 +292,37 @@ class RejectingRenderer:
         raise RuntimeError("field is not supported")
 
 
-def test_apply_simple_symbology_uses_display_state_for_districts():
-    """Verify district layers render by display_state."""
+def test_district_layers_render_by_district_type_by_default():
+    """Verify district layers default to identity-first district-type rendering."""
+
+    from toolbox.permit_office_arcgis.symbology_config import RENDER_FIELD_BY_LAYER_KEY
+
+    assert RENDER_FIELD_BY_LAYER_KEY["districts"] == "district_type"
+
+
+def test_identity_transition_symbol_values_are_configured():
+    """Verify identity transition render values are available."""
+
+    from toolbox.permit_office_arcgis.symbology_config import SYMBOLS_BY_FIELD
+
+    identity_symbols = SYMBOLS_BY_FIELD["identity_state"]
+    assert {"stable", "vulnerable", "contested", "converted", "overextended"} <= set(identity_symbols)
+    assert "district_type" in SYMBOLS_BY_FIELD
+
+
+def test_identity_transition_symbol_style_gets_strong_outline():
+    """Verify identity transition values get high-contrast outlines."""
+
+    from toolbox.permit_office_arcgis.symbology_config import symbol_style_for
+
+    style = symbol_style_for("districts", "contested")
+
+    assert style["outline_color"] == [93, 48, 48, 100]
+    assert style["outline_width"] == 3.2
+
+
+def test_apply_simple_symbology_uses_district_type_for_districts():
+    """Verify district layers render by district_type."""
 
     renderer = FieldsListRenderer()
     layer = FakeLayer(renderer)
@@ -302,7 +331,7 @@ def test_apply_simple_symbology_uses_display_state_for_districts():
     apply_simple_symbology(layer, "districts", messages)
 
     assert layer.symbology.updated_renderer == "UniqueValueRenderer"
-    assert renderer.fields == ["display_state"]
+    assert renderer.fields == ["district_type"]
     assert renderer.useDefaultSymbol is True
     assert layer.assigned_symbology is layer.symbology
     assert layer.symbology_assignment_count == 1
@@ -323,8 +352,8 @@ def test_apply_simple_symbology_uses_display_state_for_support_layers():
     assert messages.warnings == []
 
 
-def test_apply_simple_symbology_seeds_and_styles_display_state_classes():
-    """Verify known display states receive labels and symbols."""
+def test_apply_simple_symbology_seeds_and_styles_district_type_classes():
+    """Verify known district types receive labels and symbols."""
 
     renderer = StyledRenderer()
     layer = FakeLayer(renderer)
@@ -333,21 +362,17 @@ def test_apply_simple_symbology_seeds_and_styles_display_state_classes():
     apply_simple_symbology(layer, "districts", messages)
 
     items = {item.values[0][0]: item for item in renderer.groups[0].items}
-    assert "stable" in items
-    assert "daily_pressure" in items
-    assert "service_gap" in items
-    assert "hazard" in items
-    assert "housing_pressure" in items
-    assert "incident" in items
-    assert items["stable"].label == "Stable"
-    assert items["daily_pressure"].label == "Daily Pressure"
-    assert items["service_gap"].label == "Service Gap"
-    assert "strained" not in items
-    assert "aggrieved" not in items
-    assert "at_risk" not in items
-    assert items["hazard"].symbol.color == {"RGB": [196, 90, 74, 100]}
-    assert items["stable"].symbol.outlineColor == {"RGB": [242, 238, 226, 100]}
-    assert items["stable"].symbol.outlineWidth == 3.0
+    assert "residential" in items
+    assert "mercantile" in items
+    assert "industrial" in items
+    assert "civic" in items
+    assert "academic" in items
+    assert "natural" in items
+    assert items["residential"].label == "Residential"
+    assert items["mercantile"].label == "Mercantile"
+    assert items["industrial"].symbol.color == {"RGB": [174, 166, 154, 100]}
+    assert items["residential"].symbol.outlineColor == {"RGB": [242, 238, 226, 100]}
+    assert items["residential"].symbol.outlineWidth == 3.0
     assert renderer.defaultSymbol.color == {"RGB": [220, 220, 208, 100]}
     assert renderer.defaultSymbol.outlineColor == {"RGB": [242, 238, 226, 100]}
     assert renderer.defaultSymbol.outlineWidth == 3.0
@@ -411,7 +436,7 @@ def test_apply_simple_symbology_falls_back_to_cim_field_setter():
     assert layer.assigned_symbology is layer.symbology
     assert layer.symbology_assignment_count == 1
     assert layer.requested_cim_versions == ["V3"]
-    assert layer.cim_renderer.fields == ["display_state"]
+    assert layer.cim_renderer.fields == ["district_type"]
     assert layer.cim_renderer.useDefaultSymbol is True
     assert layer.cim_renderer.isDefaultSymbolVisible is True
     assert layer.assigned_definition is layer.cim_definition
@@ -440,15 +465,15 @@ def test_tune_layer_visibility_makes_zones_transparent():
     assert layer.transparency == 35
 
 
-def test_configure_labels_turns_on_district_cell_labels():
-    """Verify district label classes display cell IDs."""
+def test_configure_labels_turns_on_district_name_labels():
+    """Verify district label classes display district names."""
 
     layer = FakeLayer(FieldsListRenderer())
 
     _configure_labels(layer, "districts")
 
     assert layer.showLabels is True
-    assert layer.label_classes[0].expression == "$feature.cell_id"
+    assert layer.label_classes[0].expression == "$feature.district_name"
     assert layer.label_classes[0].visible is True
 
 

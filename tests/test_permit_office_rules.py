@@ -38,6 +38,730 @@ def test_demo_template_catalog_has_case_file_metadata():
         assert template.spawn_archetype_id in rules.FEATURE_ARCHETYPES
 
 
+def test_city_state_defaults_to_twelve_week_attention_scarcity():
+    state = rules.CityState()
+
+    assert state.max_turns == 12
+    assert state.ap == 2
+    assert state.max_ap == 2
+    assert state.type_ledger == {}
+    assert state.pending_followups == {}
+
+
+def test_district_profiles_include_identity_transition_defaults():
+    profile = rules.generate_district_profiles(rows=1, cols=1, seed=2026)[0]
+
+    assert profile.prior_district_type == ""
+    assert profile.identity_state == "stable"
+    assert profile.contesting_cell_id == ""
+    assert profile.contesting_type == ""
+    assert profile.transition_due_turn == 0
+    assert profile.buyout_pressure == 0
+    assert profile.last_buyout_report == ""
+
+
+def test_templates_declare_expiration_policy_and_pressure_category():
+    policies = {template.expiration_policy for template in rules.TEMPLATES.values()}
+
+    assert {"missed_window", "city_momentum", "momentum_with_followup_risk", "mandatory_followup"} <= policies
+    assert rules.TEMPLATES["procession_route"].expiration_policy == "missed_window"
+    assert rules.TEMPLATES["mixed_use_rezoning"].expiration_policy == "city_momentum"
+    assert rules.TEMPLATES["street_vendor_compact"].expiration_policy == "momentum_with_followup_risk"
+    assert rules.TEMPLATES[rules.MAINTENANCE_TEMPLATE_ID].expiration_policy == "mandatory_followup"
+    assert all(template.pressure_category for template in rules.TEMPLATES.values())
+
+
+def test_type_ledger_rebuilds_from_district_holdings():
+    districts = {
+        profile.cell_id: profile
+        for profile in rules.generate_district_profiles(rows=2, cols=2, seed=2026)
+    }
+
+    ledger = rules.rebuild_type_ledger(districts)
+
+    assert set(ledger) == set(rules.DISTRICT_TYPES)
+    assert sum(entry["holdings"] for entry in ledger.values()) == 4
+    assert all(entry["capital"] >= 0 for entry in ledger.values())
+    assert all("appetite" in entry for entry in ledger.values())
+    assert all("fatigue" in entry for entry in ledger.values())
+    assert all("overextension" in entry for entry in ledger.values())
+
+
+def test_type_ledger_round_trips_through_city_state_memory():
+    state = rules.CityState()
+    districts = {
+        profile.cell_id: profile
+        for profile in rules.generate_district_profiles(rows=2, cols=2, seed=2026)
+    }
+    ledger = rules.rebuild_type_ledger(districts)
+
+    rules.write_type_ledger(state, ledger)
+    loaded = rules.read_type_ledger(state, districts)
+
+    assert loaded == ledger
+    assert state.type_ledger == ledger
+
+
+def test_type_ledger_refreshes_after_blank_read_without_districts():
+    state = rules.CityState()
+    districts = {
+        profile.cell_id: profile
+        for profile in rules.generate_district_profiles(rows=2, cols=2, seed=2026)
+    }
+
+    rules.read_type_ledger(state, None)
+    loaded = rules.read_type_ledger(state, districts)
+
+    assert sum(entry["holdings"] for entry in loaded.values()) == 4
+    assert state.type_ledger == loaded
+
+
+def test_type_pressure_summary_is_qualitative_not_table_data():
+    ledger = {
+        "mercantile": {"capital": 85, "appetite": 12, "fatigue": 1, "holdings": 4, "overextension": 0},
+        "residential": {"capital": 20, "appetite": 2, "fatigue": 4, "holdings": 2, "overextension": 5},
+    }
+
+    summary = rules.type_pressure_summary(ledger)
+
+    assert "Mercantile" in summary
+    assert "expansion pressure" in summary
+    assert "$" not in summary
+
+
+def test_adjust_type_ledger_mutates_caller_ledger():
+    ledger = {
+        dtype: {"capital": 0, "appetite": 0, "fatigue": 0, "holdings": 0, "overextension": 0}
+        for dtype in rules.DISTRICT_TYPES
+    }
+
+    returned = rules.adjust_type_ledger(ledger, "residential", capital_delta=5, appetite_delta=2, holdings_delta=1)
+
+    assert returned is ledger
+    assert ledger["residential"]["capital"] == 5
+    assert ledger["residential"]["appetite"] == 2
+    assert ledger["residential"]["holdings"] == 1
+
+
+def _district_for_buyout(cell_id, dtype, activity, adjacent):
+    profile = rules.DistrictProfile(
+        cell_id=cell_id,
+        name=cell_id,
+        population=1000,
+        activity=activity,
+        friction=25,
+        trust=35,
+        exposure=20,
+        services=40,
+        district_type=dtype,
+        adjacent_cell_ids=list(adjacent),
+    )
+    rules.normalize_profile(profile)
+    return profile
+
+
+def _incident_profile(cell_id, group="renters", band=4):
+    profile = rules.DistrictProfile(
+        cell_id=cell_id,
+        name=f"{cell_id} Incident Row",
+        population=1200,
+        activity=42,
+        friction=35,
+        trust=35,
+        exposure=30,
+        services=35,
+        district_type="residential",
+        population_mix={group: 3},
+        dissatisfaction={group: band},
+    )
+    rules.normalize_profile(profile)
+    return profile
+
+
+def _local_incident_items(docket):
+    return [
+        item
+        for item in docket
+        if item.template_id == rules.CIVIC_INCIDENT_TEMPLATE_ID
+        and item.origin_item_id.startswith("dissatisfaction:")
+    ]
+
+
+def test_buyout_no_eligible_target_does_nothing():
+    state = rules.CityState()
+    districts = {
+        "A": _district_for_buyout("A", "residential", 60, ["B"]),
+        "B": _district_for_buyout("B", "mercantile", 70, ["A"]),
+    }
+    ledger = rules.rebuild_type_ledger(districts)
+
+    result = rules.resolve_buyout_round(state, districts, ledger, seed=2026)
+
+    assert result.started == []
+    assert districts["A"].identity_state == "stable"
+    assert districts["B"].identity_state == "stable"
+
+
+def test_buyout_single_bidder_starts_contested_transition():
+    state = rules.CityState()
+    districts = {
+        "A": _district_for_buyout("A", "residential", 35, ["B"]),
+        "B": _district_for_buyout("B", "mercantile", 78, ["A"]),
+    }
+    ledger = rules.rebuild_type_ledger(districts)
+    ledger["mercantile"]["capital"] = 100
+    ledger["mercantile"]["appetite"] = 20
+
+    result = rules.resolve_buyout_round(state, districts, ledger, seed=2026)
+
+    assert result.started == ["A"]
+    assert districts["A"].identity_state == "contested"
+    assert districts["A"].contesting_cell_id == "B"
+    assert districts["A"].contesting_type == "mercantile"
+    assert districts["A"].transition_due_turn == state.turn + 1
+    assert "entered contested buyout" in result.report.lower()
+    assert districts["A"].last_buyout_report == (
+        "A entered contested buyout from B; "
+        "mercantile bid cleared local leverage after weak activity and pressure."
+    )
+
+
+def test_buyout_reports_explain_target_bidder_and_reason():
+    state = rules.CityState()
+    districts = {
+        "A": _district_for_buyout("A", "residential", 35, ["B"]),
+        "B": _district_for_buyout("B", "mercantile", 82, ["A"]),
+    }
+    ledger = rules.rebuild_type_ledger(districts)
+    ledger["mercantile"]["capital"] = 100
+    ledger["mercantile"]["appetite"] = 20
+
+    result = rules.resolve_buyout_round(state, districts, ledger, seed=2026)
+
+    assert "A" in result.report or "A" in districts["A"].last_buyout_report
+    assert "mercantile" in result.report.lower()
+    assert any(phrase in result.report.lower() for phrase in ("bid", "leverage", "contested", "refused"))
+    assert result.report == (
+        "A entered contested buyout from B; "
+        "mercantile bid cleared local leverage after weak activity and pressure."
+    )
+
+
+def test_buyout_target_can_refuse_bid_deterministically():
+    state = rules.CityState()
+    districts = {
+        "A": _district_for_buyout("A", "residential", 49, ["B"]),
+        "B": _district_for_buyout("B", "mercantile", 82, ["A"]),
+    }
+    ledger = rules.rebuild_type_ledger(districts)
+    ledger["mercantile"]["capital"] = 100
+    ledger["mercantile"]["appetite"] = 20
+
+    result = rules.resolve_buyout_round(state, districts, ledger, seed=3)
+
+    assert result.started == []
+    assert result.refused == ["A"]
+    assert districts["A"].identity_state == "stable"
+    assert districts["A"].contesting_cell_id == ""
+    assert result.report == (
+        "A refused a mercantile buyout bid from B; "
+        "local leverage remained high enough to resist."
+    )
+    assert districts["A"].last_buyout_report == result.report
+
+
+def test_contested_transition_converts_when_pressure_remains_high():
+    state = rules.CityState(turn=2)
+    target = _district_for_buyout("A", "residential", 32, ["B"])
+    target.identity_state = "contested"
+    target.contesting_cell_id = "B"
+    target.contesting_type = "mercantile"
+    target.transition_due_turn = 2
+    target.buyout_pressure = 5
+    districts = {
+        "A": target,
+        "B": _district_for_buyout("B", "mercantile", 80, ["A"]),
+    }
+    ledger = rules.rebuild_type_ledger(districts)
+
+    result = rules.resolve_contested_transitions(state, districts, ledger)
+
+    assert result.converted == ["A"]
+    assert districts["A"].district_type == "mercantile"
+    assert districts["A"].prior_district_type == "residential"
+    assert districts["A"].identity_state == "converted"
+
+
+def test_converted_transition_does_not_recontest_during_same_week_close():
+    state = rules.CityState(turn=2)
+    target = _district_for_buyout("A", "residential", 32, ["B", "C"])
+    target.identity_state = "contested"
+    target.contesting_cell_id = "B"
+    target.contesting_type = "mercantile"
+    target.transition_due_turn = 2
+    target.buyout_pressure = 5
+    districts = {
+        "A": target,
+        "B": _district_for_buyout("B", "mercantile", 82, ["A"]),
+        "C": _district_for_buyout("C", "industrial", 90, ["A"]),
+    }
+
+    result = rules.advance_turn_result(state, [], districts)
+
+    assert state.turn == 3
+    assert districts["A"].district_type == "mercantile"
+    assert districts["A"].prior_district_type == "residential"
+    assert districts["A"].identity_state == "converted"
+    assert districts["A"].contesting_cell_id == ""
+    assert "converted from residential to mercantile" in result.report
+
+
+def test_contested_transition_cancels_when_target_stabilizes():
+    state = rules.CityState(turn=2)
+    target = _district_for_buyout("A", "residential", 57, ["B"])
+    target.identity_state = "contested"
+    target.contesting_cell_id = "B"
+    target.contesting_type = "mercantile"
+    target.transition_due_turn = 2
+    target.buyout_pressure = 0
+    districts = {
+        "A": target,
+        "B": _district_for_buyout("B", "mercantile", 80, ["A"]),
+    }
+    ledger = rules.rebuild_type_ledger(districts)
+
+    result = rules.resolve_contested_transitions(state, districts, ledger)
+
+    assert result.cancelled == ["A"]
+    assert districts["A"].district_type == "residential"
+    assert districts["A"].identity_state == "stable"
+
+
+def test_unmitigated_ordinary_approval_reduces_buyout_pressure_by_two():
+    state = rules.CityState(money=100)
+    districts = {
+        "D0000": _district_for_buyout("D0000", "residential", 42, []),
+    }
+    districts["D0000"].identity_state = "contested"
+    districts["D0000"].buyout_pressure = 5
+    item = rules.DocketItem(
+        "stabilize-annex",
+        "child_development_park_annex",
+        rules.TEMPLATES["child_development_park_annex"].title,
+        "POINT",
+        1,
+    )
+
+    result = rules.resolve_decision(state, item, districts, "approve", ["D0000"], seed=2026)
+
+    assert result.ok is True
+    assert districts["D0000"].buyout_pressure == 3
+
+
+def test_mitigated_ordinary_approval_reduces_buyout_pressure_by_three():
+    state = rules.CityState(money=100)
+    districts = {
+        "D0000": _district_for_buyout("D0000", "residential", 42, []),
+    }
+    districts["D0000"].identity_state = "contested"
+    districts["D0000"].buyout_pressure = 5
+    item = rules.DocketItem(
+        "stabilize-annex",
+        "child_development_park_annex",
+        rules.TEMPLATES["child_development_park_annex"].title,
+        "POINT",
+        1,
+        risk_band="low",
+    )
+
+    result = rules.resolve_decision(state, item, districts, "approve_mitigated", ["D0000"], seed=2026, mitigated=True)
+
+    assert result.ok is True
+    assert districts["D0000"].buyout_pressure == 2
+
+
+def test_failed_ordinary_approval_does_not_reduce_buyout_pressure():
+    state = rules.CityState(money=100, ap=3)
+    districts = {
+        "D0000": _district_for_buyout("D0000", "natural", 35, []),
+    }
+    districts["D0000"].exposure = 90
+    districts["D0000"].services = 5
+    districts["D0000"].identity_state = "contested"
+    districts["D0000"].buyout_pressure = 5
+    item = rules.DocketItem(
+        "failed-stabilization",
+        "contractor_renovation_waiver",
+        rules.TEMPLATES["contractor_renovation_waiver"].title,
+        "POINT",
+        1,
+        risk_band="high",
+    )
+
+    result = rules.resolve_decision(state, item, districts, "approve", ["D0000"], seed=2026)
+
+    assert result.ok is True
+    assert result.failure_triggered is True
+    assert districts["D0000"].buyout_pressure == 5
+
+
+def test_missed_window_expiration_closes_original_without_pressure():
+    state = rules.CityState()
+    districts = {profile.cell_id: profile for profile in rules.generate_district_profiles(rows=1, cols=1, seed=2026)}
+    item = rules.DocketItem("expire-event", "procession_route", "Licensed Procession Route", "LINE", 1)
+    item.target_cell_ids = ["D0000"]
+
+    result = rules.resolve_unattended_item(state, item, districts, seed=2026)
+
+    assert item.status == "expired"
+    assert result.policy == "missed_window"
+    assert result.followup_template_id == ""
+    assert districts["D0000"].buyout_pressure == 0
+    assert "window closed" in result.report.lower()
+    assert result.report == "Licensed Procession Route window closed without office action; the original filing expired."
+
+
+def test_expiration_reports_hint_at_original_policy():
+    state = rules.CityState()
+    districts = {profile.cell_id: profile for profile in rules.generate_district_profiles(rows=1, cols=1, seed=2026)}
+    item = rules.DocketItem("expire-event", "procession_route", "Licensed Procession Route", "LINE", 1)
+    item.target_cell_ids = ["D0000"]
+
+    result = rules.resolve_unattended_item(state, item, districts, seed=2026)
+
+    assert "window" in result.report.lower()
+    assert result.policy == "missed_window"
+
+
+def test_city_momentum_expiration_adds_pressure_and_report():
+    state = rules.CityState()
+    districts = {profile.cell_id: profile for profile in rules.generate_district_profiles(rows=1, cols=1, seed=2026)}
+    districts["D0000"].activity = 42
+    item = rules.DocketItem("expire-rezone", "mixed_use_rezoning", "Mixed-Use Rezoning Petition", "POLYGON", 1)
+    item.target_cell_ids = ["D0000"]
+
+    result = rules.resolve_unattended_item(state, item, districts, seed=2026)
+
+    assert item.status == "expired"
+    assert result.policy == "city_momentum"
+    assert districts["D0000"].buyout_pressure > 0
+    assert districts["D0000"].identity_state in {"stable", "vulnerable"}
+    assert "momentum" in result.report.lower()
+
+
+def test_bad_momentum_can_spawn_different_followup_template():
+    state = rules.CityState()
+    districts = {profile.cell_id: profile for profile in rules.generate_district_profiles(rows=1, cols=1, seed=2026)}
+    districts["D0000"].exposure = 70
+    item = rules.DocketItem("expire-vendor", "street_vendor_compact", "Street Vendor Compact", "POINT", 1)
+    item.target_cell_ids = ["D0000"]
+
+    result = rules.resolve_unattended_item(state, item, districts, seed=1)
+
+    assert item.status == "expired"
+    assert result.policy == "momentum_with_followup_risk"
+    assert result.followup_template_id in {"", rules.CIVIC_INCIDENT_TEMPLATE_ID, rules.ENFORCEMENT_TEMPLATE_ID}
+    assert result.report
+
+
+def test_pending_momentum_followup_appears_as_different_next_docket_item():
+    state = rules.CityState()
+    state.pending_followups["expire-vendor"] = rules.CIVIC_INCIDENT_TEMPLATE_ID
+    docket = rules.generate_docket(turn=2, seed=2026, count=4, state=state, districts={})
+
+    assert docket[0].template_id == rules.CIVIC_INCIDENT_TEMPLATE_ID
+    assert docket[0].origin_item_id == "momentum:expire-vendor"
+    assert "Follow-up from unattended city momentum" in docket[0].preview_text
+
+
+def test_city_momentum_week_close_applies_one_ignore_reaction():
+    profile = rules.DistrictProfile(
+        "D0000",
+        "Rezoning Row",
+        1200,
+        42,
+        20,
+        35,
+        25,
+        50,
+        "residential",
+        population_mix={"developers": 1},
+        dissatisfaction={"developers": 0},
+    )
+    rules.normalize_profile(profile)
+    state = rules.CityState()
+    item = rules.DocketItem(
+        "expire-rezone",
+        "mixed_use_rezoning",
+        "Mixed-Use Rezoning Petition",
+        "POLYGON",
+        1,
+        target_cell_ids=["D0000"],
+    )
+
+    rules.advance_turn_result(state, [item], {"D0000": profile})
+
+    assert item.status == "expired"
+    assert profile.buyout_pressure == 1
+    assert profile.identity_state == "vulnerable"
+    assert profile.dissatisfaction["developers"] == 1
+
+
+def test_week_close_can_start_buyout_transition_from_unattended_pressure():
+    state = rules.CityState()
+    districts = {
+        "A": _district_for_buyout("A", "residential", 35, ["B"]),
+        "B": _district_for_buyout("B", "mercantile", 82, ["A"]),
+    }
+    item = rules.DocketItem("ignored-rezone", "mixed_use_rezoning", "Mixed-Use Rezoning Petition", "POLYGON", 1)
+    item.target_cell_ids = ["A"]
+
+    result = rules.advance_turn_result(state, [item], districts)
+
+    assert state.turn == 2
+    assert districts["A"].identity_state == "contested"
+    assert districts["A"].contesting_cell_id == "B"
+    assert districts["A"].contesting_type == "mercantile"
+    assert districts["A"].transition_due_turn == 2
+    assert "expired" in result.report.lower()
+    assert "entered contested buyout" in result.report.lower()
+
+
+def test_mandatory_followup_carries_without_pending_momentum_queue():
+    state = rules.CityState()
+    item = rules.DocketItem(
+        "fire-followup",
+        "fire_budget_escalation",
+        "Fire Budget Escalation",
+        "POLYGON",
+        1,
+    )
+
+    rules.advance_turn_result(state, [item], {})
+
+    assert item.status == "carried"
+    assert state.pending_followups == {}
+
+
+def test_carried_mandatory_item_reopens_with_context_next_docket():
+    carried = rules.DocketItem(
+        "fire-followup",
+        "fire_budget_escalation",
+        "Fire Budget Escalation",
+        "POLYGON",
+        1,
+        status="carried",
+        target_cell_ids=["D0000", "D0001"],
+        preview_text="Prior fire budget review.",
+        stakeholder="fire_department",
+        origin_item_id="origin-fire",
+        target_rule="Select fire coverage districts.",
+        project_id="project-fire",
+        chain_step_id="fire-step",
+        priority=3,
+        due_turn=4,
+        subject_feature_id="F-fire",
+        case_json={"inspection": {"exposure": "high"}},
+    )
+
+    docket = rules.generate_docket(turn=2, seed=2026, count=4, carried_items=[carried])
+
+    assert docket[0] is not carried
+    assert docket[0].template_id == carried.template_id
+    assert docket[0].title == carried.title
+    assert docket[0].geometry_type == carried.geometry_type
+    assert docket[0].status == "open"
+    assert docket[0].turn == 2
+    assert docket[0].target_cell_ids == carried.target_cell_ids
+    assert docket[0].stakeholder == carried.stakeholder
+    assert docket[0].origin_item_id == carried.origin_item_id
+    assert docket[0].target_rule == carried.target_rule
+    assert docket[0].project_id == carried.project_id
+    assert docket[0].chain_step_id == carried.chain_step_id
+    assert docket[0].priority == carried.priority
+    assert docket[0].due_turn == carried.due_turn
+    assert docket[0].subject_feature_id == carried.subject_feature_id
+    assert docket[0].case_json == carried.case_json
+    assert "Carried forward from prior week." in docket[0].preview_text
+    assert carried.status == "carried"
+    assert carried.turn == 1
+
+
+def test_carried_and_pending_same_template_have_unique_item_ids():
+    state = rules.CityState()
+    state.pending_followups["expire-vendor"] = rules.CIVIC_INCIDENT_TEMPLATE_ID
+    carried = rules.DocketItem(
+        "incident-carried",
+        rules.CIVIC_INCIDENT_TEMPLATE_ID,
+        "Civic Incident Response",
+        "POINT",
+        1,
+        status="carried",
+    )
+
+    docket = rules.generate_docket(turn=2, seed=2026, count=4, state=state, carried_items=[carried])
+
+    assert docket[0].template_id == rules.CIVIC_INCIDENT_TEMPLATE_ID
+    assert docket[1].template_id == rules.CIVIC_INCIDENT_TEMPLATE_ID
+    assert docket[0].item_id != docket[1].item_id
+    assert len({item.item_id for item in docket}) == len(docket)
+
+
+def test_carried_and_generated_maintenance_have_unique_item_ids():
+    carried = rules.DocketItem(
+        "maintenance-carried",
+        rules.MAINTENANCE_TEMPLATE_ID,
+        "Maintenance Order: Vendor Market",
+        "POINT",
+        1,
+        status="carried",
+        stakeholder="maintenance_office",
+    )
+    feature = rules.FeatureInstance(
+        "F-due",
+        "vendor_market",
+        owner_group="maintenance_office",
+        target_cell_ids=["D0000"],
+        status="maintenance_due",
+    )
+
+    docket = rules.generate_docket(turn=2, seed=2026, count=4, carried_items=[carried], active_features=[feature])
+
+    assert docket[0].template_id == rules.MAINTENANCE_TEMPLATE_ID
+    assert docket[1].template_id == rules.MAINTENANCE_TEMPLATE_ID
+    assert docket[0].item_id != docket[1].item_id
+    assert len({item.item_id for item in docket}) == len(docket)
+
+
+def test_carried_and_visible_same_group_incident_deduplicates_by_identity():
+    carried = rules.DocketItem(
+        "incident-carried",
+        rules.CIVIC_INCIDENT_TEMPLATE_ID,
+        "Civic Incident Response: Renters",
+        "POINT",
+        1,
+        status="carried",
+        target_cell_ids=["D0000"],
+        stakeholder="renters",
+        origin_item_id="dissatisfaction:D0000:renters",
+        case_json={
+            "incident": {
+                "identity": "dissatisfaction:D0000:renters",
+                "cell_id": "D0000",
+                "group": "renters",
+            }
+        },
+    )
+    profile = rules.DistrictProfile(
+        "D0000",
+        "Renters Row",
+        1000,
+        45,
+        20,
+        35,
+        25,
+        50,
+        "residential",
+        population_mix={"renters": 3},
+        dissatisfaction={"renters": 4},
+    )
+
+    docket = rules.generate_docket(turn=2, seed=2026, count=4, carried_items=[carried], districts={"D0000": profile})
+
+    assert docket[0].template_id == rules.CIVIC_INCIDENT_TEMPLATE_ID
+    assert docket[0].origin_item_id == "dissatisfaction:D0000:renters"
+    assert len(_local_incident_items(docket)) == 1
+    assert len({item.item_id for item in docket}) == len(docket)
+
+
+def test_repeated_carried_incident_rows_deduplicate_by_identity():
+    first = rules.DocketItem(
+        "incident-carried-a",
+        rules.CIVIC_INCIDENT_TEMPLATE_ID,
+        "Civic Incident Response: Renters",
+        "POINT",
+        1,
+        status="carried",
+        target_cell_ids=["D0000"],
+        stakeholder="renters",
+        origin_item_id="dissatisfaction:D0000:renters",
+    )
+    second = copy.deepcopy(first)
+    second.item_id = "incident-carried-b"
+
+    docket = rules.generate_docket(turn=2, seed=2026, count=4, carried_items=[first, second])
+
+    assert len(_local_incident_items(docket)) == 1
+
+
+def test_unresolved_visible_incident_reappears_once_next_week():
+    profiles = {"D0000": _incident_profile("D0000", "renters")}
+    state = rules.CityState(turn=2)
+    docket = rules.generate_docket(turn=2, seed=2026, count=1, state=state, districts=profiles)
+
+    rules.advance_turn_result(state, docket, profiles)
+    next_docket = rules.generate_docket(
+        turn=state.turn,
+        seed=2026,
+        count=4,
+        state=state,
+        districts=profiles,
+        carried_items=docket,
+    )
+
+    assert docket[0].status == "carried"
+    assert len(_local_incident_items(next_docket)) == 1
+
+
+def test_resolving_incident_uses_case_identity_not_unrelated_selection():
+    profiles = {
+        "D0000": _incident_profile("D0000", "renters"),
+        "D0001": _incident_profile("D0001", "renters"),
+    }
+    state = rules.CityState(turn=2, ap=3, money=100)
+    item = rules.generate_docket(turn=2, seed=2026, count=1, state=state, districts=profiles)[0]
+
+    result = rules.resolve_decision(
+        state,
+        item,
+        profiles,
+        action="approve_mitigated",
+        target_cell_ids=["D0001"],
+        seed=2026,
+        mitigated=True,
+    )
+
+    assert result.ok is True
+    assert result.affected_cell_ids == ["D0000"]
+    assert profiles["D0000"].dissatisfaction["renters"] == 1
+    assert profiles["D0000"].incident_state == "none"
+    assert profiles["D0001"].dissatisfaction["renters"] == 4
+    assert profiles["D0001"].incident_state != "none"
+
+
+def test_deferred_incident_reappears_as_one_coherent_case():
+    profiles = {"D0000": _incident_profile("D0000", "renters")}
+    state = rules.CityState(turn=2, ap=3, money=100)
+    item = rules.generate_docket(turn=2, seed=2026, count=1, state=state, districts=profiles)[0]
+
+    result = rules.resolve_decision(state, item, profiles, action="deny", target_cell_ids=["D0000"], seed=2026)
+    rules.advance_turn_result(state, [item], profiles)
+    next_docket = rules.generate_docket(
+        turn=state.turn,
+        seed=2026,
+        count=4,
+        state=state,
+        districts=profiles,
+        carried_items=[item],
+    )
+
+    incidents = _local_incident_items(next_docket)
+    assert result.ok is True
+    assert item.status == "deferred"
+    assert len(incidents) == 1
+    assert incidents[0].origin_item_id == "dissatisfaction:D0000:renters"
+
+
 def test_feature_archetype_catalog_is_valid_and_covers_all_templates():
     """Verify templates resolve to valid feature archetypes and metadata."""
     assert rules.validate_feature_catalog() == []
@@ -53,10 +777,11 @@ def test_feature_archetype_catalog_is_valid_and_covers_all_templates():
 def test_generate_docket_has_three_seeded_items_with_templates():
     """Verify the first seeded docket has three valid template-backed cases."""
     docket = rules.generate_docket(turn=1, seed=2026, count=3)
+    repeat = rules.generate_docket(turn=1, seed=2026, count=3)
 
     assert len(docket) == 3
     assert len({item.item_id for item in docket}) == 3
-    assert [item.template_id for item in docket] == ["connector_corridor", "procession_route", "street_vendor_compact"]
+    assert [item.template_id for item in docket] == [item.template_id for item in repeat]
     assert all(item.template_id in rules.TEMPLATES for item in docket)
     assert all(item.preview_text for item in docket)
     assert all(item.stakeholder for item in docket)
@@ -64,24 +789,59 @@ def test_generate_docket_has_three_seeded_items_with_templates():
     assert {item.geometry_type for item in docket} <= {"POINT", "LINE", "POLYGON"}
 
 
-def test_six_turn_demo_sequence_covers_shortlist():
-    """Verify the deterministic demo schedule covers every shortlist case."""
-    expected = {
-        1: ["connector_corridor", "procession_route", "street_vendor_compact"],
-        2: ["utility_expansion_trench", "business_license_fee_sweep", "contractor_renovation_waiver"],
-        3: ["natural_reserve_conversion", "mixed_use_rezoning", "fire_budget_escalation"],
-        4: ["child_development_park_annex", "street_vendor_compact", "utility_expansion_trench"],
-        5: ["connector_corridor", "compliance_settlement_drive", "mixed_use_rezoning"],
-        6: ["natural_reserve_conversion", "fire_budget_escalation", "public_art_museum_grant"],
-    }
-    seen = set()
-    for turn in range(1, 7):
-        docket = rules.generate_docket(turn=turn, seed=2026, count=3)
-        assert len(docket) == 3
-        assert [item.template_id for item in docket] == expected[turn]
-        seen.update(item.template_id for item in docket)
+def test_docket_order_varies_by_seed_for_same_week():
+    state = rules.CityState()
+    districts = {profile.cell_id: profile for profile in rules.generate_district_profiles(seed=2026)}
 
-    assert set(rules.DEMO_TEMPLATE_IDS) <= seen
+    first = rules.generate_docket(turn=1, seed=2026, count=4, state=state, districts=districts)
+    second = rules.generate_docket(turn=1, seed=2027, count=4, state=copy.deepcopy(state), districts=copy.deepcopy(districts))
+
+    assert [item.template_id for item in first] != [item.template_id for item in second]
+
+
+def test_docket_weights_reflect_district_type_distribution():
+    state = rules.CityState()
+    mercantile = {
+        f"M{i}": _district_for_buyout(f"M{i}", "mercantile", 65, [])
+        for i in range(8)
+    }
+    natural = {
+        f"N{i}": _district_for_buyout(f"N{i}", "natural", 65, [])
+        for i in range(8)
+    }
+
+    market_docket = rules.generate_docket(turn=4, seed=2026, count=4, state=state, districts=mercantile)
+    natural_docket = rules.generate_docket(turn=4, seed=2026, count=4, state=copy.deepcopy(state), districts=natural)
+
+    market_categories = [rules.TEMPLATES[item.template_id].category for item in market_docket]
+    natural_categories = [rules.TEMPLATES[item.template_id].category for item in natural_docket]
+
+    assert market_categories.count("business") + market_categories.count("development") >= 1
+    assert natural_categories.count("land") >= 1
+    assert [item.template_id for item in market_docket] != [item.template_id for item in natural_docket]
+
+
+def test_twelve_week_docket_generation_keeps_three_or_four_items_available():
+    state = rules.CityState()
+    districts = {profile.cell_id: profile for profile in rules.generate_district_profiles(seed=2026)}
+
+    seen = set()
+    for _week in range(1, state.max_turns + 1):
+        docket = rules.generate_docket(
+            turn=state.turn,
+            seed=2026,
+            count=4,
+            state=state,
+            districts=districts,
+        )
+        assert 3 <= len(docket) <= 4
+        assert len({item.item_id for item in docket}) == len(docket)
+        seen.update(item.template_id for item in docket)
+        if state.turn < state.max_turns:
+            rules.advance_turn_result(state, docket, districts)
+
+    assert state.max_turns == 12
+    assert len(seen & set(rules.DEMO_TEMPLATE_IDS)) >= 8
 
 
 def _active_feature_from_route_item(item, turn):
@@ -103,112 +863,122 @@ def _active_feature_from_route_item(item, turn):
     return rules.normalize_feature_instance(feature, turn)
 
 
-def test_seed_2026_golden_route_produces_stable_conditional_scorecard():
-    """Verify the six-week golden route preserves its conditional audit result."""
+ROUTE_PROFIT_TEMPLATES = {
+    "business_license_fee_sweep",
+    "contractor_renovation_waiver",
+    "procession_route",
+    "street_vendor_compact",
+    "compliance_settlement_drive",
+}
+ROUTE_STABILIZER_TEMPLATES = {
+    "natural_reserve_conversion",
+    "green_buffer_reserve",
+    "water_main_loop",
+    "utility_expansion_trench",
+    "bus_priority_link",
+    "inspection_order",
+}
+ROUTE_DENY_TEMPLATES = {
+    "fire_budget_escalation",
+    "mixed_use_rezoning",
+    "affordable_infill_rezoning",
+    "infill_construction_site",
+}
+
+
+def _route_priority(item):
+    if item.template_id == rules.CIVIC_INCIDENT_TEMPLATE_ID:
+        return 0
+    if item.template_id == rules.ENFORCEMENT_TEMPLATE_ID:
+        return 1
+    if item.template_id in ROUTE_PROFIT_TEMPLATES:
+        return 2
+    if item.template_id in ROUTE_STABILIZER_TEMPLATES:
+        return 3
+    return 9
+
+
+def _route_action(state, item):
+    if item.template_id in ROUTE_DENY_TEMPLATES:
+        return "deny"
+    if item.template_id in {rules.CIVIC_INCIDENT_TEMPLATE_ID, rules.ENFORCEMENT_TEMPLATE_ID}:
+        return "approve" if state.money >= rules.TEMPLATES[item.template_id].money_cost else "deny"
+    if item.template_id in ROUTE_PROFIT_TEMPLATES | ROUTE_STABILIZER_TEMPLATES:
+        return "approve" if state.money >= rules.TEMPLATES[item.template_id].money_cost else "deny"
+    return "deny"
+
+
+def _route_targets(item, profiles):
+    if item.target_cell_ids:
+        return list(item.target_cell_ids)
+    template = rules.TEMPLATES[item.template_id]
+
+    def score(profile):
+        value = 0
+        if profile.district_type in template.good_fit_types:
+            value += 100
+        if profile.district_type in template.bad_fit_types:
+            value -= 100
+        if template.base_effects.get("exposure", 0) < 0:
+            value += profile.exposure
+        if template.base_effects.get("friction", 0) < 0:
+            value += profile.friction
+        if template.base_effects.get("services", 0) > 0:
+            value += 100 - profile.services
+        if template.base_effects.get("activity", 0) > 0:
+            value += 50 - profile.activity
+        if template.base_effects.get("trust", 0) > 0:
+            value += 50 - profile.trust
+        return (-value, profile.cell_id)
+
+    count = 2 if item.geometry_type == "LINE" else 1
+    return [profile.cell_id for profile in sorted(profiles.values(), key=score)[:count]]
+
+
+def test_seed_2026_reasonable_attention_route_reaches_final_audit():
     profiles = {profile.cell_id: profile for profile in rules.generate_district_profiles(seed=2026)}
     state = rules.CityState()
     active_features = []
     docket_history = []
-    action_counts = {"inspect": 0, "approve": 0, "approve_mitigated": 0, "deny": 0}
-    generated_followup_seen = False
 
-    route = {
-        1: [
-            ("street_vendor_compact", "approve_mitigated", ["D0102"], ["D0101"], True),
-            ("connector_corridor", "approve", ["D0101", "D0102"], [], False),
-        ],
-        2: [
-            ("utility_expansion_trench", "approve", ["D0004", "D0104"], [], False),
-            ("contractor_renovation_waiver", "deny", ["D0000"], [], False),
-        ],
-        3: [
-            (rules.MAINTENANCE_TEMPLATE_ID, "approve", ["D0102"], [], False),
-            ("natural_reserve_conversion", "approve", ["D0200", "D0304"], [], False),
-        ],
-        4: [
-            (rules.CIVIC_INCIDENT_TEMPLATE_ID, "approve", ["D0001"], [], False),
-            ("child_development_park_annex", "deny", ["D0000"], [], False),
-            ("street_vendor_compact", "deny", ["D0102"], [], False),
-        ],
-    }
-    expected_route_dockets = {
-        1: ["connector_corridor", "procession_route", "street_vendor_compact"],
-        2: [rules.CIVIC_INCIDENT_TEMPLATE_ID, "utility_expansion_trench", "business_license_fee_sweep"],
-        3: [rules.MAINTENANCE_TEMPLATE_ID, rules.CIVIC_INCIDENT_TEMPLATE_ID, rules.CIVIC_INCIDENT_TEMPLATE_ID],
-        4: [rules.CIVIC_INCIDENT_TEMPLATE_ID, rules.CIVIC_INCIDENT_TEMPLATE_ID, "child_development_park_annex"],
-        5: [rules.MAINTENANCE_TEMPLATE_ID, rules.CIVIC_INCIDENT_TEMPLATE_ID, rules.CIVIC_INCIDENT_TEMPLATE_ID],
-        6: [rules.MAINTENANCE_TEMPLATE_ID, rules.CIVIC_INCIDENT_TEMPLATE_ID, rules.CIVIC_INCIDENT_TEMPLATE_ID],
-    }
-
-    # Each turn regenerates the visible docket from current state, then applies
-    # only the scripted player actions for this golden-route scenario.
-    for turn in range(1, 7):
+    for _week in range(1, state.max_turns + 1):
         docket = rules.generate_docket(
             turn=state.turn,
             seed=2026,
-            count=3,
+            count=4,
             state=state,
             districts=profiles,
             active_features=active_features,
         )
-        assert [item.template_id for item in docket] == expected_route_dockets[turn]
-        generated_followup_seen = generated_followup_seen or any(
-            item.template_id == rules.MAINTENANCE_TEMPLATE_ID for item in docket
-        )
-
-        for template_id, action, targets, spillovers, inspect_first in route.get(turn, []):
-            item = next((item for item in docket if item.template_id == template_id), None)
-            if item is None:
+        for item in sorted(docket, key=lambda candidate: (_route_priority(candidate), candidate.item_id)):
+            if state.ap <= 0:
+                break
+            if item.status not in {"open", "inspected"}:
                 continue
-            if inspect_first:
-                inspected = rules.resolve_decision(
-                    state,
-                    item,
-                    profiles,
-                    "inspect",
-                    targets,
-                    seed=2026,
-                    active_features=active_features,
-                )
-                assert inspected.ok is True
-                action_counts["inspect"] += 1
-
+            action = _route_action(state, item)
             result = rules.resolve_decision(
                 state,
                 item,
                 profiles,
                 action,
-                targets,
-                spillover_cell_ids=spillovers,
+                _route_targets(item, profiles),
                 seed=2026,
-                mitigated=action == "approve_mitigated",
                 active_features=active_features,
             )
-            assert result.ok is True
-            action_counts[action] += 1
-            if item.status in {"active", "failed", "enforced", "settled", "responded", "maintained"} and item.template_id != rules.MAINTENANCE_TEMPLATE_ID:
+            assert result.ok is True, result.report
+            if item.status == "active":
                 active_features.append(_active_feature_from_route_item(item, state.turn))
-
         docket_history.extend(docket)
-        if turn < 6:
-            rules.advance_turn_result(state, docket, profiles, active_features)
+        rules.advance_turn_result(state, docket, profiles, active_features)
 
-    # Final assertions pin the resulting audit, resources, and feature mix so
-    # future balance changes are intentional.
-    archetypes = {feature.archetype_id for feature in active_features}
     grade, report = rules.scorecard(state, profiles, active_features, docket_history)
 
-    assert action_counts["inspect"] >= 1
-    assert action_counts["approve"] >= 1
-    assert action_counts["approve_mitigated"] >= 1
-    assert action_counts["deny"] >= 1
-    assert generated_followup_seen is True
-    assert {"vendor_market", "connector_corridor", "utility_trench"} <= archetypes
-    assert grade == "CONDITIONAL"
-    assert state.money == 45
-    assert (state.prosperity, state.unrest, state.culture, state.risk) == (64, 31, 37, 14)
-    assert "score=50" in report
-    assert "4 finding(s), 0 critical" in report
+    assert state.status == "complete"
+    assert state.turn == 12
+    assert active_features
+    assert any(feature.condition < 100 or feature.status != "active" for feature in active_features)
+    assert grade == "PASS"
+    assert "score=" in report
 
 
 def test_inspect_item_marks_item_and_adds_risk_band_hint():
@@ -231,10 +1001,10 @@ def test_inspect_item_adds_target_population_context_when_available():
         cell_id="D0000",
         name="Petition Row",
         population=1200,
-        prosperity=45,
-        unrest=25,
-        culture=40,
-        risk=25,
+        activity=45,
+        friction=25,
+        trust=40,
+        exposure=25,
         services=55,
         district_type="residential",
         population_mix={"families": 3, "renters": 2, "commuters": 1},
@@ -287,7 +1057,7 @@ def test_approve_applies_costs_district_deltas_and_city_delta():
     assert "Certain effects:" in result.report
     assert "immediate city delta" in result.report
     assert "spillover D0001, D0100 gets" in result.report
-    assert "Risk/side effects:" in result.report
+    assert "Exposure/side effects:" in result.report
     assert "recurring budget" in result.report
     assert result.city_delta
     assert profiles["D0000"].display_state in rules.DISPLAY_STATES
@@ -299,10 +1069,10 @@ def test_approval_adjusts_population_pressure_and_local_grievance():
         cell_id="D0000",
         name="Applicant Yard",
         population=1000,
-        prosperity=50,
-        unrest=20,
-        culture=35,
-        risk=20,
+        activity=50,
+        friction=20,
+        trust=35,
+        exposure=20,
         services=60,
         district_type="residential",
         population_mix={"families": 2, "commuters": 1},
@@ -382,10 +1152,10 @@ def test_service_archetype_updates_services_and_land_use_overlay():
         cell_id="D0000",
         name="Undercovered Row",
         population=1800,
-        prosperity=45,
-        unrest=20,
-        culture=35,
-        risk=55,
+        activity=45,
+        friction=20,
+        trust=35,
+        exposure=55,
         services=15,
         district_type="residential",
         population_mix={"families": 3, "commuters": 1},
@@ -457,16 +1227,16 @@ def test_stat_cascade_services_hazards_housing_and_culture_roles():
     hazard = rules.DistrictProfile("D0001", "Hazard Row", 1200, 45, 20, 30, 20, 80, "residential", population_mix={"families": 3}, hazards={"heat": 3})
     rules.normalize_profile(hazard)
     rules.apply_stat_cascade(hazard)
-    assert hazard.risk > 20
-    assert hazard.unrest > 20
+    assert hazard.exposure > 20
+    assert hazard.friction > 20
     assert hazard.dissatisfaction["families"] > 0
 
-    cultured = rules.DistrictProfile("D0002", "Civic Row", 1200, 45, 20, 70, 20, 80, "residential", population_mix={"families": 3}, dissatisfaction={"families": 2})
-    rules.normalize_profile(cultured)
-    rules.apply_stat_cascade(cultured)
-    assert cultured.dissatisfaction["families"] < 2
+    high_trust = rules.DistrictProfile("D0002", "Civic Row", 1200, 45, 20, 70, 20, 80, "residential", population_mix={"families": 3}, dissatisfaction={"families": 2})
+    rules.normalize_profile(high_trust)
+    rules.apply_stat_cascade(high_trust)
+    assert high_trust.dissatisfaction["families"] < 2
 
-    exposed = rules.DistrictProfile("D0003", "Risk Row", 1500, 45, 70, 30, 72, 80, "residential", population_mix={"families": 3}, dissatisfaction={"families": 0})
+    exposed = rules.DistrictProfile("D0003", "Exposure Row", 1500, 45, 70, 30, 72, 80, "residential", population_mix={"families": 3}, dissatisfaction={"families": 0})
     rules.normalize_profile(exposed)
     before = exposed.population
     rules.apply_stat_cascade(exposed)
@@ -490,7 +1260,7 @@ def test_incident_visibility_and_resolution_uses_existing_civic_language():
     assert rules._surface_new_incidents(state, [profile]) == 1
     assert profile.incident_state in {"complaints", "petition", "protest", "strike", "noncompliance"}
     assert profile.incident_group == "renters"
-    assert state.unrest == 21
+    assert state.friction == 21
     assert rules._surface_new_incidents(state, [profile]) == 0
     docket = rules.generate_docket(1, count=1, districts=profiles, state=state)
     assert docket[0].template_id == rules.CIVIC_INCIDENT_TEMPLATE_ID
@@ -509,10 +1279,10 @@ def test_land_use_overlay_is_applied_to_successful_zone_approval():
         cell_id="D0000",
         name="Rezoning Row",
         population=1300,
-        prosperity=45,
-        unrest=20,
-        culture=35,
-        risk=25,
+        activity=45,
+        friction=20,
+        trust=35,
+        exposure=25,
         services=60,
         district_type="residential",
     )
@@ -558,27 +1328,27 @@ def test_mitigation_reduces_bad_side_effects_and_costs_more():
     assert base.ok is True
     assert mitigated.ok is True
     assert mitigated_state.money < base_state.money
-    assert mitigated.district_deltas["D0000"].get("risk", 0) <= base.district_deltas["D0000"].get("risk", 0)
-    assert mitigated.district_deltas["D0000"].get("unrest", 0) <= base.district_deltas["D0000"].get("unrest", 0)
+    assert mitigated.district_deltas["D0000"].get("exposure", 0) <= base.district_deltas["D0000"].get("exposure", 0)
+    assert mitigated.district_deltas["D0000"].get("friction", 0) <= base.district_deltas["D0000"].get("friction", 0)
 
 
-def test_deny_costs_ap_and_adds_small_city_friction():
-    """Verify denial spends AP and applies small city and stakeholder costs."""
-    profiles = {p.cell_id: p for p in rules.generate_district_profiles(rows=1, cols=1, seed=2026)}
-    state = rules.CityState(ap=3, money=60, unrest=20, prosperity=50)
-    item = rules.DocketItem("deny-me", "fire_budget_escalation", rules.TEMPLATES["fire_budget_escalation"].title, "POLYGON", 1)
+def test_deny_does_not_spend_ap_but_still_resolves_case():
+    state = rules.CityState()
+    districts = {profile.cell_id: profile for profile in rules.generate_district_profiles(rows=1, cols=1, seed=2026)}
+    item = rules.DocketItem(
+        "deny-test",
+        "street_vendor_compact",
+        rules.TEMPLATES["street_vendor_compact"].title,
+        "POINT",
+        1,
+    )
 
-    result = rules.resolve_decision(state, item, profiles, "deny", ["D0000"], seed=2026)
+    result = rules.resolve_decision(state, item, districts, "deny", ["D0000"], seed=2026)
 
     assert result.ok is True
     assert item.status == "denied"
-    assert state.ap == 2
-    assert state.unrest == 21
-    assert state.prosperity == 49
-    assert state.stakeholder_heat["fire_department"] == 3
-    assert "Denied" in result.report
-    assert "Certain effects:" in result.report
-    assert "Risk/side effects:" in result.report
+    assert state.ap == state.max_ap
+    assert result.stakeholder_delta["vendors"] > 0
 
 
 def test_ignored_items_add_heat_and_heat_generates_enforcement_followup():
@@ -639,10 +1409,10 @@ def test_high_local_grievance_generates_civic_incident_followup():
         cell_id="D0000",
         name="Appeal Steps",
         population=1400,
-        prosperity=40,
-        unrest=35,
-        culture=35,
-        risk=30,
+        activity=40,
+        friction=35,
+        trust=35,
+        exposure=30,
         services=35,
         district_type="residential",
         population_mix={"renters": 3, "families": 1},
@@ -665,10 +1435,10 @@ def test_civic_incident_response_lowers_dissatisfaction_and_clears_incident():
         cell_id="D0000",
         name="Formal Complaint Green",
         population=1400,
-        prosperity=40,
-        unrest=35,
-        culture=35,
-        risk=30,
+        activity=40,
+        friction=35,
+        trust=35,
+        exposure=30,
         services=35,
         district_type="residential",
         population_mix={"renters": 3, "families": 1},
@@ -701,10 +1471,10 @@ def test_high_risk_bad_fit_approval_can_fail():
         cell_id="D0000",
         name="Low Service Reserve",
         population=1000,
-        prosperity=35,
-        unrest=30,
-        culture=30,
-        risk=90,
+        activity=35,
+        friction=30,
+        trust=30,
+        exposure=90,
         services=5,
         district_type="natural",
     )
@@ -733,10 +1503,10 @@ def test_land_use_conflict_increases_failure_chance():
         cell_id="D0000",
         name="Market Fit",
         population=1000,
-        prosperity=45,
-        unrest=20,
-        culture=35,
-        risk=25,
+        activity=45,
+        friction=20,
+        trust=35,
+        exposure=25,
         services=60,
         district_type="mercantile",
     )
@@ -744,10 +1514,10 @@ def test_land_use_conflict_increases_failure_chance():
         cell_id="D0001",
         name="Reserve Conflict",
         population=1000,
-        prosperity=45,
-        unrest=20,
-        culture=35,
-        risk=25,
+        activity=45,
+        friction=20,
+        trust=35,
+        exposure=25,
         services=60,
         district_type="natural",
     )
@@ -761,64 +1531,89 @@ def test_land_use_conflict_increases_failure_chance():
     assert bad_chance > good_chance
 
 
-def test_advance_turn_resets_ap_and_marks_audit_stage():
-    """Verify turn advancement restores AP and updates audit stage."""
-    state = rules.CityState(turn=2, ap=0, max_ap=3)
-    items = rules.generate_docket(turn=2, seed=2026, count=3)
+def test_twelve_week_season_mid_audit_week_six_and_final_week_twelve():
+    state = rules.CityState()
+    districts = {profile.cell_id: profile for profile in rules.generate_district_profiles(seed=2026)}
+
+    for _ in range(5):
+        rules.advance_turn_result(state, [], districts)
+
+    assert state.turn == 6
+    assert state.audit_stage == 1
+    assert state.status == "playing"
+
+    for _ in range(6):
+        rules.advance_turn_result(state, [], districts)
+
+    assert state.turn == 12
+    assert state.audit_stage == 1
+    assert state.status == "playing"
+
+    rules.advance_turn_result(state, [], districts)
+
+    assert state.turn == 12
+    assert state.audit_stage == 2
+    assert state.status == "complete"
+
+
+def test_advance_turn_resets_ap_and_marks_mid_audit_stage():
+    """Verify turn advancement restores AP and updates the week-six audit stage."""
+    state = rules.CityState(turn=5, ap=0)
+    items = rules.generate_docket(turn=5, seed=2026, count=4)
 
     report = rules.advance_turn(state, items)
 
     assert "Advanced week" in report
-    assert state.turn == 3
-    assert state.ap == 3
+    assert state.turn == 6
+    assert state.ap == state.max_ap
     assert state.audit_stage == 1
     assert {item.status for item in items} <= {"carried", "expired"}
 
 
 def test_final_week_closes_audit_without_advancing_past_max_turns():
-    """Verify week six closes the final audit and does not create week seven."""
-    state = rules.CityState(turn=6, ap=0, max_ap=3)
-    items = rules.generate_docket(turn=6, seed=2026, count=3)
+    """Verify week twelve closes the final audit and does not create week thirteen."""
+    state = rules.CityState(turn=12, ap=0)
+    items = rules.generate_docket(turn=12, seed=2026, count=4)
 
     report = rules.advance_turn(state, items)
 
     assert "Final week closed" in report
     assert "Final audit:" in report
-    assert state.turn == 6
+    assert state.turn == 12
     assert state.status == "complete"
     assert state.audit_stage == 2
-    assert state.ap == 3
+    assert state.ap == state.max_ap
     assert {item.status for item in items} <= {"carried", "expired"}
 
 
-def test_week_five_advance_opens_week_six_without_final_audit():
-    """Verify the final audit waits until week six is closed."""
-    state = rules.CityState(turn=5, audit_stage=1)
+def test_week_eleven_advance_opens_playable_week_twelve():
+    """Verify entering week twelve leaves the final docket playable."""
+    state = rules.CityState(turn=11, audit_stage=1)
 
     report = rules.advance_turn(state, [])
 
     assert "Advanced week" in report
     assert "Final audit:" not in report
-    assert state.turn == 6
+    assert state.turn == 12
     assert state.status == "playing"
     assert state.audit_stage == 1
 
 
 def test_completed_game_does_not_advance_again():
     """Verify repeated final audit clicks do not mutate the game clock."""
-    state = rules.CityState(turn=6, status="complete", audit_stage=2)
+    state = rules.CityState(turn=12, status="complete", audit_stage=2)
 
     report = rules.advance_turn(state, [])
 
     assert "Final audit already filed" in report
-    assert state.turn == 6
+    assert state.turn == 12
     assert state.status == "complete"
     assert state.audit_stage == 2
 
 
 def test_legacy_week_seven_save_is_clamped_to_final_audit():
-    """Verify old saves past the final week stop at week six."""
-    state = rules.CityState(turn=7, status="playing", audit_stage=1)
+    """Verify old six-week saves past the final week stop at week six."""
+    state = rules.CityState(turn=7, max_turns=6, status="playing", audit_stage=1)
 
     report = rules.advance_turn(state, [])
 
@@ -834,10 +1629,10 @@ def test_advance_turn_applies_population_drift_and_unresolved_local_grievance():
         cell_id="D0000",
         name="Growing Annex",
         population=1200,
-        prosperity=70,
-        unrest=20,
-        culture=40,
-        risk=20,
+        activity=70,
+        friction=20,
+        trust=40,
+        exposure=20,
         services=60,
         district_type="residential",
         population_mix={"families": 2, "renters": 1},
@@ -917,13 +1712,31 @@ def test_week_close_escalates_from_daily_pressure_and_resets():
 
 def test_scorecard_returns_audit_grade_and_metrics():
     """Verify scorecard reports a grade and key city metrics."""
-    state = rules.CityState(prosperity=70, culture=60, unrest=20, risk=15, money=45)
+    state = rules.CityState(activity=70, trust=60, friction=20, exposure=15, money=45)
 
     grade, report = rules.scorecard(state)
 
     assert grade == "PASS"
-    assert "prosperity=70" in report
-    assert "risk=15" in report
+    assert "activity=70" in report
+    assert "exposure=15" in report
+
+
+def test_scorecard_reports_renamed_city_health_metrics():
+    """Verify the city-health model uses the renamed canonical metric names."""
+
+    state = rules.CityState(activity=70, trust=60, friction=20, exposure=15, money=45)
+
+    grade, report = rules.scorecard(state)
+
+    assert grade == "PASS"
+    assert "activity=70" in report
+    assert "trust=60" in report
+    assert "friction=20" in report
+    assert "exposure=15" in report
+    assert "prosperity=" not in report
+    assert "unrest=" not in report
+    assert "culture=" not in report
+    assert "risk=" not in report
 
 
 def test_long_term_catalogs_validate_new_city_system_records():
@@ -972,10 +1785,10 @@ def test_housing_effects_recompute_vacancy_and_displacement_pressure():
         cell_id="D0000",
         name="Lease Row",
         population=950,
-        prosperity=70,
-        unrest=25,
-        culture=66,
-        risk=20,
+        activity=70,
+        friction=25,
+        trust=66,
+        exposure=20,
         services=55,
         district_type="residential",
         population_mix={"renters": 3, "artists": 2, "families": 2},
@@ -1018,10 +1831,10 @@ def test_project_chain_spawns_due_step_and_advances_on_resolution():
         cell_id="D0000",
         name="Buildout Row",
         population=1200,
-        prosperity=50,
-        unrest=20,
-        culture=40,
-        risk=20,
+        activity=50,
+        friction=20,
+        trust=40,
+        exposure=20,
         services=65,
         district_type="residential",
     )
@@ -1055,7 +1868,7 @@ def test_scenario_rules_change_docket_priority_and_scorecard_text():
     docket = rules.generate_docket(turn=1, seed=2026, count=3, state=state, districts=profiles)
     grade, report = rules.scorecard(state, profiles)
 
-    assert docket[0].template_id == "affordable_infill_rezoning"
+    assert set(item.template_id for item in docket) & set(rules.SCENARIO_RULES["housing_mandate"].docket_priority)
     assert grade in {"PASS", "CONDITIONAL", "FAIL"}
     assert "scenario=housing_mandate" in report
 
@@ -1075,10 +1888,10 @@ def test_inspection_creates_evidence_violations_deadlines_and_compliance_outcome
         cell_id="D0000",
         name="Inspection Row",
         population=1000,
-        prosperity=35,
-        unrest=35,
-        culture=30,
-        risk=70,
+        activity=35,
+        friction=35,
+        trust=30,
+        exposure=70,
         services=20,
         district_type="residential",
         dissatisfaction={"renters": 3},

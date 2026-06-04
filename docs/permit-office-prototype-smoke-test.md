@@ -24,7 +24,7 @@ Permit Office Prototype
 1. If no saved game is present, click `New Game` in the dashboard.
    - Confirm replacement if prompted.
    - Accept seed `2026` for the deterministic smoke route.
-   - The dashboard creates or resets the geodatabase rows, adds `PermitDistricts`, `PermitPoints`, `PermitLines`, and `PermitZones`, and generates a 5x5 named district board with three docket items.
+   - The dashboard creates or resets the geodatabase rows, adds `PermitDistricts`, `PermitPoints`, `PermitLines`, and `PermitZones`, and generates a 5x5 named district board with a four-item docket.
 1. Select one district on the map if you want to override the seeded exhibit.
 1. In the dashboard, pick a point-style docket item.
    - The docket row should select its proposed exhibit and target district on the map.
@@ -47,9 +47,14 @@ Permit Office Prototype
    - Approve or deny it.
 1. Click `End Week`.
     - AP should reset.
-    - A new three-item docket should be generated.
+    - A new four-item docket should be generated unless the final audit has completed.
+    - Unresolved items should produce carried, expired, momentum, or follow-up behavior in the filed report.
 1. Click `Scorecard` in the dashboard.
     - The scorecard dialog should show the current audit score.
+1. Optional pacing check: continue ending weeks until week 12.
+    - Week 6 should file the mid-season audit while keeping the game playable.
+    - Week 12 should still have a playable docket.
+    - Closing week 12 should file the final audit and stop generating new dockets.
 
 ## Expected Data
 
@@ -69,4 +74,4 @@ The prototype writes:
 - The dashboard is intentionally the main controller.
 - Manual map refresh is acceptable if live redraw lags.
 - Proposed geometries are seeded automatically and can be replaced from the current district selection; Feature Set drawing is not used.
-- This smoke test validates ArcGIS dashboard-map mechanics. The final six-week balance is locked by pure Python regression coverage, but still needs a recorded live ArcGIS Pro run.
+- This smoke test validates ArcGIS dashboard-map mechanics. The 12-week balance is covered by pure Python regression smoke checks where available, but still needs a recorded live ArcGIS Pro run.

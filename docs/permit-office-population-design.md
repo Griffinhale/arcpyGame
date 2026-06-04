@@ -31,7 +31,7 @@ Dashboard cards stay qualitative:
 
 ## Dissatisfaction and Incidents
 
-Dissatisfaction is local and group-specific. It differs from citywide unrest: citywide unrest only rises when a local grievance becomes administratively visible as an incident.
+Dissatisfaction is local and group-specific. It differs from citywide friction: citywide friction only rises when a local grievance becomes administratively visible as an incident.
 
 High grievance creates a civic incident follow-up docket item. In the first slice, incidents are civic rather than catastrophic: complaints, petitions, protests, strikes, and noncompliance waves. Riots, recalls, lawsuits, and department revolts remain later design space.
 
@@ -39,14 +39,14 @@ Incident response cards reuse the existing dashboard actions:
 
 - Approve: formal response.
 - Approve + Mitigate: settlement or service response.
-- Deny: defer the incident and raise unrest plus group heat.
+- Deny: defer the incident and raise friction plus group heat.
 
 ## Population Drift
 
 Approvals can move population and group bands slightly when a template has growth or decline groups. Failures can reverse growth pressure. Turn advance applies small deterministic drift:
 
-- Prosperous, low-risk, low-unrest districts grow.
-- Risky, restless, or incident districts lose population.
+- High-activity, low-exposure, low-friction districts grow.
+- High-exposure, high-friction, or incident districts lose population.
 - Low services can add local grievance pressure.
 
 Population is now visible in dashboard summaries and scorecard messages, but it is not yet a primary audit win condition.

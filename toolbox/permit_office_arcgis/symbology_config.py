@@ -9,6 +9,12 @@ DISPLAY_STATE_SYMBOLS = {
     "hazard": ([196, 90, 74, 100], "Hazard Pressure"),
     "housing_pressure": ([177, 126, 88, 100], "Housing Pressure"),
     "economic_growth": ([106, 162, 114, 100], "Economic Growth"),
+    "high_activity": ([106, 162, 114, 100], "Prosperous"),
+    "high_friction": ([216, 159, 84, 100], "Restless"),
+    "high_trust": ([140, 126, 188, 100], "Cultured"),
+    "high_exposure": ([196, 90, 74, 100], "At Exposure"),
+    "strained": ([205, 132, 78, 100], "Strained"),
+    "aggrieved": ([150, 72, 90, 100], "Aggrieved"),
     "proposed": ([45, 196, 199, 100], "Proposed"),
     "active": ([52, 150, 100, 100], "Active"),
     "denied": ([112, 112, 112, 100], "Denied"),
@@ -43,13 +49,22 @@ DISTRICT_TYPE_SYMBOLS = {
     "natural": ([153, 194, 148, 100], "Natural"),
 }
 
+IDENTITY_STATE_SYMBOLS = {
+    "stable": ([226, 232, 222, 0], "Stable Identity"),
+    "vulnerable": ([210, 132, 78, 100], "Vulnerable"),
+    "contested": ([188, 74, 70, 100], "Contested Buyout"),
+    "converted": ([92, 150, 105, 100], "Recently Converted"),
+    "overextended": ([150, 72, 90, 100], "Overextended"),
+}
+
 SYMBOLS_BY_FIELD = {
     "display_state": DISPLAY_STATE_SYMBOLS,
     "district_type": DISTRICT_TYPE_SYMBOLS,
+    "identity_state": IDENTITY_STATE_SYMBOLS,
 }
 
 RENDER_FIELD_BY_LAYER_KEY = {
-    "districts": "display_state",
+    "districts": "district_type",
     "points": "display_state",
     "lines": "display_state",
     "zones": "display_state",
@@ -95,7 +110,10 @@ def symbol_style_for(layer_key, value):
     if value == "proposed":
         outline_color = [31, 220, 222, 100]
         outline_width = max(outline_width, 3.2)
-    elif value in ("incident", "failed", "daily_pressure", "grievance", "hazard"):
+    elif value in ("vulnerable", "contested", "converted", "overextended"):
+        outline_color = [93, 48, 48, 100]
+        outline_width = max(outline_width, 3.2)
+    elif value in ("incident", "failed", "daily_pressure", "high_exposure", "aggrieved", "grievance", "hazard"):
         outline_color = [93, 48, 48, 100]
     elif value in ("road", "utility"):
         outline_width = max(outline_width, 2.8)

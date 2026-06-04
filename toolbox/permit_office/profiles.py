@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import copy
 import random
 from typing import Iterable
 
 from .models import *
 from .catalogs import *
 from .helpers import *
+from .incidents import incident_identity, incident_identity_from_item, write_incident_case_identity
 from .systems import normalize_feature_instance, project_step_template
 
 
@@ -23,21 +25,21 @@ def generate_district_profiles(rows: int = 5, cols: int = 5, seed: int = 2026) -
             cell_id = f"D{row:02d}{col:02d}"
             dtype = DISTRICT_TYPES[(row + col + rng.randrange(len(DISTRICT_TYPES))) % len(DISTRICT_TYPES)]
             base = 30 + rng.randrange(36)
-            prosperity = max(10, min(90, base + rng.randrange(-12, 13)))
-            unrest = max(5, min(80, 28 + rng.randrange(-14, 15)))
-            culture = max(10, min(90, 34 + rng.randrange(-14, 22)))
-            risk = max(5, min(80, 26 + rng.randrange(-12, 18)))
+            activity = max(10, min(90, base + rng.randrange(-12, 13)))
+            friction = max(5, min(80, 28 + rng.randrange(-14, 15)))
+            trust = max(10, min(90, 34 + rng.randrange(-14, 22)))
+            exposure = max(5, min(80, 26 + rng.randrange(-12, 18)))
             services = max(5, min(90, 35 + rng.randrange(-15, 16)))
             population_mix = _initial_population_mix(dtype, rng)
-            dissatisfaction = _initial_dissatisfaction(population_mix, prosperity, unrest, risk, services)
+            dissatisfaction = _initial_dissatisfaction(population_mix, activity, friction, exposure, services)
             profile = DistrictProfile(
                 cell_id=cell_id,
                 name=f"{rng.choice(prefixes)} {rng.choice(suffixes)}",
                 population=650 + rng.randrange(2200),
-                prosperity=prosperity,
-                unrest=unrest,
-                culture=culture,
-                risk=risk,
+                activity=activity,
+                friction=friction,
+                trust=trust,
+                exposure=exposure,
                 services=services,
                 district_type=dtype,
                 population_mix=population_mix,
@@ -54,20 +56,17 @@ def generate_district_profiles(rows: int = 5, cols: int = 5, seed: int = 2026) -
 def generate_docket(
     turn: int,
     seed: int = 2026,
-    count: int = 3,
+    count: int = 4,
     state: CityState | None = None,
     districts: dict[str, DistrictProfile] | None = None,
     projects: Iterable[ProjectRecord] | dict[str, ProjectRecord] | None = None,
     active_features: Iterable[FeatureInstance] | None = None,
+    carried_items: Iterable[DocketItem] | None = None,
 ) -> list[DocketItem]:
     """Generate the current turn docket, including due follow-up items first."""
 
     scenario = SCENARIO_RULES.get(state.scenario_id if state else "default", SCENARIO_RULES["default"])
-    chosen = _scenario_ordered_templates(turn, scenario)
-    if len(chosen) < count:
-        rng = random.Random(seed * 1000 + turn)
-        pool = [template_id for template_id in DEMO_TEMPLATE_IDS if template_id not in chosen]
-        chosen.extend(rng.sample(pool, min(count - len(chosen), len(pool))))
+    chosen = _weighted_template_pool(turn, seed, count, state, districts, scenario)
 
     items: list[DocketItem] = []
     for due in _project_due_items(turn, projects):
@@ -75,18 +74,33 @@ def generate_docket(
             break
         items.append(due)
 
+    for carried in _carried_docket_items(turn, carried_items, count - len(items), start_idx=len(items) + 1):
+        if len(items) >= count:
+            break
+        items.append(carried)
+
+    for followup in _pending_momentum_followup_items(turn, state, count - len(items), start_idx=len(items) + 1):
+        if len(items) >= count:
+            break
+        items.append(followup)
+
     if active_features:
-        followup = _maintenance_followup_item(turn, active_features)
+        followup = _maintenance_followup_item(turn, active_features, idx=len(items) + 1)
         if followup and len(items) < count:
             items.append(followup)
 
     if districts:
-        followup = _incident_followup_item(turn, districts)
+        followup = _incident_followup_item(
+            turn,
+            districts,
+            idx=len(items) + 1,
+            skip_identities=_incident_identities_for_items(items),
+        )
         if followup and len(items) < count:
             items.append(followup)
 
     if state:
-        followup = _heat_followup_item(turn, state)
+        followup = _heat_followup_item(turn, state, idx=len(items) + 1)
         if followup and len(items) < count:
             items.append(followup)
 
@@ -110,6 +124,73 @@ def _scenario_ordered_templates(turn: int, scenario: ScenarioRule) -> list[str]:
         if template_id not in chosen:
             chosen.append(template_id)
     return chosen
+
+
+TYPE_CATEGORY_WEIGHTS = {
+    "mercantile": {"business": 4, "development": 3, "compliance": 2},
+    "industrial": {"utility": 4, "department": 2, "compliance": 2, "transit": 2},
+    "civic": {"department": 3, "education": 2, "culture": 2, "transit": 2},
+    "academic": {"culture": 3, "education": 3, "event": 2, "land": 1},
+    "natural": {"land": 5, "culture": 1},
+    "residential": {"residential": 4, "education": 2, "development": 2, "business": 1},
+}
+
+
+def _weighted_template_pool(
+    turn: int,
+    seed: int,
+    count: int,
+    state: CityState | None,
+    districts: dict[str, DistrictProfile] | None,
+    scenario: ScenarioRule,
+) -> list[str]:
+    """Return deterministic proposal templates weighted by district mix."""
+
+    rng = random.Random(f"docket:{seed}:{turn}:{_district_mix_key(districts)}:{state.activity if state else 0}:{state.friction if state else 0}:{state.exposure if state else 0}")
+    weights = {template_id: 1 for template_id in DEMO_TEMPLATE_IDS}
+    for template_id in scenario.docket_priority:
+        if template_id in weights:
+            weights[template_id] += 4
+    if districts:
+        for profile in districts.values():
+            for template_id, template in TEMPLATES.items():
+                if template_id not in weights:
+                    continue
+                weights[template_id] += TYPE_CATEGORY_WEIGHTS.get(profile.district_type, {}).get(template.category, 0)
+                if profile.district_type in template.good_fit_types:
+                    weights[template_id] += 2
+                if profile.district_type in template.bad_fit_types:
+                    weights[template_id] = max(1, weights[template_id] - 1)
+                if profile.activity < 45 and template.category in {"development", "business", "residential"}:
+                    weights[template_id] += 2
+                if profile.friction > 45 and template.is_incident:
+                    weights[template_id] += 3
+                if profile.exposure > 45 and template.category in {"utility", "department", "compliance"}:
+                    weights[template_id] += 2
+    chosen: list[str] = []
+    available = dict(weights)
+    while available and len(chosen) < count:
+        total = sum(available.values())
+        pick = rng.randrange(total)
+        running = 0
+        selected = next(iter(available))
+        for template_id, weight in sorted(available.items()):
+            running += weight
+            if pick < running:
+                selected = template_id
+                break
+        chosen.append(selected)
+        available.pop(selected)
+    return chosen
+
+
+def _district_mix_key(districts: dict[str, DistrictProfile] | None) -> str:
+    if not districts:
+        return "none"
+    counts = {}
+    for profile in districts.values():
+        counts[profile.district_type] = counts.get(profile.district_type, 0) + 1
+    return ",".join(f"{key}:{counts[key]}" for key in sorted(counts))
 
 
 def _project_due_items(turn: int, projects: Iterable[ProjectRecord] | dict[str, ProjectRecord] | None) -> list[DocketItem]:
@@ -140,6 +221,85 @@ def _project_due_items(turn: int, projects: Iterable[ProjectRecord] | dict[str, 
         else:
             item.preview_text = f"{item.preview_text} Project step due this turn."
         out.append(item)
+    return out
+
+
+def _carried_docket_items(
+    turn: int,
+    carried_items: Iterable[DocketItem] | None,
+    limit: int,
+    start_idx: int = 1,
+) -> list[DocketItem]:
+    """Clone carried mandatory docket work into the current week's docket."""
+
+    if not carried_items or limit <= 0:
+        return []
+    out: list[DocketItem] = []
+    local_incident_identities: set[str] = set()
+    for carried in carried_items:
+        if len(out) >= limit:
+            break
+        if carried.status != "carried" or carried.template_id not in TEMPLATES:
+            continue
+        incident_identity, incident_cell_id, incident_group = incident_identity_from_item(carried)
+        if carried.template_id == CIVIC_INCIDENT_TEMPLATE_ID and incident_identity:
+            if incident_identity in local_incident_identities:
+                continue
+            local_incident_identities.add(incident_identity)
+        item = _make_docket_item(
+            turn,
+            start_idx + len(out),
+            carried.template_id,
+            stakeholder=carried.stakeholder,
+            origin_item_id=carried.origin_item_id,
+        )
+        item.title = carried.title
+        item.geometry_type = carried.geometry_type
+        item.status = "open"
+        item.target_cell_ids = list(carried.target_cell_ids)
+        item.stakeholder = carried.stakeholder
+        item.origin_item_id = carried.origin_item_id
+        item.target_rule = carried.target_rule
+        item.project_id = carried.project_id
+        item.chain_step_id = carried.chain_step_id
+        item.priority = carried.priority
+        item.due_turn = carried.due_turn
+        item.subject_feature_id = carried.subject_feature_id
+        item.case_json = copy.deepcopy(carried.case_json)
+        if carried.template_id == CIVIC_INCIDENT_TEMPLATE_ID and incident_identity:
+            write_incident_case_identity(item, incident_cell_id, incident_group)
+        carry_text = "Carried forward from prior week."
+        item.preview_text = f"{carried.preview_text} {carry_text}".strip() if carried.preview_text else carry_text
+        out.append(item)
+    return out
+
+
+def _pending_momentum_followup_items(
+    turn: int,
+    state: CityState | None,
+    limit: int,
+    start_idx: int = 1,
+) -> list[DocketItem]:
+    """Convert pending momentum follow-ups into current docket items."""
+
+    if not state or not state.pending_followups or limit <= 0:
+        return []
+    out: list[DocketItem] = []
+    consumed: list[str] = []
+    for idx, origin_item_id in enumerate(sorted(state.pending_followups), start=start_idx):
+        if len(out) >= limit:
+            break
+        template_id = state.pending_followups[origin_item_id]
+        if template_id not in TEMPLATES:
+            consumed.append(origin_item_id)
+            continue
+        item = _make_docket_item(turn, idx, template_id, origin_item_id=f"momentum:{origin_item_id}")
+        item.preview_text = f"{item.preview_text} Follow-up from unattended city momentum."
+        item.priority = max(item.priority, 2)
+        out.append(item)
+        consumed.append(origin_item_id)
+    for origin_item_id in consumed:
+        state.pending_followups.pop(origin_item_id, None)
     return out
 
 
@@ -175,7 +335,7 @@ def _make_docket_item(turn: int, idx: int, template_id: str, stakeholder: str = 
     )
 
 
-def _heat_followup_item(turn: int, state: CityState) -> DocketItem | None:
+def _heat_followup_item(turn: int, state: CityState, idx: int = 1) -> DocketItem | None:
     """Return the highest-priority stakeholder heat follow-up due this turn."""
 
     hot = []
@@ -189,10 +349,10 @@ def _heat_followup_item(turn: int, state: CityState) -> DocketItem | None:
     template_id = _stakeholder_profile(stakeholder).followup_template_id
     if template_id not in TEMPLATES:
         template_id = ENFORCEMENT_TEMPLATE_ID
-    return _make_docket_item(turn, 1, template_id, stakeholder=stakeholder, origin_item_id="stakeholder_heat")
+    return _make_docket_item(turn, idx, template_id, stakeholder=stakeholder, origin_item_id="stakeholder_heat")
 
 
-def _maintenance_followup_item(turn: int, active_features: Iterable[FeatureInstance]) -> DocketItem | None:
+def _maintenance_followup_item(turn: int, active_features: Iterable[FeatureInstance], idx: int = 1) -> DocketItem | None:
     """Return the most urgent feature maintenance item, if one is due."""
 
     candidates = []
@@ -203,7 +363,7 @@ def _maintenance_followup_item(turn: int, active_features: Iterable[FeatureInsta
     if not candidates:
         return None
     _condition, _feature_id, feature = sorted(candidates, key=lambda row: (row[0], row[1]))[0]
-    item = _make_docket_item(turn, 1, MAINTENANCE_TEMPLATE_ID, stakeholder=feature.owner_group or "maintenance_office", origin_item_id=f"feature:{feature.feature_id}")
+    item = _make_docket_item(turn, idx, MAINTENANCE_TEMPLATE_ID, stakeholder=feature.owner_group or "maintenance_office", origin_item_id=f"feature:{feature.feature_id}")
     item.title = f"Maintenance Order: {feature.archetype_id.replace('_', ' ').title()}"
     item.subject_feature_id = feature.feature_id
     item.target_cell_ids = list(feature.target_cell_ids)
@@ -221,19 +381,41 @@ def _maintenance_followup_item(turn: int, active_features: Iterable[FeatureInsta
     return item
 
 
-def _incident_followup_item(turn: int, districts: dict[str, DistrictProfile]) -> DocketItem | None:
+def _incident_identities_for_items(items: Iterable[DocketItem]) -> set[str]:
+    """Return local civic incident identities already represented on the docket."""
+
+    identities: set[str] = set()
+    for item in items:
+        if item.template_id != CIVIC_INCIDENT_TEMPLATE_ID:
+            continue
+        identity, _cell_id, _group = incident_identity_from_item(item)
+        if identity:
+            identities.add(identity)
+    return identities
+
+
+def _incident_followup_item(
+    turn: int,
+    districts: dict[str, DistrictProfile],
+    idx: int = 1,
+    skip_identities: Iterable[str] = (),
+) -> DocketItem | None:
     """Return the earliest visible local grievance that needs civic response."""
 
     visible = []
+    skip = set(skip_identities or ())
     for profile in districts.values():
         normalize_profile(profile)
         if profile.incident_state != "none" and profile.incident_group:
-            visible.append((profile.incident_state, profile.incident_group, profile.cell_id))
+            identity = incident_identity(profile.cell_id, profile.incident_group)
+            if identity not in skip:
+                visible.append((profile.incident_state, profile.incident_group, profile.cell_id))
     if not visible:
         return None
     incident_state, group, cell_id = sorted(visible, key=lambda row: (row[2], row[1], row[0]))[0]
-    item = _make_docket_item(turn, 1, CIVIC_INCIDENT_TEMPLATE_ID, stakeholder=group, origin_item_id=f"dissatisfaction:{cell_id}:{group}")
+    item = _make_docket_item(turn, idx, CIVIC_INCIDENT_TEMPLATE_ID, stakeholder=group, origin_item_id=f"dissatisfaction:{cell_id}:{group}")
     item.target_cell_ids = [cell_id]
+    write_incident_case_identity(item, cell_id, group, incident_state)
     item.preview_text = f"{item.preview_text} Visible condition: {incident_state} in {cell_id}."
     return item
 
@@ -276,7 +458,7 @@ def inspection_case_for_item(
     rule = INSPECTION_RULES.get(template.template_id, INSPECTION_RULES["default"])
     profiles = list(target_profiles)
     rng = random.Random(f"{seed}:{item.item_id}:evidence")
-    avg_risk = sum(profile.risk for profile in profiles) / max(1, len(profiles))
+    avg_exposure = sum(profile.exposure for profile in profiles) / max(1, len(profiles))
     avg_services = sum(profile.services for profile in profiles) / max(1, len(profiles))
     max_grievance = max((_top_dissatisfaction(profile)[1] for profile in profiles), default=0)
 
@@ -296,12 +478,12 @@ def inspection_case_for_item(
             else:
                 note = "Service capacity can absorb the request."
         elif code == "unsafe_work":
-            if avg_risk >= 65:
+            if avg_exposure >= 65:
                 severity = "critical"
-                note = "Site risk is high enough to require follow-through."
-            elif avg_risk >= 45:
+                note = "Site exposure is high enough to require follow-through."
+            elif avg_exposure >= 45:
                 severity = "warning"
-                note = "Site risk is visible in the inspection worksheet."
+                note = "Site exposure is visible in the inspection worksheet."
             else:
                 note = "No acute site safety concern is visible."
         elif code == "public_nuisance":
@@ -378,13 +560,13 @@ def _inspection_summary_text(inspection_case: dict[str, object]) -> str:
 def _inspection_consequence_text(template: DocketTemplate, inspection_case: dict[str, object]) -> str:
     """Format sharper post-inspection consequence hints for previews."""
 
-    risk = str(inspection_case.get("risk_band") or "unknown").lower()
+    exposure = str(inspection_case.get("risk_band") or "unknown").lower()
     violations = inspection_case.get("violations", [])
-    if risk == "high":
-        base = f"{template.failure_mode or 'approval failure'} is a live risk"
-    elif risk == "medium":
+    if exposure == "high":
+        base = f"{template.failure_mode or 'approval failure'} is a live exposure"
+    elif exposure == "medium":
         base = f"{template.failure_mode or 'side effects'} should be watched"
-    elif risk == "low":
+    elif exposure == "low":
         base = "no acute side-effect flag"
     else:
         base = "side-effect review is incomplete"
