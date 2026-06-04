@@ -42,7 +42,7 @@ def test_update_from_map_replaces_selected_case_targets(monkeypatch):
     controller.selected_item_id = item.item_id
     controller.status_text = ""
     controller.status_var = dashboard._StatusProxy(controller)
-    controller.reload = lambda: None
+    controller.reload = lambda **kwargs: None
 
     monkeypatch.setattr(dashboard, "read_docket", lambda paths: [item])
     monkeypatch.setattr(dashboard, "selected_cell_ids", lambda layer: ["D0000", "D0001"])
@@ -79,7 +79,7 @@ def test_approval_restores_missing_proposal_before_spillover(monkeypatch):
     controller.selected_item_id = item.item_id
     controller.status_text = ""
     controller.status_var = dashboard._StatusProxy(controller)
-    controller.reload = lambda: None
+    controller.reload = lambda **kwargs: None
     order = []
 
     monkeypatch.setattr(dashboard, "read_docket", lambda paths: [item])
@@ -139,7 +139,7 @@ def test_decision_exception_status_uses_neutral_action_copy(monkeypatch):
     controller.selected_item_id = item.item_id
     controller.status_text = ""
     controller.status_var = dashboard._StatusProxy(controller)
-    controller.reload = lambda: None
+    controller.reload = lambda **kwargs: None
 
     monkeypatch.setattr(dashboard, "read_docket", lambda paths: [item])
     monkeypatch.setattr(dashboard, "selected_cell_ids", lambda layer: ["D0000"])
@@ -206,7 +206,7 @@ def test_start_new_game_replaces_rows_and_map_layers(monkeypatch):
     controller.selected_item_id = "CASE-old"
     controller.status_text = ""
     controller.status_var = dashboard._StatusProxy(controller)
-    controller.reload = lambda: None
+    controller.reload = lambda **kwargs: None
     order = []
 
     monkeypatch.setattr(dashboard, "clear_game_rows", lambda paths: order.append("clear"))
@@ -233,7 +233,7 @@ def test_scorecard_files_report_tab_without_dialog(monkeypatch):
     controller = dashboard.DashboardController({"state": "state"}, "district_layer", 2026, object())
     controller.status_text = ""
     controller.status_var = dashboard._StatusProxy(controller)
-    controller.reload = lambda: None
+    controller.reload = lambda **kwargs: None
     state = rules.CityState()
     districts = {"D0000": _profile("D0000")}
 
@@ -307,7 +307,7 @@ def test_selecting_application_tab_returns_to_applications_and_updates_map_conte
         "select_case_context",
         lambda paths, district_layer, docket_item, seed, messages: calls.append((district_layer, docket_item.item_id, seed)),
     )
-    controller.reload = lambda: calls.append(("reload", controller.selected_desk_tab, controller.selected_item_id))
+    controller.reload = lambda **kwargs: calls.append(("reload", controller.selected_desk_tab, controller.selected_item_id))
 
     controller.select_item(item.item_id)
 
@@ -401,7 +401,7 @@ def test_cancel_queue_autoclose_cancels_scheduled_callback():
     canceled = []
     controller = dashboard.DashboardController({}, "district_layer", 2026, object())
     controller.status_var = dashboard._StatusProxy(controller)
-    controller.reload = lambda: canceled.append("reload")
+    controller.reload = lambda **kwargs: canceled.append("reload")
     controller._queue_autoclose_after_id = "after-1"
     controller._queue_autoclose_active = True
     controller.root = SimpleNamespace(after_cancel=lambda ident: canceled.append(("cancel", ident)))
@@ -418,7 +418,7 @@ def test_selecting_reports_pauses_queue_autoclose():
 
     canceled = []
     controller = dashboard.DashboardController({}, "district_layer", 2026, object())
-    controller.reload = lambda: canceled.append("reload")
+    controller.reload = lambda **kwargs: canceled.append("reload")
     controller._queue_autoclose_after_id = "after-1"
     controller._queue_autoclose_active = True
     controller.root = SimpleNamespace(after_cancel=lambda ident: canceled.append(("cancel", ident)))
@@ -448,7 +448,7 @@ def test_advance_turn_after_final_audit_is_idempotent(monkeypatch):
     controller = dashboard.DashboardController({"state": "state"}, "district_layer", 2026, object())
     controller.status_text = ""
     controller.status_var = dashboard._StatusProxy(controller)
-    controller.reload = lambda: None
+    controller.reload = lambda **kwargs: None
     state = rules.CityState(turn=12, status="complete", audit_stage=2)
     order = []
 
@@ -480,7 +480,7 @@ def test_advance_turn_records_inline_final_audit_receipt(monkeypatch):
     controller = dashboard.DashboardController({"state": "state"}, "district_layer", 2026, object())
     controller.status_text = ""
     controller.status_var = dashboard._StatusProxy(controller)
-    controller.reload = lambda: None
+    controller.reload = lambda **kwargs: None
     state = rules.CityState(turn=12)
     districts = {"D0000": _profile("D0000")}
     order = []
@@ -568,7 +568,7 @@ def test_deadline_final_week_records_same_inline_final_audit_receipt(monkeypatch
     monkeypatch.setattr(dashboard, "write_active_features", lambda *args, **kwargs: None)
     monkeypatch.setattr(dashboard, "generate_docket_rows", lambda *args, **kwargs: None)
     monkeypatch.setattr(dashboard, "rebuild_output_layers", lambda *args, **kwargs: None)
-    controller.reload = lambda: None
+    controller.reload = lambda **kwargs: None
 
     controller.advance_turn(auto=True)
 

@@ -20,6 +20,17 @@ from .symbology_config import LAYER_TRANSPARENCY, RENDER_FIELD_BY_LAYER_KEY, SYM
 DISTRICT_PROSPERITY = "District Prosperity"
 DISTRICT_IDENTITY = "District Identity"
 
+# District geometry is fixed for the life of a game (only attributes change), so
+# the SHAPE@ pull — the most expensive field on the districts table — is memoized
+# per districts source and cleared whenever a fresh board is seeded.
+_DISTRICT_GEOM_CACHE: dict = {}
+
+
+def clear_geometry_cache():
+    """Drop memoized district geometry so the next lookup re-reads the GDB."""
+
+    _DISTRICT_GEOM_CACHE.clear()
+
 
 def _summary_map(value):
     """Format a compact sorted metadata map for ArcGIS text fields."""
@@ -81,8 +92,9 @@ def hide_case_proposal(paths, item_id) -> bool:
     """Remove the selected unresolved proposal without touching city features."""
 
     hidden = False
+    where = _where_item_status(item_id, "proposed")
     for fc in (paths["points"], paths["lines"], paths["zones"]):
-        with arcpy.da.UpdateCursor(fc, ["item_id", "status"]) as cursor:
+        with arcpy.da.UpdateCursor(fc, ["item_id", "status"], where) as cursor:
             for row in cursor:
                 if row[0] == item_id and row[1] == "proposed":
                     cursor.deleteRow()
@@ -97,6 +109,23 @@ def case_proposal_visible(paths, item) -> bool:
     return bool(_case_proposal_targets(paths, item_id))
 
 
+def proposal_visible_map(paths) -> dict:
+    """Map every item ID that owns a live proposed exhibit to True in one pass.
+
+    Replaces N per-item ``case_proposal_visible`` calls during a dashboard reload
+    (each of which scanned all three support classes) with three cursor opens.
+    """
+
+    visible: dict = {}
+    where = _where_equals("status", "proposed")
+    for fc in (paths["points"], paths["lines"], paths["zones"]):
+        with arcpy.da.SearchCursor(fc, ["item_id", "status"], where) as cursor:
+            for row in cursor:
+                if row[0] and row[1] == "proposed":
+                    visible[row[0]] = True
+    return visible
+
+
 def select_case_context(paths, district_layer, item, seed, messages) -> None:
     """Select the docket item's proposal, target districts, and referenced feature."""
 
@@ -106,20 +135,30 @@ def select_case_context(paths, district_layer, item, seed, messages) -> None:
 
 
 def district_geometry_lookup(paths):
-    """Read district geometries keyed by cell ID."""
+    """Read district geometries keyed by cell ID (memoized for the session).
 
+    Callers treat the result as read-only; the same dict is shared across the
+    game until ``clear_geometry_cache`` is called when a new board is seeded.
+    """
+
+    key = paths["districts"]
+    cached = _DISTRICT_GEOM_CACHE.get(key)
+    if cached is not None:
+        return cached
     lookup = {}
     with arcpy.da.SearchCursor(paths["districts"], ["cell_id", "SHAPE@"]) as cursor:
         for cid, geom in cursor:
             lookup[cid] = geom
+    _DISTRICT_GEOM_CACHE[key] = lookup
     return lookup
 
 
 def _case_proposal_targets(paths, item_id):
     """Return stored target IDs for the first proposed row matching an item."""
 
+    where = _where_item_status(item_id, "proposed")
     for fc in (paths["points"], paths["lines"], paths["zones"]):
-        with arcpy.da.SearchCursor(fc, ["item_id", "status", "target_cell_ids"]) as cursor:
+        with arcpy.da.SearchCursor(fc, ["item_id", "status", "target_cell_ids"], where) as cursor:
             for row in cursor:
                 if row[0] == item_id and row[1] == "proposed":
                     return [part for part in (row[2] or "").split(",") if part]
@@ -188,6 +227,12 @@ def _where_equals(field, value):
     return f"{field} = {_sql_text(value)}"
 
 
+def _where_item_status(item_id, status):
+    """SQL match for a support row owned by ``item_id`` in a given ``status``."""
+
+    return f"{_where_equals('item_id', item_id)} AND {_where_equals('status', status)}"
+
+
 def _sql_text(value):
     """Quote a text literal for simple ArcGIS SQL expressions."""
 
@@ -199,8 +244,9 @@ def insert_or_replace_proposal(paths, item, target_ids, messages):
 
     # Each docket item owns one proposed exhibit. Other open docket proposals
     # stay visible so the map reads as a real in-tray instead of a single preview.
+    where = _where_item_status(item.item_id, "proposed")
     for fc in (paths["points"], paths["lines"], paths["zones"]):
-        with arcpy.da.UpdateCursor(fc, ["item_id", "status"]) as cursor:
+        with arcpy.da.UpdateCursor(fc, ["item_id", "status"], where) as cursor:
             for row in cursor:
                 if row[0] == item.item_id and row[1] == "proposed":
                     cursor.deleteRow()
@@ -277,6 +323,9 @@ def purge_proposed_features(paths):
 def seed_city_features(paths, seed, messages):
     """Seed deterministic baseline city detail so the map starts populated."""
 
+    # A fresh board has just been written by create_district_board, so any
+    # memoized geometry from a prior game is stale and must be dropped.
+    clear_geometry_cache()
     if any(_feature_count(paths[key]) for key in ("points", "lines", "zones")):
         return
     districts = read_districts(paths)
@@ -655,7 +704,8 @@ def activate_proposal(paths, item, report):
     fields = ["item_id", "feature_id", "archetype_id", "project_id", "chain_step_id", "turn_created", "expires_turn", "status", "display_state", "report", "condition", "maintenance_due_turn", "last_maintained_turn", "state_json"]
     status = item.status if item.status in ("active", "failed", "enforced", "settled", "responded", "maintained") else "active"
     activated = 0
-    with arcpy.da.UpdateCursor(fc, fields) as cursor:
+    where = _where_item_status(item.item_id, "proposed")
+    with arcpy.da.UpdateCursor(fc, fields, where) as cursor:
         for row in cursor:
             if row[0] == item.item_id and row[7] == "proposed":
                 # Rehydrate the lifecycle fields before writing status so
@@ -693,8 +743,9 @@ def activate_proposal(paths, item, report):
 def mark_proposals(paths, item_id, status, report=""):
     """Mark unresolved proposal features as denied, deferred, or otherwise closed."""
 
+    where = _where_item_status(item_id, "proposed")
     for fc in (paths["points"], paths["lines"], paths["zones"]):
-        with arcpy.da.UpdateCursor(fc, ["item_id", "status", "display_state", "report"]) as cursor:
+        with arcpy.da.UpdateCursor(fc, ["item_id", "status", "display_state", "report"], where) as cursor:
             for row in cursor:
                 if row[0] == item_id and row[1] == "proposed":
                     row[1] = status

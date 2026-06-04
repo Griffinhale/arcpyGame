@@ -35,6 +35,12 @@ def now_utc():
     return _datetime.datetime.utcnow()
 
 
+def _sql_quote(value):
+    """Quote a text literal for a simple file-geodatabase SQL where clause."""
+
+    return "'{0}'".format(str(value).replace("'", "''"))
+
+
 def square_polygon(x0, y0, size, sr):
     """Build a square district polygon in the target spatial reference."""
 
@@ -765,7 +771,10 @@ def read_docket(paths):
 def write_docket_item(paths, item):
     """Persist mutable fields for one docket item."""
 
-    with arcpy.da.UpdateCursor(paths["docket"], DOCKET_UPDATE_FIELDS) as cursor:
+    # The item ID field is DOCKET_UPDATE_FIELDS[0]; push the row match into SQL so
+    # the cursor scans one row instead of the whole docket table.
+    where = "{0} = {1}".format(DOCKET_UPDATE_FIELDS[0], _sql_quote(item.item_id))
+    with arcpy.da.UpdateCursor(paths["docket"], DOCKET_UPDATE_FIELDS, where) as cursor:
         for row in cursor:
             if row[0] != item.item_id:
                 continue
@@ -805,7 +814,10 @@ def command_finish(paths, command_id, status, message="", error=""):
     """Mark a command row finished with status and diagnostic text."""
 
     fields = ["command_id", "finished_utc", "status", "attempt_count", "message", "error_message"]
-    with arcpy.da.UpdateCursor(paths["commands"], fields) as cursor:
+    # The commands table grows once per action across a 12-week game, so a SQL
+    # match keeps this O(1) instead of scanning every prior command row.
+    where = "{0} = {1}".format(fields[0], _sql_quote(command_id))
+    with arcpy.da.UpdateCursor(paths["commands"], fields, where) as cursor:
         for row in cursor:
             if row[0] != command_id:
                 continue

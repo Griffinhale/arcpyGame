@@ -17,6 +17,7 @@ from .geometry import (
     insert_or_replace_proposal,
     mark_proposals,
     proposal_spillover,
+    proposal_visible_map,
     refresh_all,
     remove_outputs_from_map,
     select_case_context,
@@ -195,13 +196,20 @@ class DashboardController:
                 _warn(self.messages, "DASH", traceback.format_exc().strip().splitlines()[-1])
         self.reload()
 
-    def reload(self):
-        """Read persisted game rows and render a fresh desk view model."""
+    def reload(self, *, state=None, districts=None, items=None, active_features=None):
+        """Read persisted game rows and render a fresh desk view model.
 
-        state = read_state(self.paths)
-        districts = read_districts(self.paths)
-        items = read_docket(self.paths)
-        active_features = read_active_features(self.paths)
+        A caller that has just written a fully-persisted copy of any of these
+        objects may pass it to skip the re-read; anything left as None is read
+        from the GDB. Pass ONLY values that match what was persisted — never an
+        object mutated by side-channel GDB writes (e.g. activate_proposal) or by
+        a rolled-back command, or the view will show stale/uncommitted data.
+        """
+
+        state = read_state(self.paths) if state is None else state
+        districts = read_districts(self.paths) if districts is None else districts
+        items = read_docket(self.paths) if items is None else items
+        active_features = read_active_features(self.paths) if active_features is None else active_features
         self._sync_deadline_timer(state)
         self._sync_report_week(state)
         if state.status == "complete" or state.turn > state.max_turns:
@@ -209,12 +217,11 @@ class DashboardController:
         saved_game = has_saved_game(self.paths)
         if not saved_game and not self.status_text:
             self.status_text = "No saved game found. Click New Game to create Permit Office layers and start play."
-        proposal_visible_by_item = {}
-        for item in items:
-            try:
-                proposal_visible_by_item[item.item_id] = case_proposal_visible(self.paths, item)
-            except Exception:
-                proposal_visible_by_item[item.item_id] = False
+        try:
+            visible = proposal_visible_map(self.paths)
+        except Exception:
+            visible = {}
+        proposal_visible_by_item = {item.item_id: bool(visible.get(item.item_id)) for item in items}
         model = build_desk_model(
             state,
             districts,
@@ -607,10 +614,11 @@ class DashboardController:
         item_id = self.selected_item_id
         if not item_id and getattr(self, "view", None):
             item_id = self.view.selected_item_id()
-        for item in read_docket(self.paths):
+        docket = read_docket(self.paths)
+        for item in docket:
             if item.item_id == item_id:
                 return item
-        for item in read_docket(self.paths):
+        for item in docket:
             if item.status in ("open", "inspected", "active", "carried"):
                 return item
         return None
@@ -663,6 +671,7 @@ class DashboardController:
         if not item:
             return
         command_id = command_insert(self.paths, "inspect", item.item_id, item.target_cell_ids)
+        reload_kwargs = {}
         with perf_session("turn=inspect", self.messages):
             try:
                 # Inspection reads the live state, lets pure rules attach evidence,
@@ -679,12 +688,15 @@ class DashboardController:
                     command_finish(self.paths, command_id, result.command_status, result.report)
                 self.status_var.set(result.report)
                 self._record_receipt(item.title, result.report, result.affected_cell_ids, state)
+                # Only `state` is fully persisted by inspect (districts and active
+                # features are read but not written), so only it is safe to reuse.
+                reload_kwargs = {"state": state}
             except Exception as exc:
                 command_finish(self.paths, command_id, "error", error=str(exc))
                 self.status_var.set(f"Inspect failed: {exc}")
             finally:
                 self._command_busy = False
-        self.reload()
+        self.reload(**reload_kwargs)
 
     def apply_decision(self, action, mitigated):
         """Approve or approve-with-mitigation for the active docket item."""
@@ -693,6 +705,7 @@ class DashboardController:
         if not item:
             return
         command_id = None
+        reload_kwargs = {}
         with perf_session(f"turn={action}", self.messages):
             try:
                 self._command_busy = True
@@ -736,6 +749,10 @@ class DashboardController:
                 if not activated:
                     _warn(self.messages, "DASH", f"approved {item.item_id} but no proposed map feature was activated")
                 self._finish_decision(command_id, item, state, districts, projects, result, _decision_layer_names(item))
+                # state and districts are fully persisted here; active_features is
+                # re-read because activate_proposal mutated support rows in the GDB
+                # directly, and items is re-read because triage just reselected.
+                reload_kwargs = {"state": state, "districts": districts}
             except Exception as exc:
                 if command_id:
                     command_finish(self.paths, command_id, "error", error=str(exc))
@@ -744,7 +761,7 @@ class DashboardController:
             finally:
                 self._command_busy = False
                 with perf_block("reload"):
-                    self.reload()
+                    self.reload(**reload_kwargs)
 
     def deny(self):
         """Deny the active docket item and persist resulting state changes."""
@@ -753,6 +770,7 @@ class DashboardController:
         if not item:
             return
         command_id = command_insert(self.paths, "deny", item.item_id, item.target_cell_ids)
+        reload_kwargs = {}
         with perf_session("turn=deny", self.messages):
             try:
                 self._command_busy = True
@@ -776,13 +794,16 @@ class DashboardController:
                 with perf_block("mark"):
                     mark_proposals(self.paths, item.item_id, proposal_status, result.report)
                 self._finish_decision(command_id, item, state, districts, projects, result, _decision_layer_names(item))
+                # state and districts are fully persisted; active_features is re-read
+                # because mark_proposals mutated support rows in the GDB directly.
+                reload_kwargs = {"state": state, "districts": districts}
             except Exception as exc:
                 command_finish(self.paths, command_id, "error", error=str(exc))
                 self.status_var.set(f"Deny failed: {exc}")
             finally:
                 self._command_busy = False
                 with perf_block("reload"):
-                    self.reload()
+                    self.reload(**reload_kwargs)
 
     def _finish_decision(self, command_id, item, state, districts, projects, result, layer_names=None):
         """Persist a successful decision result and show its filed report."""
@@ -827,6 +848,7 @@ class DashboardController:
         """Advance the saved game one week and regenerate the docket."""
 
         command_id = command_insert(self.paths, "advance_turn", "", [])
+        reload_kwargs = {}
         with perf_session("turn=advance", self.messages):
             try:
                 self._command_busy = True
@@ -874,13 +896,17 @@ class DashboardController:
                     self.status_var.set(f"{prefix}{report}")
                 self._deadline_week = 0
                 self._deadline_started = 0.0
+                # state, districts, and active_features are all fully rewritten
+                # above; items is re-read because generate_docket_rows just added
+                # next week's docket rows that the in-memory list does not hold.
+                reload_kwargs = {"state": state, "districts": districts, "active_features": active_features}
             except Exception as exc:
                 command_finish(self.paths, command_id, "error", error=str(exc))
                 self.status_var.set(f"Advance failed: {exc}")
             finally:
                 self._command_busy = False
                 with perf_block("reload"):
-                    self.reload()
+                    self.reload(**reload_kwargs)
 
     def _record_week_report(self, title, report, state):
         """Store the week-close report as the first report in the new week."""
@@ -924,21 +950,27 @@ def _decision_layer_names(item):
     return {DISTRICTS, feature_layer}
 
 
-def rebuild_output_layers(paths, messages, layer_names=None):
-    """Recreate map layers after GDB edits to avoid stale ArcGIS draw state.
+def rebuild_output_layers(paths, messages, layer_names=None, force_readd=False):
+    """Refresh (or, when forced, recreate) map layers after GDB edits.
 
-    layer_names: optional iterable restricting remove/add/refresh to those names.
-    None rebuilds all four (current behavior). Unknown values pass through.
+    layer_names: optional iterable restricting the work to those names. None
+    covers all four (plus district overlays). Unknown values pass through.
+
+    force_readd: remove and re-add layers from scratch. Needed only when the
+    layer set or symbology changes (e.g. a new game). The default path is
+    refresh-only: ``add_outputs_to_map`` already no-ops for layers that exist,
+    so for data-only edits we skip the expensive remove + ``addDataFromPath``
+    churn (the dominant per-turn cost) and let ``refresh_all`` pick up changes.
     """
 
     with perf_block("rebuild"):
         clear_output_selections(paths)
-        if layer_names is None:
-            _log(messages, "REBUILD", "all")
-        else:
-            _log(messages, "REBUILD", f"targeted={sorted(layer_names)}")
-        with perf_block("remove"):
-            remove_outputs_from_map(messages, layer_names=layer_names)
+        mode = "force-readd" if force_readd else "refresh-only"
+        scope = "all" if layer_names is None else f"targeted={sorted(layer_names)}"
+        _log(messages, "REBUILD", f"{scope} ({mode})")
+        if force_readd:
+            with perf_block("remove"):
+                remove_outputs_from_map(messages, layer_names=layer_names)
         with perf_block("add"):
             add_outputs_to_map(paths, messages, layer_names=layer_names)
         with perf_block("refresh"):

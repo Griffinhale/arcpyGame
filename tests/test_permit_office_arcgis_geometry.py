@@ -64,13 +64,17 @@ class FakeDA:
 
         self.rows = rows
 
-    def SearchCursor(self, path, fields):
-        """Return a read cursor over one fake table."""
+    def SearchCursor(self, path, fields, where_clause=None):
+        """Return a read cursor over one fake table.
+
+        where_clause is accepted to match real arcpy; the production code keeps
+        an equivalent Python guard, so the fake can leave filtering to it.
+        """
 
         return FakeSearchCursor(self.rows[path], fields)
 
-    def UpdateCursor(self, path, fields):
-        """Return a mutable cursor over one fake table."""
+    def UpdateCursor(self, path, fields, where_clause=None):
+        """Return a mutable cursor over one fake table (where_clause ignored)."""
 
         return FakeUpdateCursor(self.rows[path], fields)
 
