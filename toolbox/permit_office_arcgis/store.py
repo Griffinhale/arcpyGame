@@ -187,6 +187,9 @@ def read_state(paths):
     for key in ("status", "last_report", "scenario_id"):
         if key in values:
             setattr(state, key, values[key][0] or ("default" if key == "scenario_id" else ""))
+    default_max_turns = rules.CityState().max_turns
+    if state.status == "playing" and state.max_turns < default_max_turns:
+        state.max_turns = default_max_turns
     if "stakeholder_heat" in values and values["stakeholder_heat"][0]:
         try:
             parsed = json.loads(values["stakeholder_heat"][0])

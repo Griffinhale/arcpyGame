@@ -5,7 +5,10 @@ from __future__ import annotations
 from toolbox import arcpy_permit_office_rules as rules
 from toolbox.permit_office_arcgis.desk_view import (
     HEADLINE_METRICS,
+    Palette,
+    PermitDeskView,
     ReceiptModel,
+    ReportTab,
     _Stacker,
     _hazard_summary,
     _maintenance_summary,
@@ -59,7 +62,7 @@ def test_uninspected_case_uses_qualitative_impact_buckets():
     )
     buckets = {bucket.label: bucket for bucket in model.case.impact_buckets}
 
-    assert list(buckets) == ["Cost", "City", "Local", "People", "Services", "Aftermath"]
+    assert list(buckets) == ["Cost", "City", "Local", "People", "Services", "Budget"]
     assert model.exhibit_visible is True
     assert model.deadline_text == "MON INTAKE 1:00"
     assert model.deadline_running is True
@@ -73,10 +76,10 @@ def test_uninspected_case_uses_qualitative_impact_buckets():
     assert "vendors" in buckets["People"].value
     assert "homeowners" in buckets["People"].value
     assert "gap" in buckets["Services"].value
-    assert "rev $4/week" in buckets["Aftermath"].value
-    assert "upkeep $1/week" in buckets["Aftermath"].value
-    assert "inspect for unlicensed spillover" in buckets["Aftermath"].value
-    assert "evidence" not in buckets["Aftermath"].value
+    assert "rev $4/week" in buckets["Budget"].value
+    assert "upkeep $1/week" in buckets["Budget"].value
+    assert "inspect for unlicensed spillover" in buckets["Budget"].value
+    assert "evidence" not in buckets["Budget"].value
 
 
 def test_inspected_case_buckets_surface_evidence_and_population_context():
@@ -96,8 +99,8 @@ def test_inspected_case_buckets_surface_evidence_and_population_context():
     model = build_desk_model(rules.CityState(), districts, [item], item.item_id)
     buckets = {bucket.label: bucket for bucket in model.case.impact_buckets}
 
-    assert "high risk; 2/2 flagged evidence; 1 violation(s)" in buckets["Aftermath"].value
-    assert buckets["Aftermath"].tone == "bad"
+    assert "high risk; 2/2 flagged evidence; 1 violation(s)" in buckets["Budget"].value
+    assert buckets["Budget"].tone == "bad"
     assert "homeowners aggrieved" in buckets["People"].value
 
 
@@ -192,6 +195,8 @@ def test_build_desk_model_threads_receipt_into_view_model():
     model = build_desk_model(rules.CityState(), districts, [item], item.item_id, receipt=receipt)
 
     assert model.receipt is receipt
+    assert model.report_tabs[0].title == "Street Vendor"
+    assert model.selected_report_id == "latest"
 
 
 def test_build_desk_model_defaults_receipt_to_none():
@@ -202,6 +207,101 @@ def test_build_desk_model_defaults_receipt_to_none():
     model = build_desk_model(rules.CityState(), districts, [item], item.item_id)
 
     assert model.receipt is None
+    assert model.report_tabs == ()
+
+
+def test_build_desk_model_selects_report_tabs_and_builds_ticker():
+    """Verify report tabs and ticker text are deterministic view-model inputs."""
+
+    item, districts = _vendor_case()
+    districts["D0000"].display_state = "grievance"
+    tabs = (
+        ReportTab("r1", "Inspection", "report", "inspected", False, "Inspected file."),
+        ReportTab("r2", "Scorecard", "scorecard", "scorecard", False, "Audit PASS."),
+    )
+
+    first = build_desk_model(rules.CityState(ap=1), districts, [item], item.item_id, report_tabs=tabs, selected_report_id="r1")
+    second = build_desk_model(rules.CityState(ap=1), districts, [item], item.item_id, report_tabs=tabs, selected_report_id="r1")
+
+    assert first.selected_report_id == "r1"
+    assert first.selected_desk_tab == "applications"
+    assert [tab.selected for tab in first.report_tabs] == [True, False]
+    assert first.ticker_items == second.ticker_items
+    assert any("Street wire" in text for text in first.ticker_items)
+
+
+def test_build_desk_model_can_select_reports_primary_tab():
+    """Verify the combined lower tabbox can switch to filed reports."""
+
+    item, districts = _vendor_case()
+    tabs = (ReportTab("r1", "Inspection", "report", "inspected", True, "Inspected file."),)
+
+    model = build_desk_model(rules.CityState(), districts, [item], item.item_id, report_tabs=tabs, selected_desk_tab="reports")
+
+    assert model.selected_desk_tab == "reports"
+    assert model.selected_report_id == "r1"
+
+
+def test_build_desk_model_adds_decision_lanes_for_selected_case():
+    """Verify selected applications expose consequence lanes for triage."""
+
+    item, districts = _vendor_case()
+
+    model = build_desk_model(rules.CityState(ap=2, money=60), districts, [item], item.item_id)
+
+    lanes = {lane.action_id: lane for lane in model.action_lanes}
+    assert list(lanes) == ["approve", "approve_mitigated", "deny"]
+    assert lanes["approve"].label == "Issue Permit"
+    assert "1 AP" in lanes["approve"].cost
+    assert "$12" in lanes["approve"].cost
+    assert "activity" in lanes["approve"].city_effect
+    assert lanes["approve_mitigated"].label == "Add Conditions"
+    assert "conditions" in lanes["approve_mitigated"].cost.lower()
+    assert lanes["deny"].label == "Deny"
+    assert "0 AP" in lanes["deny"].cost
+
+
+def test_incident_decision_lanes_disable_ap_gated_actions_when_ap_empty():
+    """Verify AP-gated incident actions are visibly unavailable at 0 AP."""
+
+    item = rules.DocketItem("incident", rules.CIVIC_INCIDENT_TEMPLATE_ID, "Civic Incident", "POINT", 1, target_cell_ids=["D0000"])
+    profile = rules.DistrictProfile("D0000", "D0000", 1000, 50, 20, 35, 25, 50, "mercantile")
+    districts = {profile.cell_id: rules.normalize_profile(profile)}
+
+    model = build_desk_model(rules.CityState(ap=0, money=60), districts, [item], item.item_id)
+
+    lanes = {lane.action_id: lane for lane in model.action_lanes}
+    assert lanes["approve"].enabled is False
+    assert lanes["approve_mitigated"].enabled is False
+    assert lanes["deny"].enabled is False
+    assert lanes["deny"].cost.startswith("1 AP")
+    assert lanes["deny"].disabled_reason == "Needs 1 AP"
+
+
+def test_permit_deny_stays_enabled_when_ap_empty():
+    """Verify ordinary permit denial remains available with 0 AP."""
+
+    item, districts = _vendor_case()
+
+    model = build_desk_model(rules.CityState(ap=0, money=60), districts, [item], item.item_id)
+
+    lanes = {lane.action_id: lane for lane in model.action_lanes}
+    assert lanes["approve"].enabled is False
+    assert lanes["deny"].enabled is True
+    assert lanes["deny"].cost.startswith("0 AP")
+
+
+def test_build_desk_model_marks_queue_cleared_when_no_active_items():
+    """Verify empty active dockets expose the queue-cleared state."""
+
+    model = build_desk_model(
+        rules.CityState(),
+        {},
+        [rules.DocketItem("done", "street_vendor_compact", "Done", "POINT", 1, status="approved")],
+    )
+
+    assert model.queue_cleared is True
+    assert model.action_lanes == ()
 
 
 class _FakeCanvas:
@@ -212,26 +312,31 @@ class _FakeCanvas:
 
         self.created = []
 
-    def _record(self, kind, args):
+    def _record(self, kind, args, kwargs=None):
         """Record one create_* call and return a synthetic item id."""
 
-        self.created.append((kind, args))
+        self.created.append((kind, args, kwargs or {}))
         return len(self.created)
 
     def create_rectangle(self, *args, **kwargs):
         """Record a rectangle and return its synthetic id."""
 
-        return self._record("rect", args)
+        return self._record("rect", args, kwargs)
 
     def create_text(self, *args, **kwargs):
         """Record a text item and return its synthetic id."""
 
-        return self._record("text", args)
+        return self._record("text", args, kwargs)
 
     def create_line(self, *args, **kwargs):
         """Record a line and return its synthetic id."""
 
-        return self._record("line", args)
+        return self._record("line", args, kwargs)
+
+    def delete(self, *_args):
+        """Record canvas clearing for full-draw tests."""
+
+        self.created.clear()
 
     def bbox(self, _item):
         """Report no measurable box, exercising the conservative fallback."""
@@ -268,6 +373,200 @@ def test_stacker_blocks_never_overlap_or_exceed_bottom():
 
     # No room left, so a further block is skipped instead of overlapping.
     assert stack.add(block(20)) is None
+
+
+class _Callbacks:
+    """Callable bundle for headless desk view tests."""
+
+    def __init__(self):
+        """Record invoked callbacks by name."""
+
+        self.calls = []
+
+    def __getattr__(self, name):
+        """Return a recorder function for any callback field."""
+
+        def _callback(*args):
+            self.calls.append((name, args))
+
+        return _callback
+
+
+def _view_for_drawing(model):
+    """Return a PermitDeskView shell without creating a Tk widget."""
+
+    callbacks = _Callbacks()
+    view = object.__new__(PermitDeskView)
+    view.callbacks = callbacks
+    view.on_select_item = lambda item_id: callbacks.calls.append(("select_item", (item_id,)))
+    view.model = model
+    view._click_targets = []
+    view._hover_key = ""
+    view._font_cache = {}
+    view._menu_open = False
+    view.root = None
+    view._font = lambda size, weight="normal": ("Segoe UI", size, weight)
+    view._px_measurer = lambda _size, _weight: None
+    return view, callbacks
+
+
+def _text_values(canvas):
+    """Return all text values written to the fake canvas."""
+
+    return [kwargs.get("text") for kind, _args, kwargs in canvas.created if kind == "text"]
+
+
+def test_application_workspace_draws_four_open_application_tabs():
+    """Verify the application tab strip exposes the full default docket."""
+
+    item, districts = _vendor_case()
+    rows = [
+        item,
+        rules.DocketItem("T02", "street_vendor_compact", "Business License Fee Sweep", "POINT", 1),
+        rules.DocketItem("T03", "street_vendor_compact", "Public Art and Museum Grant", "POINT", 1),
+        rules.DocketItem("T04", "street_vendor_compact", "Street Vendor Compact", "POINT", 1),
+    ]
+    model = build_desk_model(rules.CityState(), districts, rows, "T03")
+    view, _callbacks = _view_for_drawing(model)
+    canvas = _FakeCanvas()
+
+    view._draw_application_tab_content(canvas, (0, 0, 760, 700))
+
+    target_ids = [ident for kind, ident, _bbox, _callback in view._click_targets if kind == "docket"]
+    assert target_ids == ["T03", "T01-vendor", "T02", "T04"]
+    assert "+1 more" not in _text_values(canvas)
+
+
+def test_utility_menu_button_is_compact_hamburger_without_text_label():
+    """Verify utility actions are collapsed behind a small menu affordance."""
+
+    item, districts = _vendor_case()
+    model = build_desk_model(rules.CityState(), districts, [item], item.item_id)
+    view, _callbacks = _view_for_drawing(model)
+    canvas = _FakeCanvas()
+
+    view._draw_menu_button(canvas, 100, 10, 136, 34)
+
+    assert "MENU" not in _text_values(canvas)
+    assert any(kind == "line" for kind, _args, _kwargs in canvas.created)
+    assert [target[:2] for target in view._click_targets] == [("session", "Menu")]
+
+
+def test_session_menu_anchors_to_hamburger_button():
+    """Verify the utility menu opens under the hamburger, not at window edge."""
+
+    item, districts = _vendor_case()
+    model = build_desk_model(rules.CityState(), districts, [item], item.item_id)
+    view, _callbacks = _view_for_drawing(model)
+    canvas = _FakeCanvas()
+
+    view._draw_menu_button(canvas, 720, 20, 760, 48)
+    view._draw_session_menu(canvas, 1300)
+
+    menu_rects = [
+        args
+        for kind, args, kwargs in canvas.created
+        if kind == "rect" and kwargs.get("fill") == Palette.PAPER and len(args) == 4 and args[3] - args[1] > 100
+    ]
+    assert menu_rects
+    x0, y0, _x1, _y1 = menu_rects[-1]
+    assert x0 == 584
+    assert y0 == 48
+
+
+def test_full_draw_has_no_global_case_action_bar_targets():
+    """Verify case actions are not registered in the old global toolbar zone."""
+
+    item, districts = _vendor_case()
+    model = build_desk_model(rules.CityState(), districts, [item], item.item_id)
+    view, _callbacks = _view_for_drawing(model)
+    canvas = _FakeCanvas()
+    view.canvas = canvas
+
+    view._draw(1120, 900)
+
+    early_actions = [
+        ident
+        for kind, ident, bbox, _callback in view._click_targets
+        if kind == "action" and bbox[1] < 230
+    ]
+    assert early_actions == []
+
+
+def test_selected_application_draws_decision_brief_lanes():
+    """Verify the active application renders modern decision-lane content."""
+
+    item, districts = _vendor_case()
+    model = build_desk_model(rules.CityState(), districts, [item], item.item_id)
+    view, _callbacks = _view_for_drawing(model)
+    canvas = _FakeCanvas()
+
+    view._draw_active_card(canvas, (0, 0, 760, 620))
+
+    texts = _text_values(canvas)
+    assert "DECISION BRIEF" in texts
+    assert "Issue Permit" in texts
+    assert "Add Conditions" in texts
+    assert "Deny" in texts
+
+
+def test_decision_brief_uses_vertical_lane_rows_for_breathing_room():
+    """Verify action consequences use stacked rows instead of cramped columns."""
+
+    item, districts = _vendor_case()
+    model = build_desk_model(rules.CityState(), districts, [item], item.item_id)
+    view, _callbacks = _view_for_drawing(model)
+    canvas = _FakeCanvas()
+
+    view._draw_active_card(canvas, (0, 0, 760, 620))
+
+    lane_rects = [
+        args
+        for kind, args, kwargs in canvas.created
+        if kind == "rect" and kwargs.get("fill") == Palette.PAPER_ALT and len(args) == 4 and args[3] - args[1] >= 58
+    ]
+    assert len(lane_rects) >= 3
+    assert lane_rects[1][1] > lane_rects[0][1]
+    assert lane_rects[2][1] > lane_rects[1][1]
+
+
+def test_city_health_rail_draws_only_slim_pulse_signals():
+    """Verify City Health defaults to pulse signals, not the full ledger."""
+
+    item, districts = _vendor_case()
+    model = build_desk_model(rules.CityState(), districts, [item], item.item_id)
+    view, _callbacks = _view_for_drawing(model)
+    canvas = _FakeCanvas()
+
+    view._draw_ledger_rail(canvas, (0, 0, 260, 620))
+
+    texts = _text_values(canvas)
+    assert "CITY PULSE" in texts
+    assert "ACTIVITY" in texts
+    assert "TRUST" in texts
+    assert "EXPOSURE" in texts
+    assert "PRESSURE" in texts
+    assert "SERVICES" not in texts
+    assert "HOUSING" not in texts
+    assert "MAINTENANCE" not in texts
+
+
+def test_queue_cleared_state_draws_end_week_and_cancel_autoclose():
+    """Verify the application workspace exposes the queue-cleared controls."""
+
+    model = build_desk_model(rules.CityState(), {}, [], auto_close_active=True, auto_close_seconds=3)
+    view, _callbacks = _view_for_drawing(model)
+    canvas = _FakeCanvas()
+
+    view._draw_application_tab_content(canvas, (0, 0, 760, 620))
+
+    texts = _text_values(canvas)
+    assert "Queue cleared" in texts
+    assert "End Week" in texts
+    assert "Cancel Auto Close" in texts
+    targets = [(kind, ident) for kind, ident, _bbox, _callback in view._click_targets]
+    assert ("case-action", "End Week") in targets
+    assert ("case-action", "Cancel Auto Close") in targets
 
 
 def test_summary_helpers_report_service_hazard_and_maintenance_backlog():

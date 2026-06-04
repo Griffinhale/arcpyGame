@@ -208,6 +208,221 @@ def test_start_new_game_replaces_rows_and_map_layers(monkeypatch):
     assert controller.status_text == "New game started with seed 99."
 
 
+def test_scorecard_files_report_tab_without_dialog(monkeypatch):
+    """Verify Scorecard becomes a selectable dashboard report tab."""
+
+    controller = dashboard.DashboardController({"state": "state"}, "district_layer", 2026, object())
+    controller.status_text = ""
+    controller.status_var = dashboard._StatusProxy(controller)
+    controller.reload = lambda: None
+    state = rules.CityState()
+    districts = {"D0000": _profile("D0000")}
+
+    monkeypatch.setattr(dashboard, "has_saved_game", lambda paths: True)
+    monkeypatch.setattr(dashboard, "read_state", lambda paths: state)
+    monkeypatch.setattr(dashboard, "read_districts", lambda paths: districts)
+    monkeypatch.setattr(dashboard, "read_active_features", lambda paths: [])
+    monkeypatch.setattr(dashboard, "read_docket", lambda paths: [])
+
+    controller.show_scorecard()
+
+    assert controller.report_tabs
+    assert controller.report_tabs[-1].kind == "scorecard"
+    assert controller.report_tabs[-1].selected is True
+    assert controller.selected_report_id == controller.report_tabs[-1].report_id
+
+
+def test_dashboard_enforces_startup_geometry_after_window_maps():
+    """Verify startup sizing is reapplied after Tk/Windows maps the window."""
+
+    class FakeRoot:
+        def __init__(self):
+            self.calls = []
+            self.width = 900
+            self.height = 780
+
+        def geometry(self, value=None):
+            if value is not None:
+                self.calls.append(("geometry", value))
+
+        def minsize(self, width, height):
+            self.calls.append(("minsize", width, height))
+
+        def update_idletasks(self):
+            self.calls.append(("update",))
+
+        def winfo_width(self):
+            return self.width
+
+        def winfo_height(self):
+            return self.height
+
+        def after(self, delay, callback):
+            self.calls.append(("after", delay))
+            callback()
+            return "after-1"
+
+    root = FakeRoot()
+
+    dashboard._configure_dashboard_window(root)
+
+    assert ("minsize", 1180, 860) in root.calls
+    assert ("geometry", "1360x1040") in root.calls
+    assert root.calls.count(("geometry", "1360x1040")) == 2
+
+
+def test_selecting_application_tab_returns_to_applications_and_updates_map_context(monkeypatch):
+    """Verify nested application selection owns the active case and map highlight."""
+
+    item = rules.DocketItem("CASE-select", "street_vendor_compact", "Street Vendor Compact", "POINT", 1)
+    controller = dashboard.DashboardController({"docket": "docket"}, "district_layer", 2026, object())
+    controller.selected_item_id = ""
+    controller.selected_desk_tab = "reports"
+    controller.status_text = ""
+    controller.status_var = dashboard._StatusProxy(controller)
+    calls = []
+
+    monkeypatch.setattr(dashboard, "read_docket", lambda paths: [item])
+    monkeypatch.setattr(
+        dashboard,
+        "select_case_context",
+        lambda paths, district_layer, docket_item, seed, messages: calls.append((district_layer, docket_item.item_id, seed)),
+    )
+    controller.reload = lambda: calls.append(("reload", controller.selected_desk_tab, controller.selected_item_id))
+
+    controller.select_item(item.item_id)
+
+    assert controller.selected_item_id == item.item_id
+    assert controller.selected_desk_tab == "applications"
+    assert calls == [("district_layer", item.item_id, 2026), ("reload", "applications", item.item_id)]
+
+
+def test_recording_normal_decision_report_stays_on_applications():
+    """Verify filed decision reports do not interrupt application triage."""
+
+    controller = dashboard.DashboardController({}, "district_layer", 2026, object())
+    controller.selected_desk_tab = "applications"
+
+    controller._record_receipt("Street Vendor", "approved Local changes:", ["D0000"], rules.CityState(turn=2))
+
+    assert controller.report_tabs[-1].title == "Street Vendor"
+    assert controller.selected_report_id == controller.report_tabs[-1].report_id
+    assert controller.selected_desk_tab == "applications"
+
+
+def test_finish_decision_selects_next_open_application_and_updates_map_context(monkeypatch):
+    """Verify successful decisions advance triage to the next open app."""
+
+    resolved = rules.DocketItem("CASE-done", "street_vendor_compact", "Done", "POINT", 1, status="approved")
+    next_item = rules.DocketItem("CASE-next", "street_vendor_compact", "Next", "POINT", 1, target_cell_ids=["D0001"])
+    state = rules.CityState(turn=2)
+    districts = {"D0001": _profile("D0001")}
+    controller = dashboard.DashboardController({"districts": "districts"}, "district_layer", 2026, object())
+    controller.status_text = ""
+    controller.status_var = dashboard._StatusProxy(controller)
+    calls = []
+
+    monkeypatch.setattr(dashboard, "write_district_updates", lambda *args, **kwargs: calls.append("districts"))
+    monkeypatch.setattr(dashboard, "write_state", lambda *args, **kwargs: calls.append("state"))
+    monkeypatch.setattr(dashboard, "write_projects", lambda *args, **kwargs: calls.append("projects"))
+    monkeypatch.setattr(dashboard, "write_docket_item", lambda *args, **kwargs: calls.append("docket"))
+    monkeypatch.setattr(dashboard, "action_log", lambda *args, **kwargs: calls.append("log"))
+    monkeypatch.setattr(dashboard, "command_finish", lambda *args, **kwargs: calls.append("command"))
+    monkeypatch.setattr(dashboard, "rebuild_output_layers", lambda *args, **kwargs: calls.append("rebuild"))
+    monkeypatch.setattr(dashboard, "read_docket", lambda paths: [resolved, next_item])
+    monkeypatch.setattr(
+        dashboard,
+        "select_case_context",
+        lambda paths, district_layer, docket_item, seed, messages: calls.append(("context", docket_item.item_id)),
+    )
+    monkeypatch.setattr(controller, "_schedule_queue_autoclose", lambda: calls.append("autoclose"))
+
+    result = rules.DecisionResult(True, "approve", resolved.item_id, "approved", affected_cell_ids=["D0000"])
+
+    controller._finish_decision("CMD-1", resolved, state, districts, {}, result)
+
+    assert controller.selected_item_id == next_item.item_id
+    assert controller.selected_desk_tab == "applications"
+    assert ("context", next_item.item_id) in calls
+    assert "autoclose" not in calls
+
+
+def test_finish_decision_schedules_queue_autoclose_when_no_open_apps(monkeypatch):
+    """Verify clearing the queue arms the end-week countdown."""
+
+    resolved = rules.DocketItem("CASE-done", "street_vendor_compact", "Done", "POINT", 1, status="approved")
+    state = rules.CityState(turn=2)
+    controller = dashboard.DashboardController({"districts": "districts"}, "district_layer", 2026, object())
+    controller.status_text = ""
+    controller.status_var = dashboard._StatusProxy(controller)
+    calls = []
+
+    monkeypatch.setattr(dashboard, "write_district_updates", lambda *args, **kwargs: None)
+    monkeypatch.setattr(dashboard, "write_state", lambda *args, **kwargs: None)
+    monkeypatch.setattr(dashboard, "write_projects", lambda *args, **kwargs: None)
+    monkeypatch.setattr(dashboard, "write_docket_item", lambda *args, **kwargs: None)
+    monkeypatch.setattr(dashboard, "action_log", lambda *args, **kwargs: None)
+    monkeypatch.setattr(dashboard, "command_finish", lambda *args, **kwargs: None)
+    monkeypatch.setattr(dashboard, "rebuild_output_layers", lambda *args, **kwargs: None)
+    monkeypatch.setattr(dashboard, "read_docket", lambda paths: [resolved])
+    monkeypatch.setattr(controller, "_schedule_queue_autoclose", lambda: calls.append("autoclose"))
+
+    result = rules.DecisionResult(True, "deny", resolved.item_id, "denied", affected_cell_ids=[])
+
+    controller._finish_decision("CMD-1", resolved, state, {}, {}, result)
+
+    assert controller.selected_item_id == ""
+    assert controller.selected_desk_tab == "applications"
+    assert calls == ["autoclose"]
+
+
+def test_cancel_queue_autoclose_cancels_scheduled_callback():
+    """Verify explicit cancel clears the queue auto-close timer."""
+
+    canceled = []
+    controller = dashboard.DashboardController({}, "district_layer", 2026, object())
+    controller.status_var = dashboard._StatusProxy(controller)
+    controller.reload = lambda: canceled.append("reload")
+    controller._queue_autoclose_after_id = "after-1"
+    controller._queue_autoclose_active = True
+    controller.root = SimpleNamespace(after_cancel=lambda ident: canceled.append(("cancel", ident)))
+
+    controller.cancel_queue_autoclose()
+
+    assert controller._queue_autoclose_after_id is None
+    assert controller._queue_autoclose_active is False
+    assert ("cancel", "after-1") in canceled
+
+
+def test_selecting_reports_pauses_queue_autoclose():
+    """Verify reviewing reports pauses pending queue auto-close."""
+
+    canceled = []
+    controller = dashboard.DashboardController({}, "district_layer", 2026, object())
+    controller.reload = lambda: canceled.append("reload")
+    controller._queue_autoclose_after_id = "after-1"
+    controller._queue_autoclose_active = True
+    controller.root = SimpleNamespace(after_cancel=lambda ident: canceled.append(("cancel", ident)))
+
+    controller.select_desk_tab("reports")
+
+    assert controller.selected_desk_tab == "reports"
+    assert controller._queue_autoclose_active is False
+    assert ("cancel", "after-1") in canceled
+
+
+def test_end_game_closes_dashboard_without_clearing_rows():
+    """Verify End Game only closes the dashboard window."""
+
+    controller = dashboard.DashboardController({}, "district_layer", 2026, object())
+    destroyed = []
+    controller.root = SimpleNamespace(destroy=lambda: destroyed.append("destroy"))
+
+    controller.end_game()
+
+    assert destroyed == ["destroy"]
+
+
 def test_advance_turn_after_final_audit_is_idempotent(monkeypatch):
     """Verify repeated final-audit closes do not mutate gameplay rows."""
 
@@ -645,6 +860,34 @@ def test_state_storage_reads_legacy_city_health_keys(monkeypatch):
     assert restored.friction == 23
     assert restored.trust == 52
     assert restored.exposure == 17
+
+
+def test_state_storage_upgrades_active_legacy_six_week_games(monkeypatch):
+    """Verify old active six-week saves resume with the current season length."""
+
+    rows = [
+        ("turn", "1", 1),
+        ("max_turns", "6", 6),
+        ("status", "playing", None),
+    ]
+    paths = {"state": "state"}
+
+    class FakeSearchCursor:
+        def __init__(self, _path, _fields):
+            pass
+
+        def __enter__(self):
+            return iter(rows)
+
+        def __exit__(self, _exc_type, _exc, _tb):
+            return False
+
+    monkeypatch.setattr(store.arcpy, "da", SimpleNamespace(SearchCursor=FakeSearchCursor), raising=False)
+
+    restored = store.read_state(paths)
+
+    assert restored.turn == 1
+    assert restored.max_turns == 12
 
 
 def test_district_storage_round_trips_buyout_transition_state():

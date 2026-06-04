@@ -31,6 +31,12 @@ class DeskCallbacks:
     new_game: Callable[[], None]
     scorecard: Callable[[], None]
     close: Callable[[], None]
+    select_desk_tab: Callable[[str], None] = lambda _tab_id: None
+    select_report: Callable[[str], None] = lambda _report_id: None
+    show_help: Callable[[], None] = lambda: None
+    end_game: Callable[[], None] = lambda: None
+    cancel_queue_autoclose: Callable[[], None] = lambda: None
+    pause_queue_autoclose: Callable[[], None] = lambda: None
 
 
 @dataclass(frozen=True)
@@ -101,6 +107,34 @@ class ReceiptModel:
 
 
 @dataclass(frozen=True)
+class ReportTab:
+    """One selectable filed report or scorecard tab."""
+
+    report_id: str
+    title: str
+    kind: str
+    status: str
+    selected: bool = False
+    report: str = ""
+    affected: tuple[str, ...] = ()
+    metrics: tuple[tuple[str, str], ...] = ()
+
+
+@dataclass(frozen=True)
+class ActionLane:
+    """One action consequence lane for the selected application decision brief."""
+
+    action_id: str
+    label: str
+    cost: str
+    city_effect: str
+    local_effect: str
+    tone: str = "neutral"
+    enabled: bool = True
+    disabled_reason: str = ""
+
+
+@dataclass(frozen=True)
 class DeskViewModel:
     """Everything the desk view needs to draw one frame."""
 
@@ -114,6 +148,15 @@ class DeskViewModel:
     deadline_meter: int = 0
     deadline_running: bool = False
     receipt: ReceiptModel | None = None
+    report_tabs: tuple[ReportTab, ...] = ()
+    selected_report_id: str = ""
+    ticker_items: tuple[str, ...] = ()
+    show_start_help: bool = False
+    selected_desk_tab: str = "applications"
+    action_lanes: tuple[ActionLane, ...] = ()
+    queue_cleared: bool = False
+    auto_close_active: bool = False
+    auto_close_seconds: int = 0
 
 
 def build_desk_model(
@@ -128,6 +171,12 @@ def build_desk_model(
     deadline_running=False,
     active_features=None,
     receipt=None,
+    report_tabs=None,
+    selected_report_id="",
+    show_start_help=False,
+    selected_desk_tab="applications",
+    auto_close_active=False,
+    auto_close_seconds=0,
 ) -> DeskViewModel:
     """Format gameplay state into a presentation-only desk model."""
 
@@ -148,9 +197,27 @@ def build_desk_model(
         for item in active_items
     )
     case = _case_summary(state, districts, selected)
+    action_lanes = _action_lanes(state, districts, selected) if selected else ()
     ledger_rows = _ledger_rows(state, districts, active_features, active_items)
     status = status_text or "No report yet. Select a docket row; use Update From Map when changing targets."
+    report_tabs = tuple(report_tabs or _legacy_report_tabs(receipt))
+    selected_report_id = _resolve_selected_report_id(report_tabs, selected_report_id)
+    if report_tabs and selected_report_id:
+        report_tabs = tuple(
+            ReportTab(
+                tab.report_id,
+                tab.title,
+                tab.kind,
+                tab.status,
+                tab.report_id == selected_report_id,
+                tab.report,
+                tab.affected,
+                tab.metrics,
+            )
+            for tab in report_tabs
+        )
     exhibit_visible = bool(proposal_visible_by_item.get(selected_id))
+    ticker_items = _ticker_items(state, districts, active_features, active_items, report_tabs)
     return DeskViewModel(
         docket_rows,
         selected_id,
@@ -162,6 +229,15 @@ def build_desk_model(
         deadline_meter,
         deadline_running,
         receipt,
+        report_tabs,
+        selected_report_id,
+        ticker_items,
+        bool(show_start_help),
+        _resolve_desk_tab(selected_desk_tab, report_tabs),
+        action_lanes,
+        not bool(active_items),
+        bool(auto_close_active),
+        int(auto_close_seconds or 0),
     )
 
 
@@ -173,6 +249,65 @@ def _resolve_selected_item(items, selected_item_id):
             if item.item_id == selected_item_id:
                 return item
     return items[0] if items else None
+
+
+def _resolve_desk_tab(selected_desk_tab, report_tabs):
+    """Return the active primary lower-desk tab."""
+
+    if selected_desk_tab == "reports":
+        return "reports"
+    if selected_desk_tab == "applications":
+        return "applications"
+    return "reports" if report_tabs else "applications"
+
+
+def _legacy_report_tabs(receipt):
+    """Represent the legacy single receipt as one selected report tab."""
+
+    if not receipt:
+        return ()
+    return (
+        ReportTab(
+            "latest",
+            receipt.title,
+            "report",
+            _report_status(receipt.report),
+            True,
+            receipt.report,
+            receipt.affected,
+            receipt.metrics,
+        ),
+    )
+
+
+def _resolve_selected_report_id(report_tabs, selected_report_id):
+    """Return a valid selected report id for the current report tab set."""
+
+    if selected_report_id:
+        for tab in report_tabs:
+            if tab.report_id == selected_report_id:
+                return selected_report_id
+    for tab in report_tabs:
+        if tab.selected:
+            return tab.report_id
+    return report_tabs[-1].report_id if report_tabs else ""
+
+
+def _report_status(report):
+    """Classify filed-report text for compact tab styling."""
+
+    lower = str(report or "").lower()
+    if "final audit" in lower or "audit " in lower:
+        return "scorecard"
+    if lower.startswith(("approved", "issued")):
+        return "approved"
+    if lower.startswith(("denied", "deny")):
+        return "denied"
+    if lower.startswith(("inspected", "inspection")):
+        return "inspected"
+    if lower.startswith(("advanced", "final week", "auto-deadline")):
+        return "week"
+    return "filed"
 
 
 def _case_summary(state, districts, item) -> CaseSummary:
@@ -255,8 +390,66 @@ def _impact_buckets(state, districts, item, template) -> tuple[ImpactBucket, ...
         ImpactBucket("Local", local, local_tone),
         ImpactBucket("People", people, people_tone),
         ImpactBucket("Services", services, services_tone),
-        ImpactBucket("Aftermath", f"{recurring}; {followup}", _worst_tone(recurring_tone, followup_tone)),
+        ImpactBucket("Budget", f"{recurring}; {followup}", _worst_tone(recurring_tone, followup_tone)),
     )
+
+
+def _action_lanes(state, districts, item) -> tuple[ActionLane, ...]:
+    """Build approve/conditions/deny consequence lanes for the selected case."""
+
+    template = rules.TEMPLATES[item.template_id]
+    targets = [districts[cid] for cid in item.target_cell_ids if cid in districts]
+    issue_label, mitigate_label, deny_label = _action_lane_labels(template)
+    issue_money = template.money_cost
+    mitigated_money = template.money_cost + template.mitigation_cost
+    deny_ap = template.ap_cost if template.is_incident else 0
+    issue_cost = f"{template.ap_cost} AP / ${issue_money}"
+    mitigated_cost = f"{template.ap_cost} AP / ${mitigated_money}; conditions +${template.mitigation_cost}"
+    deny_cost = f"{deny_ap} AP / $0; may return as follow-up" if deny_ap else "0 AP / $0; may return as follow-up"
+    local = _local_bucket_value(item, template, targets)
+    issue_city = _city_forecast_bucket(template, targets, mitigated=False)
+    mitigated_city = _city_forecast_bucket(template, targets, mitigated=True)
+    deny_city = _deny_forecast(template)
+    issue_enabled, issue_reason = _resource_available(state, template.ap_cost, issue_money)
+    mitigated_enabled, mitigated_reason = _resource_available(state, template.ap_cost, mitigated_money)
+    deny_enabled, deny_reason = _resource_available(state, deny_ap, 0)
+    return (
+        ActionLane("approve", issue_label, issue_cost, issue_city, local, _delta_tone(template.base_effects), issue_enabled, issue_reason),
+        ActionLane("approve_mitigated", mitigate_label, mitigated_cost, mitigated_city, local, "watch", mitigated_enabled, mitigated_reason),
+        ActionLane("deny", deny_label, deny_cost, deny_city, "unresolved pressure may persist", "watch", deny_enabled, deny_reason),
+    )
+
+
+def _resource_available(state, ap_cost, money_cost) -> tuple[bool, str]:
+    """Return whether the current AP/money can pay an action."""
+
+    if int(getattr(state, "ap", 0) or 0) < int(ap_cost or 0):
+        return False, f"Needs {ap_cost} AP"
+    if int(getattr(state, "money", 0) or 0) < int(money_cost or 0):
+        return False, f"Needs ${money_cost}"
+    return True, ""
+
+
+def _action_lane_labels(template) -> tuple[str, str, str]:
+    """Return action labels matched to incident/enforcement/permit language."""
+
+    if template.is_incident:
+        return "Respond", "Settlement", "Defer"
+    if template.is_enforcement:
+        return "Enforce", "Settle", "Defer"
+    return "Issue Permit", "Add Conditions", "Deny"
+
+
+def _deny_forecast(template) -> str:
+    """Return a compact deny/defer consequence forecast."""
+
+    if template.is_incident:
+        return "incident remains open"
+    if template.is_enforcement:
+        return "enforcement deferred"
+    if template.failure_mode:
+        return f"risk of {template.failure_mode}"
+    return "no immediate build; applicant heat may rise"
 
 
 def _cost_bucket_value(template) -> str:
@@ -712,6 +905,33 @@ def _maintenance_count_from_state(state) -> str:
 
     backlog = int(getattr(state, "maintenance_backlog", 0) or 0)
     return f"{backlog} active" if backlog else "none"
+
+
+def _ticker_items(state, districts, active_features=None, docket=None, report_tabs=None) -> tuple[str, ...]:
+    """Build deterministic city ticker lines from live game state."""
+
+    items = []
+    heat = rules.heat_summary(state)
+    if heat != "none":
+        items.append(f"Heat desk: {heat} may become incident, enforcement, or follow-up filing.")
+    pressure = _pressure_cause_summary(districts)
+    if pressure != "stable":
+        items.append(f"Street wire: {pressure} showing on district files.")
+    incidents = rules.incident_summary(districts)
+    if incidents != "none":
+        items.append(f"Civic desk: {incidents}.")
+    maintenance = _maintenance_summary(active_features) if active_features is not None else _maintenance_count_from_state(state)
+    if maintenance != "none":
+        items.append(f"Works desk: maintenance {maintenance}.")
+    open_count = len([item for item in docket or () if item.status in ACTIVE_STATUSES])
+    if open_count:
+        items.append(f"Clerk queue: {open_count} active application(s), {state.ap}/{state.max_ap} AP left.")
+    if report_tabs:
+        latest = report_tabs[-1]
+        items.append(f"Filed: {latest.title}.")
+    if not items:
+        items.append("City desk quiet: filings orderly, complaints merely decorative.")
+    return tuple(items[:4])
 
 
 def _inspection_summary(item) -> str:

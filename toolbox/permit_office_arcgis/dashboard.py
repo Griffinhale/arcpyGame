@@ -44,11 +44,13 @@ from .store import (
     write_projects,
     write_state,
 )
-from .desk_view import DeskCallbacks, Palette, PermitDeskView, ReceiptModel, build_desk_model, receipt_metrics
+from .desk_view import DeskCallbacks, Palette, PermitDeskView, ReceiptModel, ReportTab, build_desk_model, receipt_metrics
 
 
 WEEK_DEADLINE_SECONDS = 5 * 60
 TIMER_TICK_MS = 1000
+STARTUP_GEOMETRY = "1360x1040"
+STARTUP_MIN_SIZE = (1180, 860)
 WORK_WEEK_DAYS = (
     ("MON INTAKE", "New applications logged. Triage high-risk packets."),
     ("TUE INSPECTION", "Inspection desk is active. File reviews reveal compliance risk."),
@@ -60,8 +62,6 @@ WORK_DAY_SECONDS = WEEK_DEADLINE_SECONDS // len(WORK_WEEK_DAYS)
 
 
 def prepare_dashboard_session(paths, seed, messages):
-    """Repair resumable saved-game presentation before the GUI opens."""
-
     if has_saved_game(paths):
         add_outputs_to_map(paths, messages)
         if _row_count(paths["docket"]) == 0:
@@ -74,45 +74,46 @@ def prepare_dashboard_session(paths, seed, messages):
 
 
 def has_saved_game(paths):
-    """Return whether the geodatabase contains enough rows to resume play."""
-
     return _row_count(paths.get("districts", "")) > 0 and _row_count(paths.get("state", "")) > 0
 
 
 def _row_count(path):
-    """Return an ArcGIS table row count, treating inaccessible paths as empty."""
-
     try:
         return int(arcpy.management.GetCount(path)[0])
     except Exception:
         return 0
 
 
+def _configure_dashboard_window(root):
+    root.minsize(*STARTUP_MIN_SIZE)
+    root.geometry(STARTUP_GEOMETRY)
+
+    def _enforce():
+        try:
+            root.update_idletasks()
+            if root.winfo_width() < STARTUP_MIN_SIZE[0] or root.winfo_height() < STARTUP_MIN_SIZE[1]:
+                root.geometry(STARTUP_GEOMETRY)
+        except Exception:
+            pass
+    try:
+        root.after(80, _enforce)
+    except Exception:
+        _enforce()
+
+
 class _StatusProxy:
-    """Compatibility shim for the old StringVar-like controller calls."""
-
     def __init__(self, controller):
-        """Attach the proxy to the dashboard controller's status field."""
-
         self.controller = controller
 
     def set(self, value):
-        """Store status text in the controller for the next render."""
-
         self.controller.status_text = str(value or "")
 
     def get(self):
-        """Return the controller's current status text."""
-
         return self.controller.status_text
 
 
 class DashboardController:
-    """Coordinate dashboard UI actions with ArcGIS persistence helpers."""
-
     def __init__(self, paths, district_layer, seed, messages):
-        """Store ArcGIS handles used by dashboard callbacks."""
-
         self.paths = paths
         self.district_layer = district_layer
         self.seed = seed
@@ -120,6 +121,15 @@ class DashboardController:
         self.status_text = ""
         self.selected_item_id = ""
         self.last_receipt = None
+        self.report_tabs = []
+        self.selected_report_id = ""
+        self.selected_desk_tab = "applications"
+        self._report_counter = 0
+        self._report_week = 0
+        self._show_help = False
+        self._queue_autoclose_after_id = None
+        self._queue_autoclose_active = False
+        self._queue_autoclose_seconds = 0
         self._newgame_overlay = None
         self._deadline_week = 0
         self._deadline_started = 0.0
@@ -128,8 +138,6 @@ class DashboardController:
         self._command_busy = False
 
     def open(self):
-        """Create the Tkinter window, wire callbacks, and enter the UI loop."""
-
         try:
             import tkinter as tk
         except Exception as exc:
@@ -137,9 +145,7 @@ class DashboardController:
 
         self.root = tk.Tk()
         self.root.title("Permit Office")
-        # Portrait pane sized to sit beside ArcGIS Pro on a 1920x1080 monitor.
-        self.root.geometry("980x1040")
-        self.root.minsize(900, 860)
+        _configure_dashboard_window(self.root)
         try:
             self.root.attributes("-topmost", True)
         except Exception:
@@ -160,6 +166,12 @@ class DashboardController:
             advance_turn=self.advance_turn,
             new_game=self.new_game,
             scorecard=self.show_scorecard,
+            select_desk_tab=self.select_desk_tab,
+            select_report=self.select_report,
+            show_help=self.show_help,
+            end_game=self.end_game,
+            cancel_queue_autoclose=self.cancel_queue_autoclose,
+            pause_queue_autoclose=self._pause_queue_autoclose,
             close=self.root.destroy,
         )
         self.view = PermitDeskView(self.root, callbacks, self.select_item)
@@ -172,6 +184,7 @@ class DashboardController:
         """Select a docket item and redraw the dashboard model."""
 
         self.selected_item_id = item_id
+        self.selected_desk_tab = "applications"
         item = self.active_item()
         if item:
             try:
@@ -190,9 +203,11 @@ class DashboardController:
         items = read_docket(self.paths)
         active_features = read_active_features(self.paths)
         self._sync_deadline_timer(state)
+        self._sync_report_week(state)
         if state.status == "complete" or state.turn > state.max_turns:
             self._record_final_audit_receipt(state, districts, active_features, items)
-        if not has_saved_game(self.paths) and not self.status_text:
+        saved_game = has_saved_game(self.paths)
+        if not saved_game and not self.status_text:
             self.status_text = "No saved game found. Click New Game to create Permit Office layers and start play."
         proposal_visible_by_item = {}
         for item in items:
@@ -210,31 +225,164 @@ class DashboardController:
             *self._deadline_presentation(),
             active_features=active_features,
             receipt=self.last_receipt,
+            report_tabs=tuple(self.report_tabs),
+            selected_report_id=self.selected_report_id,
+            show_start_help=(not saved_game) or self._show_help,
+            selected_desk_tab=self.selected_desk_tab,
+            auto_close_active=self._queue_autoclose_active,
+            auto_close_seconds=self._queue_autoclose_seconds,
         )
         self.selected_item_id = model.selected_item_id
+        self.selected_report_id = model.selected_report_id
+        self.selected_desk_tab = model.selected_desk_tab
         self.view.render(model)
 
     def _record_receipt(self, title, report, affected, state):
         """Store the latest filed report for the inline receipt panel (no popup)."""
 
-        self.last_receipt = ReceiptModel(
+        receipt = ReceiptModel(
             title=title,
             report=report,
             affected=tuple(affected or ()),
             metrics=receipt_metrics(state),
         )
+        self.last_receipt = receipt
+        report_id = self._next_report_id("report", state)
+        tab = ReportTab(
+            report_id=report_id,
+            title=title,
+            kind="report",
+            status=_report_status(report),
+            selected=True,
+            report=report,
+            affected=receipt.affected,
+            metrics=receipt.metrics,
+        )
+        self.report_tabs = [self._unselect_report(tab) for tab in self.report_tabs] + [tab]
+        self.selected_report_id = report_id
+        self.selected_desk_tab = "applications"
 
     def _record_final_audit_receipt(self, state, districts, active_features, items):
         """Store the current final audit scorecard as the inline receipt."""
 
         grade, scorecard = rules.scorecard(state, districts, active_features, items)
-        self._record_receipt(
-            f"Final Audit: {grade}",
-            _final_audit_report(grade, scorecard),
-            (),
-            state,
-        )
+        title = f"Final Audit: {grade}"
+        report = _final_audit_report(grade, scorecard)
+        self._record_scorecard_tab(title, report, state)
         return grade, self.last_receipt.report
+
+    def _record_scorecard_tab(self, title, report, state):
+        """Store or select a scorecard report tab."""
+
+        receipt = ReceiptModel(title=title, report=report, affected=(), metrics=receipt_metrics(state))
+        self.last_receipt = receipt
+        existing_id = ""
+        for tab in self.report_tabs:
+            if tab.kind == "scorecard" and tab.title == title:
+                existing_id = tab.report_id
+                break
+        report_id = existing_id or self._next_report_id("scorecard", state)
+        scorecard_tab = ReportTab(report_id, title, "scorecard", "scorecard", True, report, (), receipt.metrics)
+        tabs = [self._unselect_report(tab) for tab in self.report_tabs if tab.report_id != report_id]
+        self.report_tabs = tabs + [scorecard_tab]
+        self.selected_report_id = report_id
+        self.selected_desk_tab = "reports"
+
+    def _next_report_id(self, kind, state):
+        """Return a stable in-session id for a newly filed report tab."""
+
+        self._report_counter += 1
+        week = int(getattr(state, "turn", 0) or 0)
+        return f"{kind}-w{week}-{self._report_counter}"
+
+    def _unselect_report(self, tab):
+        return ReportTab(tab.report_id, tab.title, tab.kind, tab.status, False, tab.report, tab.affected, tab.metrics)
+
+    def _sync_report_week(self, state):
+        week = int(getattr(state, "turn", 0) or 0)
+        if self._report_week == 0:
+            self._report_week = week
+            return
+        if week != self._report_week and getattr(state, "status", "") != "complete":
+            keep = [tab for tab in self.report_tabs if tab.status == "week"][-1:]
+            self.report_tabs = keep
+            self.selected_report_id = keep[-1].report_id if keep else ""
+            self.last_receipt = _receipt_from_tab(keep[-1]) if keep else None
+            self.selected_desk_tab = "reports" if keep else "applications"
+            self._report_week = week
+
+    def select_desk_tab(self, tab_id):
+        self.selected_desk_tab = "reports" if tab_id == "reports" else "applications"
+        if self.selected_desk_tab == "reports":
+            self._pause_queue_autoclose()
+        self.reload()
+
+    def select_report(self, report_id):
+        self._pause_queue_autoclose()
+        self.selected_report_id = report_id
+        self.selected_desk_tab = "reports"
+        self.report_tabs = [
+            ReportTab(tab.report_id, tab.title, tab.kind, tab.status, tab.report_id == report_id, tab.report, tab.affected, tab.metrics)
+            for tab in self.report_tabs
+        ]
+        for tab in self.report_tabs:
+            if tab.report_id == report_id:
+                self.last_receipt = _receipt_from_tab(tab)
+                break
+        self.reload()
+
+    def show_help(self):
+        self._pause_queue_autoclose()
+        self._show_help = not self._show_help
+        self.reload()
+
+    def _schedule_queue_autoclose(self, seconds=3):
+        self._cancel_queue_autoclose_timer()
+        self._queue_autoclose_active = True
+        self._queue_autoclose_seconds = int(seconds)
+        self.status_var.set(f"Queue cleared. Week closes automatically in {seconds} seconds.")
+        root = getattr(self, "root", None)
+        if root is not None:
+            try:
+                self._queue_autoclose_after_id = root.after(int(seconds * 1000), self._queue_autoclose_tick)
+            except Exception:
+                self._queue_autoclose_after_id = None
+
+    def cancel_queue_autoclose(self):
+        self._cancel_queue_autoclose_timer()
+        self._queue_autoclose_active = False
+        self._queue_autoclose_seconds = 0
+        if getattr(self, "status_var", None):
+            self.status_var.set("Queue cleared. End Week when ready.")
+        self.reload()
+
+    def _pause_queue_autoclose(self):
+        if not self._queue_autoclose_active and not self._queue_autoclose_after_id:
+            return
+        self._cancel_queue_autoclose_timer()
+        self._queue_autoclose_active = False
+        self._queue_autoclose_seconds = 0
+
+    def _cancel_queue_autoclose_timer(self):
+        after_id = self._queue_autoclose_after_id
+        self._queue_autoclose_after_id = None
+        if after_id and getattr(self, "root", None):
+            try:
+                self.root.after_cancel(after_id)
+            except Exception:
+                pass
+
+    def _queue_autoclose_tick(self):
+        self._queue_autoclose_after_id = None
+        if not self._queue_autoclose_active:
+            return
+        self._queue_autoclose_active = False
+        self._queue_autoclose_seconds = 0
+        self.advance_turn(auto=True)
+
+    def end_game(self):
+        if getattr(self, "root", None):
+            self.root.destroy()
 
     def _sync_deadline_timer(self, state):
         """Start or reset the five-minute filing clock for the current week."""
@@ -251,8 +399,6 @@ class DashboardController:
         self._deadline_running = True
 
     def _deadline_remaining_seconds(self):
-        """Return seconds left before the filing deadline closes the week."""
-
         if not self._deadline_running or not self._deadline_started:
             return WEEK_DEADLINE_SECONDS
         elapsed = max(0, time.monotonic() - self._deadline_started)
@@ -378,8 +524,6 @@ class DashboardController:
         buttons.pack(padx=26, pady=(14, 18))
 
         def _start(_event=None):
-            """Validate the seed and start the new game, then close the overlay."""
-
             try:
                 seed = abs(int(seed_var.get().strip()))
             except (TypeError, ValueError):
@@ -388,8 +532,6 @@ class DashboardController:
             self.start_new_game(int(seed))
 
         def _cancel(_event=None):
-            """Dismiss the overlay without changing the game."""
-
             self._close_newgame_overlay()
 
         tk.Button(buttons, text="START", command=_start, bg=pal.GREEN, fg=pal.PAPER, activebackground=pal.BLUE, activeforeground=pal.PAPER, relief="flat", padx=20, pady=7, font=("Segoe UI", 9, "bold")).pack(side="left", padx=6)
@@ -402,16 +544,12 @@ class DashboardController:
         frame.bind("<Escape>", _cancel)
 
     def _close_newgame_overlay(self):
-        """Destroy the inline new-game overlay if it is open."""
-
         overlay = getattr(self, "_newgame_overlay", None)
         if overlay is not None:
             overlay.destroy()
             self._newgame_overlay = None
 
     def start_new_game(self, seed):
-        """Replace persisted game rows and reload the dashboard."""
-
         with perf_session("new_game", self.messages):
             try:
                 self._command_busy = True
@@ -426,6 +564,14 @@ class DashboardController:
                 self.seed = seed
                 self.district_layer = DISTRICTS
                 self.selected_item_id = ""
+                self.last_receipt = None
+                self.report_tabs = []
+                self.selected_report_id = ""
+                self.selected_desk_tab = "applications"
+                self._pause_queue_autoclose()
+                self._report_counter = 0
+                self._report_week = 0
+                self._show_help = False
                 self._deadline_week = 0
                 self._deadline_started = 0.0
                 self.status_var.set(f"New game started with seed {seed}.")
@@ -437,38 +583,27 @@ class DashboardController:
                 self.reload()
 
     def show_scorecard(self):
-        """Display the current audit scorecard from persisted game rows."""
-
-        try:
-            from tkinter import messagebox
-        except Exception as exc:
-            self.status_var.set(f"Scorecard failed: tkinter dialogs unavailable: {exc}")
-            self.reload()
-            return
         if not has_saved_game(self.paths):
-            messagebox.showinfo("Scorecard", "No saved Permit Office game found.", parent=self.root)
+            self.status_var.set("No saved Permit Office game found.")
+            self.reload()
             return
         try:
             state = read_state(self.paths)
             districts = read_districts(self.paths)
             active_features = read_active_features(self.paths)
             items = read_docket(self.paths)
-            _grade, report = rules.scorecard(state, districts, active_features, items)
+            grade, report = rules.scorecard(state, districts, active_features, items)
             summary = f"{report}\n\n{rules.population_city_summary(districts)}; incidents={rules.incident_summary(districts)}."
-            messagebox.showinfo("Scorecard", summary, parent=self.root)
+            self._record_scorecard_tab(f"Scorecard: {grade}", summary, state)
             self.status_var.set(report)
         except Exception as exc:
             self.status_var.set(f"Scorecard failed: {exc}")
         self.reload()
 
     def item_label(self, item):
-        """Return a compact debugging label for a docket item."""
-
         return f"{item.item_id} | {item.geometry_type} | {item.status} | {item.title}"
 
     def active_item(self):
-        """Return the selected docket item or first actionable fallback."""
-
         item_id = self.selected_item_id
         if not item_id and getattr(self, "view", None):
             item_id = self.view.selected_item_id()
@@ -481,8 +616,6 @@ class DashboardController:
         return None
 
     def refresh_detail(self):
-        """Refresh visible dashboard details from persisted state."""
-
         self.reload()
 
     def toggle_exhibit(self):
@@ -666,6 +799,29 @@ class DashboardController:
         self.district_layer = DISTRICTS
         self.status_var.set(filed_report)
         self._record_receipt(item.title, filed_report, result.affected_cell_ids, state)
+        self._advance_triage_selection(item.item_id)
+
+    def _advance_triage_selection(self, resolved_item_id):
+        """Select the next open application or arm queue auto-close."""
+
+        try:
+            docket = read_docket(self.paths)
+        except Exception as exc:
+            _warn(self.messages, "DASH", f"next selection skipped: {exc}")
+            return
+        active = [item for item in docket if item.status in ("open", "inspected", "active", "carried")]
+        next_item = next((item for item in active if item.item_id != resolved_item_id), active[0] if active else None)
+        self.selected_desk_tab = "applications"
+        if next_item is None:
+            self.selected_item_id = ""
+            self._schedule_queue_autoclose()
+            return
+        self._pause_queue_autoclose()
+        self.selected_item_id = next_item.item_id
+        try:
+            select_case_context(self.paths, self.district_layer, next_item, self.seed, self.messages)
+        except Exception as exc:
+            _warn(self.messages, "DASH", f"next selection map context failed: {exc}")
 
     def advance_turn(self, auto=False):
         """Advance the saved game one week and regenerate the docket."""
@@ -714,6 +870,7 @@ class DashboardController:
                     self.status_var.set(f"{prefix}{final_report}")
                     self._deadline_running = False
                 else:
+                    self._record_week_report("Week Closed", report, state)
                     self.status_var.set(f"{prefix}{report}")
                 self._deadline_week = 0
                 self._deadline_started = 0.0
@@ -724,6 +881,18 @@ class DashboardController:
                 self._command_busy = False
                 with perf_block("reload"):
                     self.reload()
+
+    def _record_week_report(self, title, report, state):
+        """Store the week-close report as the first report in the new week."""
+
+        receipt = ReceiptModel(title=title, report=report, affected=(), metrics=receipt_metrics(state))
+        self.last_receipt = receipt
+        report_id = self._next_report_id("week", state)
+        tab = ReportTab(report_id, title, "week", "week", True, report, (), receipt.metrics)
+        self.report_tabs = [tab]
+        self.selected_report_id = report_id
+        self.selected_desk_tab = "reports"
+        self._report_week = int(getattr(state, "turn", 0) or 0)
 
 
 def clear_output_selections(paths):
@@ -798,6 +967,29 @@ def _final_audit_report(grade, scorecard):
     grade = grade or "UNKNOWN"
     flavor = FINAL_AUDIT_FLAVOR.get(grade, "Audit closes the current file.")
     return f"Final audit: {grade}. {flavor} {scorecard}"
+
+
+def _report_status(report):
+    """Classify report text for dashboard tab styling."""
+
+    lower = str(report or "").lower()
+    if "final audit" in lower or lower.startswith("audit "):
+        return "scorecard"
+    if lower.startswith(("approved", "issued")):
+        return "approved"
+    if lower.startswith(("denied", "deny")):
+        return "denied"
+    if lower.startswith(("inspected", "inspection")):
+        return "inspected"
+    if lower.startswith(("advanced", "final week", "auto-deadline")):
+        return "week"
+    return "filed"
+
+
+def _receipt_from_tab(tab):
+    """Create a legacy receipt object from a selected report tab."""
+
+    return ReceiptModel(tab.title, tab.report, tab.affected, tab.metrics)
 
 
 def _local_changes_fragment(result):
