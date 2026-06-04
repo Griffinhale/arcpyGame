@@ -19,6 +19,7 @@ dist/
 
 .DS_Store
 .claude/
+.serena/
 
 *.aprx.lock
 *.lock
