@@ -152,6 +152,10 @@ def _district_block_features(profile: DistrictProfile, seed: int, rng: random.Ra
     for idx, (cx, cy) in enumerate(positions[:block_count]):
         jitter = rng.randrange(-2, 3) / 100.0
         occupancy = occupancy_budget[idx] if idx < len(occupancy_budget) else 0
+        # Footprint tracks land-use intensity: denser residential/commercial
+        # blocks render larger than sparse industrial/civic ones. Bounded so the
+        # rectangle stays inside the district and clear of the central road lane.
+        scale = _block_size_scale(occupancy)
         features.append(
             _zone_feature(
                 seed,
@@ -162,7 +166,7 @@ def _district_block_features(profile: DistrictProfile, seed: int, rng: random.Ra
                 f"{profile.name} Block {idx + 1}",
                 status="context",
                 capacity=occupancy,
-                geometry_hint={"shape": "rect", "cx": cx + jitter, "cy": cy - jitter, "w": 0.19, "h": 0.17},
+                geometry_hint={"shape": "rect", "cx": cx + jitter, "cy": cy - jitter, "w": round(0.19 * scale, 3), "h": round(0.17 * scale, 3)},
                 metadata={
                     "seed_role": "city_block",
                     "generated_subtype": archetype_id,
@@ -249,7 +253,10 @@ def _anchor_point(profile, seed, idx):
         "academic": "academic_block",
         "mercantile": "commercial_block",
     }.get(profile.district_type, "civic_building")
-    display_state = "civic" if profile.district_type == "civic" else "commerce" if profile.district_type == "mercantile" else "campus"
+    # Anchor POIs are the prominent special-interest dots placed away from the
+    # context blocks; they render larger than ordinary context points. The
+    # district family stays in archetype_id/metadata for inspection.
+    display_state = "special_interest"
     x, y = _POI_SLOTS[(idx - 1) % len(_POI_SLOTS)]
     return CityDetailFeature(
         feature_id=f"CITY-{seed}-anchor-{idx}-{profile.cell_id}",
@@ -280,6 +287,15 @@ def _park_slot(idx):
     """Return a repeating relative slot for seeded park placement."""
 
     return _BUILDING_SLOTS[(idx - 1) % len(_BUILDING_SLOTS)]
+
+
+def _block_size_scale(occupancy: int) -> float:
+    """Scale a context block footprint by its occupancy (land-use intensity).
+
+    Bounded to [0.8, 1.5] so blocks stay inside the district extent and never
+    reach the central road lane at offset 0.50.
+    """
+    return max(0.8, min(1.5, 0.8 + max(0, int(occupancy or 0)) / 500.0))
 
 
 def _occupancy_budget(profile, block_count):

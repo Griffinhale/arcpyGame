@@ -320,6 +320,35 @@ def test_contested_transition_converts_when_pressure_remains_high():
     assert districts["A"].identity_state == "converted"
 
 
+def test_converted_district_is_renamed_to_signal_new_identity():
+    """Verify a buyout conversion relabels the district to fit its new type."""
+
+    state = rules.CityState(turn=2)
+    target = _district_for_buyout("A", "residential", 32, ["B"])
+    target.name = "Cinder Yard"
+    target.identity_state = "contested"
+    target.contesting_cell_id = "B"
+    target.contesting_type = "mercantile"
+    target.transition_due_turn = 2
+    target.buyout_pressure = 5
+    districts = {
+        "A": target,
+        "B": _district_for_buyout("B", "mercantile", 80, ["A"]),
+    }
+    ledger = rules.rebuild_type_ledger(districts)
+
+    result = rules.resolve_contested_transitions(state, districts, ledger)
+
+    renamed = districts["A"].name
+    assert renamed != "Cinder Yard"
+    # Keeps the original prefix for continuity, swaps to a mercantile suffix.
+    assert renamed.startswith("Cinder ")
+    assert renamed.split()[-1] in ("Market", "Exchange", "Bazaar", "Arcade")
+    # The report names both the old and new label so the flip is legible.
+    assert "Cinder Yard" in result.report
+    assert renamed in result.report
+
+
 def test_converted_transition_does_not_recontest_during_same_week_close():
     state = rules.CityState(turn=2)
     target = _district_for_buyout("A", "residential", 32, ["B", "C"])
@@ -790,6 +819,68 @@ def test_deferred_incident_reappears_as_one_coherent_case():
     assert incidents[0].origin_item_id == "dissatisfaction:D0000:renters"
 
 
+def test_week_five_commuter_incident_stays_single_and_clears_on_response():
+    """Regression for the stuck week-5 commuter incident.
+
+    A persistent commuter grievance must surface exactly one actionable follow-up
+    per week (never a hidden duplicate), survive repeated denial without
+    duplicating, and clear permanently once the office finally responds.
+    """
+
+    identity = "dissatisfaction:D0000:commuters"
+    profiles = {"D0000": _incident_profile("D0000", "commuters", band=4)}
+    state = rules.CityState(turn=5, ap=4, money=120)
+    carried: list = []
+
+    # Weeks 5 and 6: deny each week. The grievance persists (correct) but must
+    # never present two simultaneous follow-ups for the same identity.
+    for _week in (5, 6):
+        docket = rules.generate_docket(turn=state.turn, seed=2026, count=4, state=state, districts=profiles, carried_items=carried)
+        incidents = [item for item in _local_incident_items(docket) if item.origin_item_id == identity]
+        assert len(incidents) == 1
+        item = incidents[0]
+        rules.resolve_decision(state, item, profiles, action="deny", target_cell_ids=["D0000"], seed=2026)
+        rules.advance_turn_result(state, [item], profiles)
+        carried = [item]
+        assert profiles["D0000"].incident_state != "none"
+
+    # Now respond to it: a settlement relieves the grievance below threshold.
+    docket = rules.generate_docket(turn=state.turn, seed=2026, count=4, state=state, districts=profiles, carried_items=carried)
+    incidents = [item for item in _local_incident_items(docket) if item.origin_item_id == identity]
+    assert len(incidents) == 1
+    item = incidents[0]
+    rules.resolve_decision(state, item, profiles, action="approve_mitigated", target_cell_ids=["D0000"], seed=2026, mitigated=True)
+    rules.advance_turn_result(state, [item], profiles)
+
+    # The incident clears and does not resurrect from a stale duplicate record.
+    assert profiles["D0000"].incident_state == "none"
+    final_docket = rules.generate_docket(turn=state.turn, seed=2026, count=4, state=state, districts=profiles, carried_items=[item])
+    assert [item for item in _local_incident_items(final_docket) if item.origin_item_id == identity] == []
+
+
+def test_district_prosperity_band_grades_core_metrics():
+    """Verify the per-district prosperity band tracks the four core metrics."""
+
+    def _band(activity, friction, trust, exposure):
+        profile = rules.DistrictProfile(
+            cell_id="D0", name="D0", population=1000,
+            activity=activity, friction=friction, trust=trust, exposure=exposure,
+            services=40, district_type="residential",
+        )
+        rules.normalize_profile(profile)
+        return profile.prosperity_band
+
+    # (80 + 60 + 90 + 80) / 4 = 77.5 -> thriving
+    assert _band(80, 10, 60, 20) == "thriving"
+    # (20 + 15 + 30 + 35) / 4 = 25 -> failing
+    assert _band(20, 70, 15, 65) == "failing"
+    # A healthy district outranks a struggling one.
+    bands = ["failing", "strained", "stable", "thriving"]
+    assert bands.index(_band(80, 10, 60, 20)) > bands.index(_band(20, 70, 15, 65))
+    # normalize_profile persists the band onto the profile for map rendering.
+    assert _band(55, 30, 45, 30) in bands
+
+
 def test_feature_archetype_catalog_is_valid_and_covers_all_templates():
     """Verify templates resolve to valid feature archetypes and metadata."""
     assert rules.validate_feature_catalog() == []
@@ -847,6 +938,49 @@ def test_docket_weights_reflect_district_type_distribution():
     assert market_categories.count("business") + market_categories.count("development") >= 1
     assert natural_categories.count("land") >= 1
     assert [item.template_id for item in market_docket] != [item.template_id for item in natural_docket]
+
+
+def _typed_population_district(cell_id, dtype, population):
+    profile = rules.DistrictProfile(
+        cell_id=cell_id,
+        name=cell_id,
+        population=population,
+        activity=60,
+        friction=25,
+        trust=35,
+        exposure=20,
+        services=40,
+        district_type=dtype,
+    )
+    rules.normalize_profile(profile)
+    return profile
+
+
+def test_docket_weights_reflect_district_population_distribution():
+    """More-populous district types should generate more related proposals."""
+
+    def _board(merc_pop, nat_pop):
+        board = {}
+        for i in range(4):
+            board[f"M{i}"] = _typed_population_district(f"M{i}", "mercantile", merc_pop)
+            board[f"N{i}"] = _typed_population_district(f"N{i}", "natural", nat_pop)
+        return board
+
+    def _commerce_count(board):
+        # Sample the proposal pool across many weeks with fixed city state so we
+        # isolate the population weighting from turn-to-turn board mutation.
+        total = 0
+        state = rules.CityState()
+        for turn in range(1, 61):
+            docket = rules.generate_docket(turn=turn, seed=2026, count=4, state=state, districts=board)
+            cats = [rules.TEMPLATES[item.template_id].category for item in docket]
+            total += cats.count("business") + cats.count("development")
+        return total
+
+    dense_mercantile = _commerce_count(_board(merc_pop=3000, nat_pop=500))
+    sparse_mercantile = _commerce_count(_board(merc_pop=500, nat_pop=3000))
+
+    assert dense_mercantile > sparse_mercantile
 
 
 def test_twelve_week_docket_generation_keeps_three_or_four_items_available():
@@ -2027,6 +2161,42 @@ def test_seeded_city_detail_descriptors_are_deterministic_and_moderate():
     assert any(feature.capacity > 0 and feature.metadata.get("occupancy") for feature in first if feature.status == "context")
     assert any(feature.metadata.get("seed_role") == "point_of_interest" for feature in first if feature.geometry_type == "POINT")
     _assert_city_detail_rects_clear_road_lanes(first)
+
+
+def test_city_detail_block_size_tracks_land_use_intensity():
+    """Verify denser districts render larger context blocks than sparse ones."""
+
+    def _max_block_width(population):
+        profile = rules.DistrictProfile(
+            cell_id="D0000", name="Dense Row", population=population,
+            activity=55, friction=25, trust=35, exposure=25, services=40,
+            district_type="residential",
+        )
+        rules.normalize_profile(profile)
+        features = rules.generate_city_detail_features({profile.cell_id: profile}, seed=2026)
+        widths = [
+            float(f.geometry_hint["w"])
+            for f in features
+            if f.metadata.get("seed_role") == "city_block" and f.target_cell_ids == ("D0000",)
+        ]
+        return max(widths)
+
+    dense = _max_block_width(2800)
+    sparse = _max_block_width(700)
+    assert dense > sparse
+    # Stays bounded so the block never reaches the central road lane at 0.50.
+    assert dense < 0.30
+
+
+def test_city_detail_anchor_points_render_as_special_interest():
+    """Verify prominent anchor POIs use the larger special-interest symbol."""
+
+    profiles = {profile.cell_id: profile for profile in rules.generate_district_profiles(seed=2026)}
+    features = rules.generate_city_detail_features(profiles, seed=2026)
+
+    anchors = [f for f in features if f.metadata.get("seed_role") == "point_of_interest"]
+    assert anchors
+    assert all(f.display_state == "special_interest" for f in anchors)
 
 
 def _assert_city_detail_rects_clear_road_lanes(features):

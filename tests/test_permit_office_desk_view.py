@@ -133,6 +133,20 @@ def test_heat_ticker_explains_future_followup_pressure():
         assert phrase in heat_line
 
 
+def test_ticker_surfaces_contested_buyout_for_legibility():
+    """Verify a contested district shows up on the city news ticker."""
+
+    item, districts = _vendor_case()
+    target = districts["D0000"]
+    target.name = "Cinder Yard"
+    target.identity_state = "contested"
+    target.contesting_type = "mercantile"
+
+    model = build_desk_model(rules.CityState(), districts, [item], item.item_id)
+
+    assert any("Boundary desk:" in line and "Cinder Yard" in line for line in model.ticker_items)
+
+
 def test_ledger_rows_surface_non_money_city_health():
     """Verify desk ledger rows expose non-money city systems."""
 
@@ -445,8 +459,8 @@ def _text_values(canvas):
     return [kwargs.get("text") for kind, _args, kwargs in canvas.created if kind == "text"]
 
 
-def test_application_workspace_draws_four_open_application_tabs():
-    """Verify the application tab strip exposes the full default docket."""
+def test_application_workspace_stacks_queued_cases_under_active_case():
+    """Verify the active case expands while queued cases collapse vertically beneath it."""
 
     item, districts = _vendor_case()
     rows = [
@@ -461,9 +475,31 @@ def test_application_workspace_draws_four_open_application_tabs():
 
     view._draw_application_tab_content(canvas, (0, 0, 760, 700))
 
+    # The active case (T03) is the expanded brief, not a collapsed queued row.
     target_ids = [ident for kind, ident, _bbox, _callback in view._click_targets if kind == "docket"]
-    assert target_ids == ["T03", "T01-vendor", "T02", "T04"]
-    assert "+1 more" not in _text_values(canvas)
+    assert target_ids == ["T01-vendor", "T02", "T04"]
+    assert "QUEUED (3)" in _text_values(canvas)
+    assert not any(text.startswith("+") and "queued" in text for text in _text_values(canvas))
+
+
+def test_application_workspace_caps_queued_stack_and_reports_overflow():
+    """Verify a short workspace caps the collapsed queue and flags overflow."""
+
+    item, districts = _vendor_case()
+    rows = [item] + [
+        rules.DocketItem(f"T{n:02d}", "street_vendor_compact", f"Case {n}", "POINT", 1)
+        for n in range(2, 12)
+    ]
+    model = build_desk_model(rules.CityState(), districts, rows, item.item_id)
+    view, _callbacks = _view_for_drawing(model)
+    canvas = _FakeCanvas()
+
+    # A short box forces the collapsed stack to cap below the 10 queued cases.
+    view._draw_application_tab_content(canvas, (0, 0, 760, 460))
+
+    target_ids = [ident for kind, ident, _bbox, _callback in view._click_targets if kind == "docket"]
+    assert 0 < len(target_ids) < 10
+    assert any(text.startswith("+") and "queued" in text for text in _text_values(canvas))
 
 
 def test_utility_menu_button_is_compact_hamburger_without_text_label():
@@ -600,6 +636,57 @@ def test_city_health_rail_draws_only_slim_pulse_signals():
     assert "SERVICES" not in texts
     assert "HOUSING" not in texts
     assert "MAINTENANCE" not in texts
+
+
+def test_city_health_index_folds_core_metrics():
+    """Verify the City Health headline summarizes the four core metrics."""
+
+    from toolbox.permit_office_arcgis.desk_model import _city_health_index
+
+    # Activity/Trust positive, Friction/Exposure negative: (80 + 60 + (100-10) + (100-20)) / 4 = 77.5 -> 78
+    healthy = rules.CityState(activity=80, trust=60, friction=10, exposure=20)
+    assert _city_health_index(healthy) == 78
+    # A struggling city reads lower.
+    failing = rules.CityState(activity=20, trust=15, friction=70, exposure=65)
+    assert _city_health_index(failing) < _city_health_index(healthy)
+    assert 0 <= _city_health_index(failing) <= 100
+
+
+def test_ledger_surfaces_city_health_headline_and_heat():
+    """Verify the ledger leads with a Health row and keeps Heat visible."""
+
+    item, districts = _vendor_case()
+    model = build_desk_model(rules.CityState(activity=70, trust=55, friction=15, exposure=20), districts, [item], item.item_id)
+    ledger = {row.label: row for row in model.ledger_rows}
+
+    assert "Health" in ledger
+    assert ledger["Health"].meter is not None
+    assert "Heat" in ledger
+
+
+def test_city_health_rail_draws_health_and_heat_headline():
+    """Verify the pulse rail renders the City Health gauge and Heat indicator."""
+
+    item, districts = _vendor_case()
+    model = build_desk_model(rules.CityState(), districts, [item], item.item_id)
+    view, _callbacks = _view_for_drawing(model)
+    canvas = _FakeCanvas()
+
+    view._draw_ledger_rail(canvas, (0, 0, 260, 620))
+
+    texts = _text_values(canvas)
+    assert "CITY HEALTH" in texts
+    assert "HEAT" in texts
+
+
+def test_selected_case_renders_economy_and_action_note():
+    """Verify the decision brief carries a recurring budget line and action note."""
+
+    item, districts = _vendor_case()
+    model = build_desk_model(rules.CityState(), districts, [item], item.item_id)
+
+    assert model.case.economy
+    assert "Issue=" in model.case.action_note
 
 
 def test_queue_cleared_state_draws_end_week_and_cancel_autoclose():

@@ -14,6 +14,12 @@ from .schema import DISTRICTS, LINES, POINTS, SUPPORT_FIELDS, ZONES
 from .store import decode_json, encode_json, read_districts, write_docket_item
 from .symbology_config import LAYER_TRANSPARENCY, RENDER_FIELD_BY_LAYER_KEY, SYMBOLS_BY_FIELD, apply_default_symbol_style, apply_symbol_style
 
+# District overlay layers reuse the PermitDistricts feature class with different
+# render fields so land-use type, prosperity, and buyout identity each get their
+# own visual channel without one fill having to encode all three.
+DISTRICT_PROSPERITY = "District Prosperity"
+DISTRICT_IDENTITY = "District Identity"
+
 
 def _summary_map(value):
     """Format a compact sorted metadata map for ArcGIS text fields."""
@@ -725,6 +731,16 @@ def add_outputs_to_map(paths, messages, layer_names=None):
             _tune_layer_visibility(existing[name], key)
             _configure_labels(existing[name], key)
             apply_simple_symbology(existing[name], key, messages)
+        # Add the prosperity and identity overlays from the same districts source.
+        if layer_names is None or DISTRICTS in layer_names:
+            for name, key in ((DISTRICT_PROSPERITY, "district_prosperity"), (DISTRICT_IDENTITY, "district_identity")):
+                if name not in existing:
+                    lyr = active_map.addDataFromPath(paths["districts"])
+                    lyr.name = name
+                    existing[name] = lyr
+                    _log(messages, "MAP", f"added {name}")
+                _tune_layer_visibility(existing[name], key)
+                apply_simple_symbology(existing[name], key, messages)
         _order_output_layers(active_map, existing)
     except Exception as exc:
         _warn(messages, "MAP", f"add outputs failed: {exc}")
@@ -737,7 +753,16 @@ def remove_outputs_from_map(messages, layer_names=None):
         active_map = aprx.activeMap
         if active_map is None:
             return
-        output_names = {DISTRICTS, POINTS, LINES, ZONES} if layer_names is None else {DISTRICTS, POINTS, LINES, ZONES} & set(layer_names)
+        base_outputs = {DISTRICTS, POINTS, LINES, ZONES}
+        # The district overlays are tied to the districts source, so they clear
+        # whenever districts (or a full refresh) are being removed.
+        overlay_outputs = {DISTRICT_PROSPERITY, DISTRICT_IDENTITY}
+        if layer_names is None:
+            output_names = base_outputs | overlay_outputs
+        else:
+            output_names = (base_outputs & set(layer_names))
+            if DISTRICTS in layer_names:
+                output_names |= overlay_outputs
         removed = 0
         for layer in list(active_map.listLayers()):
             if getattr(layer, "name", None) in output_names:
@@ -1009,14 +1034,14 @@ def _configure_labels(layer, key):
 
 
 def _order_output_layers(active_map, existing):
-    """Draw district colors as the base, with feature lines on top."""
-    ordered_names = [LINES, POINTS, ZONES, DISTRICTS]
-    layers = {name: existing.get(name) for name in ordered_names}
-    if not all(layers.values()):
+    """Draw district colors as the base, identity/prosperity overlays just above
+    it, and feature lines/points/zones on top."""
+    ordered_names = [LINES, POINTS, ZONES, DISTRICT_IDENTITY, DISTRICT_PROSPERITY, DISTRICTS]
+    if not all(existing.get(name) for name in (LINES, POINTS, ZONES, DISTRICTS)):
         return
+    present = [existing[name] for name in ordered_names if existing.get(name) is not None]
     try:
-        active_map.moveLayer(layers[LINES], layers[POINTS], "AFTER")
-        active_map.moveLayer(layers[POINTS], layers[ZONES], "AFTER")
-        active_map.moveLayer(layers[ZONES], layers[DISTRICTS], "AFTER")
+        for reference_layer, move_layer in zip(present, present[1:]):
+            active_map.moveLayer(reference_layer, move_layer, "AFTER")
     except Exception:
         pass

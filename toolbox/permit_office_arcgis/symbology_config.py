@@ -38,6 +38,7 @@ DISPLAY_STATE_SYMBOLS = {
     "overlay": ([63, 168, 159, 100], "Overlay"),
     "case": ([199, 82, 96, 100], "Case"),
     "context": ([146, 139, 128, 100], "Context"),
+    "special_interest": ([214, 168, 64, 100], "Special Interest"),
 }
 
 DISTRICT_TYPE_SYMBOLS = {
@@ -57,10 +58,28 @@ IDENTITY_STATE_SYMBOLS = {
     "overextended": ([150, 72, 90, 100], "Overextended"),
 }
 
+# Prosperity overlay: transparent fills (alpha 0) so the land-use-type fill stays
+# visible beneath; the graduated thriving->failing color is carried on the
+# outline (see PROSPERITY_BAND_OUTLINE / symbol_style_for).
+PROSPERITY_BAND_SYMBOLS = {
+    "thriving": ([106, 162, 114, 0], "Thriving"),
+    "stable": ([170, 186, 170, 0], "Stable"),
+    "strained": ([216, 159, 84, 0], "Strained"),
+    "failing": ([196, 90, 74, 0], "Failing"),
+}
+
+PROSPERITY_BAND_OUTLINE = {
+    "thriving": [70, 150, 96, 100],
+    "stable": [150, 170, 150, 100],
+    "strained": [210, 150, 70, 100],
+    "failing": [196, 70, 60, 100],
+}
+
 SYMBOLS_BY_FIELD = {
     "display_state": DISPLAY_STATE_SYMBOLS,
     "district_type": DISTRICT_TYPE_SYMBOLS,
     "identity_state": IDENTITY_STATE_SYMBOLS,
+    "prosperity_band": PROSPERITY_BAND_SYMBOLS,
 }
 
 RENDER_FIELD_BY_LAYER_KEY = {
@@ -68,6 +87,10 @@ RENDER_FIELD_BY_LAYER_KEY = {
     "points": "display_state",
     "lines": "display_state",
     "zones": "display_state",
+    # Overlay layers reuse the PermitDistricts feature class with a different
+    # render field so type, prosperity, and identity each get a visual channel.
+    "district_prosperity": "prosperity_band",
+    "district_identity": "identity_state",
 }
 
 LAYER_TRANSPARENCY = {
@@ -75,6 +98,8 @@ LAYER_TRANSPARENCY = {
     "points": 0,
     "lines": 0,
     "zones": 35,
+    "district_prosperity": 0,
+    "district_identity": 25,
 }
 
 DISTRICT_OUTLINE_COLOR = [242, 238, 226, 100]
@@ -107,6 +132,27 @@ def symbol_style_for(layer_key, value):
     style = SYMBOL_STYLE_BY_LAYER.get(layer_key or "", {})
     outline_color = style.get("outline_color", [86, 98, 92, 100])
     outline_width = float(style.get("outline_width", 1.2))
+    if layer_key == "district_prosperity":
+        # Graduated thriving->failing outline over a transparent fill.
+        return {
+            "outline_color": PROSPERITY_BAND_OUTLINE.get(value, [150, 170, 150, 100]),
+            "outline_width": 3.4,
+            "size": None,
+        }
+    if layer_key == "district_identity":
+        # Thick alert outline so contested/vulnerable districts read as overlays.
+        return {
+            "outline_color": [93, 48, 48, 100] if value != "stable" else [226, 232, 222, 0],
+            "outline_width": 3.4 if value != "stable" else 0.0,
+            "size": None,
+        }
+    if value == "special_interest":
+        # Special-interest anchor points read larger than ordinary context dots.
+        return {
+            "outline_color": [93, 60, 30, 100],
+            "outline_width": max(outline_width, 1.4),
+            "size": 15.0,
+        }
     if value == "proposed":
         outline_color = [31, 220, 222, 100]
         outline_width = max(outline_width, 3.2)

@@ -46,6 +46,7 @@ DISTRICT_FIELDS = [
     ("land_use", "TEXT", "Land Use", 32),
     ("zoning_overlay", "TEXT", "Zoning Overlay", 32),
     ("display_state", "TEXT", "Display State", 32),
+    ("prosperity_band", "TEXT", "Prosperity Band", 16),
     ("service_gap_json", "TEXT", "Service Gaps", 1024),
     ("adjacent_cell_ids", "TEXT", "Adjacent District IDs", 512),
     ("network_access_json", "TEXT", "Network Access", 1024),

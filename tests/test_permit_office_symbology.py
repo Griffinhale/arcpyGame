@@ -560,3 +560,64 @@ def test_order_output_layers_keeps_lines_on_top_and_districts_on_bottom():
         "PermitZones",
         "PermitDistricts",
     ]
+
+
+def test_overlay_layers_render_prosperity_and_identity_fields():
+    """Verify the district overlays render by prosperity_band and identity_state."""
+
+    messages = FakeMessages()
+    prosperity_renderer = FieldsListRenderer()
+    apply_simple_symbology(FakeLayer(prosperity_renderer), "district_prosperity", messages)
+    assert prosperity_renderer.fields == ["prosperity_band"]
+
+    identity_renderer = FieldsListRenderer()
+    apply_simple_symbology(FakeLayer(identity_renderer), "district_identity", messages)
+    assert identity_renderer.fields == ["identity_state"]
+    assert messages.warnings == []
+
+
+def test_prosperity_overlay_outline_is_graduated_over_transparent_fill():
+    """Verify prosperity bands carry a graduated outline and a transparent fill."""
+
+    from toolbox.permit_office_arcgis.symbology_config import PROSPERITY_BAND_SYMBOLS, symbol_style_for
+
+    thriving = symbol_style_for("district_prosperity", "thriving")
+    failing = symbol_style_for("district_prosperity", "failing")
+    assert thriving["outline_color"] != failing["outline_color"]
+    assert thriving["outline_width"] >= 3.0
+    # Fill is transparent (alpha 0) so the land-use fill stays visible beneath.
+    assert all(color[3] == 0 for color, _label in PROSPERITY_BAND_SYMBOLS.values())
+
+
+def test_special_interest_point_reads_larger_than_context():
+    """Verify special-interest points are sized larger than ordinary points."""
+
+    from toolbox.permit_office_arcgis.symbology_config import symbol_style_for
+
+    base = symbol_style_for("points", "context")
+    special = symbol_style_for("points", "special_interest")
+    assert special["size"] > (base["size"] or 9.0)
+
+
+def test_order_output_layers_stacks_overlays_above_base_district_fill():
+    """Verify identity/prosperity overlays sit above the base district fill."""
+
+    from toolbox.permit_office_arcgis.geometry import DISTRICT_IDENTITY, DISTRICT_PROSPERITY
+
+    names = ["PermitDistricts", DISTRICT_PROSPERITY, DISTRICT_IDENTITY, "PermitZones", "PermitPoints", "PermitLines"]
+    layers = [FakeLayer(FieldsListRenderer()) for _ in names]
+    for layer, name in zip(layers, names):
+        layer.name = name
+    existing = {layer.name: layer for layer in layers}
+    fake_map = FakeMap(layers)
+
+    _order_output_layers(fake_map, existing)
+
+    assert [layer.name for layer in fake_map.layers] == [
+        "PermitLines",
+        "PermitPoints",
+        "PermitZones",
+        DISTRICT_IDENTITY,
+        DISTRICT_PROSPERITY,
+        "PermitDistricts",
+    ]

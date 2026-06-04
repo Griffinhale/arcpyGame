@@ -90,6 +90,7 @@ def create_district_board(paths, seed, messages):
         "incident_group",
         "public_profile",
         "last_report",
+        "prosperity_band",
     ]
     with arcpy.da.InsertCursor(paths["districts"], fields) as cursor:
         for profile in profiles:
@@ -131,6 +132,7 @@ def create_district_board(paths, seed, messages):
                 profile.incident_group,
                 profile.public_profile,
                 "New district profile generated.",
+                profile.prosperity_band,
             ])
     _log(messages, "NEW", f"inserted {len(profiles)} districts")
 
@@ -330,6 +332,7 @@ def read_districts(paths):
         "incident_state",
         "incident_group",
         "public_profile",
+        "prosperity_band",
     ]
     with arcpy.da.SearchCursor(paths["districts"], fields) as cursor:
         for row in cursor:
@@ -366,6 +369,7 @@ def read_districts(paths):
                 incident_state=row[29] or "none",
                 incident_group=row[30] or "",
                 public_profile=row[31] or "",
+                prosperity_band=row[32] or "stable",
             )
             rules.normalize_profile(profile)
             out[profile.cell_id] = profile
@@ -412,6 +416,7 @@ def write_district_updates(paths, districts, report, affected_ids=None):
         "incident_group",
         "public_profile",
         "last_report",
+        "prosperity_band",
     ]
     with arcpy.da.UpdateCursor(paths["districts"], fields) as cursor:
         for row in cursor:
@@ -452,6 +457,7 @@ def write_district_updates(paths, districts, report, affected_ids=None):
             row[30] = profile.public_profile
             if cid in affected:
                 row[31] = report[:512]
+            row[32] = profile.prosperity_band
             cursor.updateRow(row)
 
 

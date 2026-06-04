@@ -11,6 +11,32 @@ from .models import DISTRICT_TYPES, CityState, DistrictProfile
 from .type_pressure import adjust_type_ledger
 
 
+# Type-flavored name suffixes so a converted district's name signals its new
+# identity (keeping the original prefix for continuity, e.g. "Cinder Yard" ->
+# civic -> "Cinder Hall"). This makes buyouts legible on the map/dashboard
+# without the player inspecting raw district_type columns.
+_TYPE_NAME_SUFFIXES: dict[str, tuple[str, ...]] = {
+    "residential": ("Quarter", "Terrace", "Commons", "Gardens"),
+    "mercantile": ("Market", "Exchange", "Bazaar", "Arcade"),
+    "industrial": ("Works", "Foundry", "Forge", "Yard"),
+    "civic": ("Hall", "Plaza", "Court", "Square"),
+    "academic": ("Campus", "College", "Quad", "Library"),
+    "natural": ("Green", "Reserve", "Meadow", "Park"),
+}
+
+
+def _rename_for_type(profile: DistrictProfile, new_type: str) -> None:
+    """Relabel a converted district with a name suffix that fits its new type."""
+
+    suffixes = _TYPE_NAME_SUFFIXES.get(new_type)
+    if not suffixes:
+        return
+    parts = (profile.name or profile.cell_id).split()
+    prefix = parts[0] if parts else profile.cell_id
+    rng = random.Random(f"rename:{profile.cell_id}:{new_type}")
+    profile.name = f"{prefix} {rng.choice(suffixes)}"
+
+
 @dataclass
 class BuyoutRoundResult:
     """Result of one buyout bidding round."""
@@ -100,10 +126,12 @@ def resolve_contested_transitions(
                 reports.append(f"{profile.name} cancelled a contested buyout with no active sponsor.")
                 continue
             old_type = profile.district_type
+            old_name = profile.name
             _convert_transition(profile, new_type, ledger)
             converted.append(cell_id)
             reports.append(
-                f"{profile.name} converted from {old_type} to {new_type} after contested buyout pressure held."
+                f"{old_name} converted from {old_type} to {new_type} after contested buyout pressure held "
+                f"and is now {profile.name}."
             )
 
     return TransitionResult(converted, cancelled, " ".join(reports))
@@ -243,6 +271,7 @@ def _convert_transition(
     """Convert a contested district to its bidder type and update pressure."""
 
     old_type = profile.district_type
+    old_name = profile.name
     profile.prior_district_type = old_type
     profile.district_type = new_type
     profile.land_use = ""
@@ -253,7 +282,8 @@ def _convert_transition(
     profile.buyout_pressure = max(0, int(profile.buyout_pressure or 0) - 2)
     profile.activity = max(0, min(100, int(profile.activity or 0) + 4))
     profile.friction = max(0, min(100, int(profile.friction or 0) + 4))
-    profile.last_buyout_report = f"{profile.name} converted from {old_type} to {new_type}."
+    _rename_for_type(profile, new_type)
+    profile.last_buyout_report = f"{old_name} converted from {old_type} to {new_type} and is now {profile.name}."
     adjust_type_ledger(ledger, old_type, holdings_delta=-1, fatigue_delta=1)
     adjust_type_ledger(
         ledger,

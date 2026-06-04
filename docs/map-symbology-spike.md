@@ -38,6 +38,18 @@ city-detail classes already have distinct `display_state` symbol values and
 pure tests. Live ArcGIS smoke testing should decide whether that is readable
 enough before adding layer-management complexity.
 
+### Buyout legibility update (2026-06-04)
+
+Converted districts are now relabeled with a type-flavored name on conversion
+(e.g. "Cinder Yard" -> civic -> "Cinder Hall") in addition to shifting to the
+new `district_type` fill color. Combined with the buyout/contested line on the
+city news ticker and the named conversion report, this makes district takeovers
+legible from the dashboard text and district color/label without activating the
+separate `identity_state` (vulnerable/contested/converted) overlay symbols.
+Those overlay symbols remain defined in `symbology_config.py` and ready to
+activate if a live ArcGIS smoke test shows contested/vulnerable state needs a
+dedicated map channel before conversion.
+
 ## Verification
 
 Automated checks:

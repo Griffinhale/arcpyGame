@@ -541,7 +541,9 @@ def test_completed_game_reloads_inline_final_audit_receipt(monkeypatch):
     assert controller.view.model.receipt.title.startswith("Final Audit:")
     assert controller.view.model.selected_desk_tab == "reports"
     assert controller.view.model.report_tabs[-1].kind == "scorecard"
-    assert controller.view.model.ledger_rows[0].value == "12/12 CLOSED"
+    rows_by_label = {row.label: row for row in controller.view.model.ledger_rows}
+    assert rows_by_label["Week"].value == "12/12 CLOSED"
+    assert rows_by_label["Health"].label == "Health"
 
 
 def test_deadline_final_week_records_same_inline_final_audit_receipt(monkeypatch):

@@ -82,6 +82,7 @@ class CaseSummary:
     preview: str = "Select a docket item from the in tray."
     inspection: str = "No inspection addendum filed."
     action_note: str = ""
+    economy: str = ""
     risk_band: str = "unknown"
     impact_buckets: tuple[ImpactBucket, ...] = ()
 
@@ -340,6 +341,7 @@ def _case_summary(state, districts, item) -> CaseSummary:
         CaseField("Failure Mode", template.failure_mode or "none filed"),
     )
     action_note = _action_note(template)
+    economy = _recurring_bucket_value(template)
     districts_text = ", ".join(item.target_cell_ids) if item.target_cell_ids else "(seeded exhibit; use Retarget Map to revise)"
     inspection = _inspection_summary(item)
     impact_buckets = _impact_buckets(state, districts, item, template)
@@ -353,6 +355,7 @@ def _case_summary(state, districts, item) -> CaseSummary:
         preview=preview,
         inspection=inspection,
         action_note=action_note,
+        economy=economy,
         risk_band=item.risk_band or "unknown",
         impact_buckets=impact_buckets,
     )
@@ -800,9 +803,35 @@ def _worst_tone(*tones) -> str:
     return max((tone or "neutral" for tone in tones), key=lambda tone: priority.get(tone, 0))
 
 
+def _city_health_index(state) -> int:
+    """Fold the four core metrics into one 0-100 city wellness signal.
+
+    Activity and Trust read positive; Friction and Exposure read negative. The
+    engine still tracks the four metrics independently -- this is a presentation
+    summary so the player has one headline gauge instead of four bars to parse.
+    """
+
+    score = (int(state.activity) + int(state.trust) + (100 - int(state.friction)) + (100 - int(state.exposure))) / 4
+    return max(0, min(100, round(score)))
+
+
+def _city_health_descriptor(value: int) -> tuple[str, str]:
+    """Return a (word, tone) summary for a city health index value."""
+
+    if value >= 65:
+        return "Thriving", "good"
+    if value >= 45:
+        return "Stable", "watch"
+    if value >= 30:
+        return "Strained", "watch"
+    return "Failing", "bad"
+
+
 def _ledger_rows(state, districts, active_features=None, docket=None) -> tuple[LedgerRow, ...]:
     """Build the city ledger rows shown in the dashboard sidebar."""
 
+    health = _city_health_index(state)
+    health_word, health_tone = _city_health_descriptor(health)
     heat = rules.heat_summary(state)
     audit_grade, _audit_report = rules.scorecard(state, deepcopy(districts), _feature_snapshots(active_features), deepcopy(docket or ()))
     population = rules.population_city_summary(districts)
@@ -814,6 +843,7 @@ def _ledger_rows(state, districts, active_features=None, docket=None) -> tuple[L
     pressure = _pressure_cause_summary(districts)
     week_value = f"{state.turn}/{state.max_turns} CLOSED" if state.status == "complete" or state.turn > state.max_turns else f"{state.turn}/{state.max_turns}"
     return (
+        LedgerRow("Health", f"{health} {health_word}", health_tone, health),
         LedgerRow("Week", week_value, "neutral", _meter(state.turn, state.max_turns)),
         LedgerRow("AP", f"{state.ap}/{state.max_ap}", "good" if state.ap else "watch", _meter(state.ap, state.max_ap)),
         LedgerRow("Money", f"${state.money}", "good" if state.money >= 20 else "watch"),
@@ -927,6 +957,15 @@ def _ticker_items(state, districts, active_features=None, docket=None, report_ta
     incidents = rules.incident_summary(districts)
     if incidents != "none":
         items.append(f"Civic desk: {incidents}.")
+    profiles = list(districts.values() if isinstance(districts, dict) else (districts or ()))
+    contested = sorted((p for p in profiles if getattr(p, "identity_state", "stable") == "contested"), key=lambda p: p.cell_id)
+    converted = sorted((p for p in profiles if getattr(p, "identity_state", "stable") == "converted"), key=lambda p: p.cell_id)
+    if contested:
+        lead = contested[0]
+        items.append(f"Boundary desk: {lead.name} fending off a {lead.contesting_type} buyout; office attention can still hold the line.")
+    elif converted:
+        lead = converted[0]
+        items.append(f"Boundary desk: {lead.name} has flipped {lead.district_type} after a neighbor's buyout cleared.")
     maintenance = _maintenance_summary(active_features) if active_features is not None else _maintenance_count_from_state(state)
     if maintenance != "none":
         items.append(f"Works desk: maintenance {maintenance}.")

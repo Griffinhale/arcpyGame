@@ -290,6 +290,7 @@ class DistrictProfile:
     buyout_pressure: int = 0
     last_buyout_report: str = ""
     display_state: str = "stable"
+    prosperity_band: str = "stable"
     population_mix: dict[str, int] = field(default_factory=dict)
     dissatisfaction: dict[str, int] = field(default_factory=dict)
     incident_state: str = "none"

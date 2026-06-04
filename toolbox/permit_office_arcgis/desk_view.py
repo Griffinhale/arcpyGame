@@ -358,33 +358,48 @@ class PermitDeskView:
             self._draw_queue_cleared_state(c, box)
             return
 
-        selected = [row for row in rows if row.item_id == active_id]
-        others = [row for row in rows if row.item_id != active_id]
-        visible = (selected + others)[:4]
-        overflow = len(rows) - len(visible)
-        tabs_y0 = y0 + 18
-        tabs_y1 = tabs_y0 + 50
+        active = next((row for row in rows if row.item_id == active_id), rows[0])
+        others = [row for row in rows if row.item_id != active.item_id]
+
+        # Vertical docket stack: the active case stays prominent as the full
+        # decision brief, while queued cases collapse into narrow rows beneath it
+        # and vanish from the stack as they are resolved. The active card keeps a
+        # minimum height so the stack never crowds the decision out.
+        row_h = 28
         gap = 6
-        tab_w = max(104, (x1 - x0 - gap * (len(visible) - 1)) // max(1, len(visible)))
-        tx = x0
+        header_h = 16
+        card_min = 280
+        stack_capacity = max(0, (y1 - (y0 + 16) - card_min - header_h - 18) // (row_h + gap))
+        visible_count = min(len(others), max(0, stack_capacity), 8)
+        stack_overflow = len(others) - visible_count
 
-        for row in visible:
-            selected = row.item_id == active_id
-            hover = self._hover_key == f"docket:{row.item_id}"
-            fill = Palette.WHITE if selected or hover else Palette.PAPER_ALT
-            outline = _status_color(row.status)
-            ty0 = tabs_y0 - (2 if selected else 0)
-            ty1 = tabs_y1
-            tx1 = min(x1 - 12, tx + tab_w)
-            c.create_rectangle(tx, ty0, tx1, ty1, fill=fill, outline=Palette.BLUE if selected else Palette.LINE, width=2 if selected else 1)
-            c.create_text(tx + 10, ty0 + 10, text=row.status.upper(), anchor="nw", fill=outline, font=self._font(7, "bold"))
-            c.create_text(tx + 10, ty0 + 28, text=self._fit_px(row.title, 10, "bold", tx1 - tx - 20), anchor="nw", fill=Palette.INK, font=self._font(10, "bold"))
-            self._add_target("docket", row.item_id, (tx, ty0, tx1, ty1), lambda item_id=row.item_id: self.on_select_item(item_id))
-            tx += tab_w + gap
+        if visible_count <= 0:
+            self._draw_active_card(c, (x0, y0 + 16, x1, y1))
+            return
 
-        if overflow > 0:
-            c.create_text(x1, tabs_y1 - 12, text=f"+{overflow} more", anchor="e", fill=Palette.MUTED, font=self._font(8, "bold"))
-        self._draw_active_card(c, (x0, tabs_y1 + 18, x1, y1))
+        stack_h = header_h + visible_count * (row_h + gap)
+        card_bottom = y1 - stack_h - 14
+        self._draw_active_card(c, (x0, y0 + 16, x1, card_bottom))
+
+        sy = card_bottom + 14
+        c.create_text(x0, sy, text=f"QUEUED ({len(others)})", anchor="nw", fill=Palette.MUTED, font=self._font(8, "bold"))
+        if stack_overflow > 0:
+            c.create_text(x1, sy, text=f"+{stack_overflow} more queued", anchor="ne", fill=Palette.MUTED, font=self._font(8, "bold"))
+        sy += header_h
+        for row in others[:visible_count]:
+            self._draw_collapsed_docket_row(c, x0, sy, x1, sy + row_h, row)
+            sy += row_h + gap
+
+    def _draw_collapsed_docket_row(self, c, x0, y0, x1, y1, row):
+        """Draw one collapsed queued docket case as a slim selectable row."""
+
+        hover = self._hover_key == f"docket:{row.item_id}"
+        outline = _status_color(row.status)
+        c.create_rectangle(x0, y0, x1, y1, fill=Palette.WHITE if hover else Palette.PAPER_ALT, outline=Palette.LINE)
+        c.create_rectangle(x0, y0, x0 + 4, y1, fill=outline, outline="")
+        c.create_text(x0 + 14, (y0 + y1) // 2, text=row.status.upper(), anchor="w", fill=outline, font=self._font(7, "bold"))
+        c.create_text(x0 + 96, (y0 + y1) // 2, text=self._fit_px(row.title, 10, "bold", x1 - x0 - 110), anchor="w", fill=Palette.INK, font=self._font(10, "bold"))
+        self._add_target("docket", row.item_id, (x0, y0, x1, y1), lambda item_id=row.item_id: self.on_select_item(item_id))
 
     def _draw_queue_cleared_state(self, c, box):
         """Draw the empty queue state and auto-close controls."""
@@ -473,7 +488,18 @@ class PermitDeskView:
         c.create_rectangle(body_x0, yy, body_x0 + 4, yy + note_h, fill=note_color, outline="")
         note_lines = _fit_lines(note, max(30, (body_x1 - body_x0 - 24) // 7), 2)
         c.create_text(body_x0 + 12, yy + 8, text="\n".join(note_lines), anchor="nw", fill=Palette.INK, font=self._font(9, "bold"))
-        yy += note_h + 16
+        yy += note_h + 14
+
+        if case.economy:
+            econ_qualifier = "filed" if inspected else "est."
+            econ_text = f"Budget ({econ_qualifier}): {case.economy}" if case.economy != "no recurring budget" else "Budget: no recurring revenue or upkeep"
+            econ_color = Palette.GREEN if "net +" in case.economy else Palette.RED if "net -" in case.economy else Palette.MUTED
+            c.create_text(body_x0, yy, text=self._fit_px(econ_text, 9, "bold", body_x1 - body_x0), anchor="nw", fill=econ_color, font=self._font(9, "bold"))
+            yy += 16
+        if case.action_note:
+            c.create_text(body_x0, yy, text=self._fit_px(case.action_note, 8, "normal", body_x1 - body_x0), anchor="nw", fill=Palette.MUTED, font=self._font(8))
+            yy += 16
+        yy += 2
 
         lanes = self.model.action_lanes
         lane_gap = 8
@@ -555,13 +581,40 @@ class PermitDeskView:
 
         inner_x0 = x0 + 14
         inner_x1 = x1 - 14
-        y = y0 + 52
         by_label = {row.label: row for row in self.model.ledger_rows}
-        pulse = [by_label[name] for name in ("Activity", "Trust", "Exposure", "Pressure") if name in by_label]
+
+        # Headline: one City Health gauge folds the four core metrics together.
+        y = y0 + 50
+        health = by_label.get("Health")
+        if health:
+            tone = _tone_color(health.tone)
+            c.create_text(inner_x0, y, text="CITY HEALTH", anchor="nw", fill=Palette.MUTED, font=self._font(8, "bold"))
+            c.create_text(inner_x1, y - 2, text=_clip(health.value, 18), anchor="ne", fill=tone, font=self._font(13, "bold"))
+            bar_y0 = y + 20
+            pct = max(0, min(100, int(health.meter or 0)))
+            c.create_rectangle(inner_x0, bar_y0, inner_x1, bar_y0 + 9, fill="#dce5e1", outline="")
+            if pct:
+                c.create_rectangle(inner_x0, bar_y0, inner_x0 + int((inner_x1 - inner_x0) * pct / 100), bar_y0 + 9, fill=tone, outline="")
+            y = bar_y0 + 9 + 14
+
+        # Heat as the leading indicator of trouble brewing into later filings.
+        heat = by_label.get("Heat")
+        if heat:
+            heat_tone = _tone_color(heat.tone)
+            c.create_text(inner_x0, y, text="HEAT", anchor="nw", fill=Palette.MUTED, font=self._font(8, "bold"))
+            c.create_text(inner_x1, y, text=_clip(heat.value, 20), anchor="ne", fill=heat_tone, font=self._font(9, "bold"))
+            hint = "drives later incidents & enforcement" if heat.value != "none" else "calm; no escalation brewing"
+            c.create_text(inner_x0, y + 15, text=self._fit_px(hint, 8, "normal", inner_x1 - inner_x0), anchor="nw", fill=Palette.MUTED, font=self._font(8))
+            y += 36
+        c.create_line(inner_x0, y, inner_x1, y, fill=Palette.LINE)
+        y += 12
+
+        # Core-metric breakdown beneath the headline.
+        pulse = [by_label[name] for name in ("Activity", "Trust", "Friction", "Exposure", "Pressure") if name in by_label]
         for row in pulse:
             if y + 48 > y1 - 54:
                 break
-            y = self._draw_pulse_row(c, inner_x0, inner_x1, y, row) + 14
+            y = self._draw_pulse_row(c, inner_x0, inner_x1, y, row) + 12
 
         ticker = self.model.ticker_items[0] if self.model.ticker_items else "City desk quiet."
         c.create_line(inner_x0, y1 - 58, inner_x1, y1 - 58, fill=Palette.LINE)

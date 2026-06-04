@@ -31,6 +31,24 @@ def display_state_for_profile(profile: DistrictProfile) -> str:
     return "stable"
 
 
+def district_prosperity_band(profile: DistrictProfile) -> str:
+    """Graduated per-district prosperity band from the four core metrics.
+
+    Activity + trust read positive, friction + exposure negative (the dashboard
+    City Health index, per-district). Derived display band only; the four core
+    metrics stay the source of truth.
+    """
+    score = (int(profile.activity or 0) + int(profile.trust or 0)
+             + (100 - int(profile.friction or 0)) + (100 - int(profile.exposure or 0))) / 4
+    if score >= 65:
+        return "thriving"
+    if score >= 45:
+        return "stable"
+    if score >= 30:
+        return "strained"
+    return "failing"
+
+
 
 
 def _stakeholder_profile(stakeholder: str) -> StakeholderProfile:
@@ -325,6 +343,7 @@ def normalize_profile(profile: DistrictProfile) -> DistrictProfile:
     _refresh_incident(profile)
     profile.public_profile = public_profile_for(profile)
     profile.display_state = display_state_for_profile(profile)
+    profile.prosperity_band = district_prosperity_band(profile)
     return profile
 
 

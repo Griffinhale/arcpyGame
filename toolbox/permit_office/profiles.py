@@ -148,17 +148,26 @@ def _weighted_template_pool(
 
     rng = random.Random(f"docket:{seed}:{turn}:{_district_mix_key(districts)}:{state.activity if state else 0}:{state.friction if state else 0}:{state.exposure if state else 0}")
     weights = {template_id: 1 for template_id in DEMO_TEMPLATE_IDS}
-    for template_id in scenario.docket_priority:
-        if template_id in weights:
-            weights[template_id] += 4
     if districts:
+        populations = [max(0, int(getattr(profile, "population", 0) or 0)) for profile in districts.values()]
+        avg_population = (sum(populations) / len(populations)) if populations else 0
         for profile in districts.values():
+            # Above-average-population districts pull the docket harder toward
+            # their type, so dominant cultures see more related proposals and can
+            # snowball. This is a purely additive bonus that only rewards density
+            # past the city average: a balanced board leaves pop_bonus == 0 and
+            # weighting is identical to the prior type-only behavior.
+            pop_bonus = 0.0
+            if avg_population > 0:
+                pop_bonus = max(0.0, min(1.0, int(profile.population or 0) / avg_population - 1.0))
             for template_id, template in TEMPLATES.items():
                 if template_id not in weights:
                     continue
-                weights[template_id] += TYPE_CATEGORY_WEIGHTS.get(profile.district_type, {}).get(template.category, 0)
+                type_weight = TYPE_CATEGORY_WEIGHTS.get(profile.district_type, {}).get(template.category, 0)
+                if type_weight:
+                    weights[template_id] += type_weight + round(type_weight * pop_bonus)
                 if profile.district_type in template.good_fit_types:
-                    weights[template_id] += 2
+                    weights[template_id] += 2 + round(2 * pop_bonus)
                 if profile.district_type in template.bad_fit_types:
                     weights[template_id] = max(1, weights[template_id] - 1)
                 if profile.activity < 45 and template.category in {"development", "business", "residential"}:
@@ -169,6 +178,20 @@ def _weighted_template_pool(
                     weights[template_id] += 2
     chosen: list[str] = []
     available = dict(weights)
+    # Scenario docket priority is the strongest designer signal (e.g. a housing
+    # mandate forcing housing filings). Guarantee its in-pool templates a slot so
+    # forced scenarios reliably surface their mandated work instead of depending
+    # on weighted-sampling luck. Leave at least one organic slot for variety, and
+    # prefer the highest-weighted (best-fit) priority template first. The default
+    # scenario has no priority, so ordinary play is untouched.
+    priority_present = sorted(
+        (template_id for template_id in scenario.docket_priority if template_id in available),
+        key=lambda template_id: (-available[template_id], template_id),
+    )
+    reserved = max(0, count - 1) if count > 1 else count
+    for template_id in priority_present[:reserved]:
+        chosen.append(template_id)
+        available.pop(template_id, None)
     while available and len(chosen) < count:
         total = sum(available.values())
         pick = rng.randrange(total)
