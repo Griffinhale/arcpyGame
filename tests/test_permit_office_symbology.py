@@ -352,6 +352,47 @@ def test_apply_simple_symbology_uses_display_state_for_support_layers():
     assert messages.warnings == []
 
 
+def test_support_feature_symbol_values_cover_seeded_city_detail_classes():
+    """Verify support layers have symbol classes for generated city-detail features."""
+
+    from toolbox.permit_office_arcgis.symbology_config import SYMBOLS_BY_FIELD
+
+    display_symbols = SYMBOLS_BY_FIELD["display_state"]
+
+    assert {
+        "road",
+        "utility",
+        "park",
+        "housing",
+        "commerce",
+        "civic",
+        "industry",
+        "campus",
+        "proposed",
+        "active",
+        "maintenance_due",
+        "degraded",
+    } <= set(display_symbols)
+    assert display_symbols["road"][1] == "Road"
+    assert display_symbols["utility"][1] == "Utility"
+    assert display_symbols["housing"][1] == "Housing"
+
+
+def test_support_feature_style_hints_preserve_line_and_proposed_readability():
+    """Verify roads/utilities and proposed features get readable style hints."""
+
+    from toolbox.permit_office_arcgis.symbology_config import symbol_style_for
+
+    road = symbol_style_for("lines", "road")
+    utility = symbol_style_for("lines", "utility")
+    proposed_point = symbol_style_for("points", "proposed")
+
+    assert road["outline_width"] >= 3.0
+    assert utility["outline_width"] >= 3.0
+    assert proposed_point["outline_color"] == [31, 220, 222, 100]
+    assert proposed_point["outline_width"] >= 3.2
+
+
 def test_apply_simple_symbology_seeds_and_styles_district_type_classes():
     """Verify known district types receive labels and symbols."""
 

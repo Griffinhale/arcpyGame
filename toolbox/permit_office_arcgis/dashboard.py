@@ -739,7 +739,7 @@ class DashboardController:
             except Exception as exc:
                 if command_id:
                     command_finish(self.paths, command_id, "error", error=str(exc))
-                self.status_var.set(f"Approve failed: {exc}")
+                self.status_var.set(f"Decision failed: {exc}")
                 _warn(self.messages, "DASH", traceback.format_exc().strip().splitlines()[-1])
             finally:
                 self._command_busy = False

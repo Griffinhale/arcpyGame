@@ -31,25 +31,25 @@ Show the core dashboard-map loop in a stable order:
 
 ## Steps
 
-For each decision, click the listed docket row first. The row selects its seeded proposal and target districts on the map. If the listed district selection differs from the seeded target, select the listed district or districts on the map and click `Update From Map`, then click the listed dashboard action. Items marked `Advance` are intentionally left open until `End Week`.
+For each decision, click the listed docket row first. The row selects its seeded proposal and target districts on the map. If the listed district selection differs from the seeded target, select the listed district or districts on the map and click `Retarget Map`, then click the listed dashboard action. Items marked `Advance` are intentionally left open until `End Week`.
 
 | Week | Docket item | District selection | Action | Expected result |
 | --- | --- | --- | --- | --- |
-| 1 | Street Vendor Compact | `D0102` | Inspect, then `Approve + Mitigate` | `PermitPoints` gets an active vendor point. AP drops for inspection and approval. Report emphasizes mitigated nuisance risk, activity, trust, and any computed spillover. |
-| 1 | Connector Corridor Pilot | `D0101`, `D0102` | `Approve` | `PermitLines` gets an active corridor. Report shows access/activity gain and exposure relief. |
+| 1 | Street Vendor Compact | `D0102` | Inspect File, then `Add Conditions` | `PermitPoints` gets an active vendor point. AP drops for inspection and approval. Report emphasizes mitigated nuisance risk, activity, trust, and any computed spillover. |
+| 1 | Connector Corridor Pilot | `D0101`, `D0102` | `Issue Permit` | `PermitLines` gets an active corridor. Report shows access/activity gain and exposure relief. |
 | 1 | Licensed Procession Route | none | Advance | Leaving it open adds small celebrant heat when the turn advances. |
-| 2 | Utility Expansion Trench | `D0004`, `D0104` | `Approve` | `PermitLines` gets an active utility trench. Report shows industrial service/exposure improvement. |
+| 2 | Utility Expansion Trench | `D0004`, `D0104` | `Issue Permit` | `PermitLines` gets an active utility trench. Report shows industrial service/exposure improvement. |
 | 2 | Contractor Renovation Waiver | `D0000` | `Deny` | No permit feature is activated. Report shows avoided project exposure and contractor heat. |
 | 2 | Public Art and Museum Grant | none | Advance | Arts heat is acceptable; save budget for the reserve and follow-up. |
-| 3 | Maintenance Order: Vendor Market | `D0102` | `Approve` | Generated follow-up appears in the docket. Report shows the vendor market condition repaired and a new due turn. |
-| 3 | Natural Reserve Conversion | `D0200`, `D0304` | `Approve` | `PermitZones` gets an active protected reserve polygon. Report shows trust gain and exposure relief. |
+| 3 | Maintenance Order: Vendor Market | `D0102` | `Issue Permit` | Generated follow-up appears in the docket. Report shows the vendor market condition repaired and a new due turn. |
+| 3 | Natural Reserve Conversion | `D0200`, `D0304` | `Issue Permit` | `PermitZones` gets an active protected reserve polygon. Report shows trust gain and exposure relief. |
 | 3 | Mixed-Use Rezoning Petition | none | Advance | Developers gain heat, preserving the audit tradeoff. |
-| 4 | Civic Incident Response: Commuters | `D0001` | `Approve` | `PermitPoints` gets an incident marker. Report shows friction/exposure relief and names commuters as the target group. |
+| 4 | Civic Incident Response: Commuters | `D0001` | `Respond` | `PermitPoints` gets an incident marker. Report shows friction/exposure relief and names commuters as the target group. |
 | 4 | Child Development Park Annex | `D0000` | `Deny` | No annex point is activated. Report shows family heat and budget restraint. |
 | 4 | Street Vendor Compact | `D0102` | `Deny` | Avoids duplicating the already active vendor market. Vendor heat rises. |
 | 5 | Maintenance Order: Vendor Market | none | Advance | Leave this open to preserve final cash; it becomes a scorecard maintenance finding. |
 | 5 | Civic Incident Response: Families | none | Advance | Leave unresolved as an audit beat. |
-| 5 | Connector Corridor Pilot | none | Advance | Optional show/hide only. Do not approve; budget is reserved for a stable scorecard. |
+| 5 | Connector Corridor Pilot | none | Advance | Optional show/hide only. Do not issue; budget is reserved for a stable scorecard. |
 | 6 | Maintenance Order: Connector Corridor | none | Advance | Leave unresolved as the visible maintenance backlog. |
 | 6 | Civic Incident Response: Commuters | none | Advance | Unresolved civic file remains in the mid-season audit. |
 | 6 | Civic Incident Response: Families | none | Advance | Unresolved civic file remains in the mid-season audit. |
@@ -62,7 +62,7 @@ After week 6, click `End Week` to file the mid-season audit. For quick smoke cov
   - `PermitPoints`: active vendor point and responded civic incident marker.
   - `PermitLines`: active connector corridor and utility trench.
   - `PermitZones`: active protected reserve polygon.
-  - Later maintenance/civic cards seed proposed rows automatically; unresolved proposals can remain visible or be hidden with `Hide Exhibit`.
+  - Later maintenance/civic cards seed proposed rows automatically; unresolved proposals can remain visible or be hidden with `Hide Proposed Feature`.
 - Report beats:
   - Week 1: inspection risk band appears on the vendor card; mitigated approval shows activity/trust with reduced nuisance.
   - Week 2: utility approval visibly lowers exposure; contractor denial creates a clean tradeoff.
@@ -76,7 +76,7 @@ After week 6, click `End Week` to file the mid-season audit. For quick smoke cov
 
 ## Failure Notes
 
-- If an exhibit does not draw immediately, use the layer refresh or reopen the dashboard; proposed geometry is seeded from filed targets and replaced only by `Update From Map`.
+- If an exhibit does not draw immediately, use the layer refresh or reopen the dashboard; proposed geometry is seeded from filed targets and replaced only by `Retarget Map`.
 - If the wrong item is selected, close the dashboard without advancing, reopen it, and reselect the docket row.
 - If money is lower than expected, skip optional exhibit toggles and leave week 5 and week 6 items unresolved. The rehearsed ending depends on not spending the last reserve.
 - If the smoke-path scorecard differs, click `New Game` with seed `2026`; route order depends on that seed and the generated active-feature follow-ups.

@@ -71,6 +71,19 @@ def test_templates_declare_expiration_policy_and_pressure_category():
     assert all(template.pressure_category for template in rules.TEMPLATES.values())
 
 
+def test_runtime_action_copy_uses_current_decision_labels():
+    """Verify player-facing action copy does not use retired Approve labels."""
+
+    state = rules.CityState()
+    item = rules.DocketItem("no-target", "street_vendor_compact", rules.TEMPLATES["street_vendor_compact"].title, "POINT", 1)
+
+    result = rules.resolve_decision(state, item, {}, "approve", [], seed=2026)
+
+    assert "Decision requires" in result.report
+    assert "selected target district" in result.report
+    assert "Issue or resolve" in rules.TEMPLATES[rules.MAINTENANCE_TEMPLATE_ID].preview
+
+
 def test_type_ledger_rebuilds_from_district_holdings():
     districts = {
         profile.cell_id: profile
@@ -219,11 +232,9 @@ def test_buyout_single_bidder_starts_contested_transition():
     assert districts["A"].contesting_cell_id == "B"
     assert districts["A"].contesting_type == "mercantile"
     assert districts["A"].transition_due_turn == state.turn + 1
-    assert "entered contested buyout" in result.report.lower()
-    assert districts["A"].last_buyout_report == (
-        "A entered contested buyout from B; "
-        "mercantile bid cleared local leverage after weak activity and pressure."
-    )
+    report = districts["A"].last_buyout_report
+    for phrase in ("A", "B", "mercantile", "entered contested buyout", "weak activity", "pressure", "office attention"):
+        assert phrase in report
 
 
 def test_buyout_reports_explain_target_bidder_and_reason():
@@ -241,10 +252,27 @@ def test_buyout_reports_explain_target_bidder_and_reason():
     assert "A" in result.report or "A" in districts["A"].last_buyout_report
     assert "mercantile" in result.report.lower()
     assert any(phrase in result.report.lower() for phrase in ("bid", "leverage", "contested", "refused"))
-    assert result.report == (
-        "A entered contested buyout from B; "
-        "mercantile bid cleared local leverage after weak activity and pressure."
-    )
+    for phrase in ("B", "weak activity", "pressure", "office attention", "stabilize"):
+        assert phrase in result.report
+
+
+def test_buyout_reports_hint_at_player_pressure_control():
+    """Verify contested buyout reports say how attention can still matter."""
+
+    state = rules.CityState()
+    districts = {
+        "A": _district_for_buyout("A", "residential", 35, ["B"]),
+        "B": _district_for_buyout("B", "mercantile", 82, ["A"]),
+    }
+    ledger = rules.rebuild_type_ledger(districts)
+    ledger["mercantile"]["capital"] = 100
+    ledger["mercantile"]["appetite"] = 20
+
+    result = rules.resolve_buyout_round(state, districts, ledger, seed=2026)
+
+    assert "office attention" in result.report
+    assert "stabilize" in result.report
+    assert "before conversion" in result.report
 
 
 def test_buyout_target_can_refuse_bid_deterministically():
@@ -1216,7 +1244,7 @@ def test_display_state_selects_primary_pressure_cause_priority():
     assert profile.display_state == "economic_growth"
 
 
-def test_stat_cascade_services_hazards_housing_and_culture_roles():
+def test_stat_cascade_services_hazards_housing_and_trust_roles():
     """Verify the shared cascade keeps non-money stat roles distinct."""
     low_service = rules.DistrictProfile("D0000", "Gap Row", 1200, 45, 20, 30, 20, 5, "residential", population_mix={"families": 3}, dissatisfaction={"families": 0})
     rules.normalize_profile(low_service)

@@ -82,6 +82,17 @@ def test_uninspected_case_uses_qualitative_impact_buckets():
     assert "evidence" not in buckets["Budget"].value
 
 
+def test_empty_target_copy_uses_retarget_map_language():
+    """Verify fallback targeting copy matches the current button label."""
+
+    item = rules.DocketItem("T01-vendor", "street_vendor_compact", rules.TEMPLATES["street_vendor_compact"].title, "POINT", 1)
+
+    model = build_desk_model(rules.CityState(), {}, [item], item.item_id)
+
+    assert "Retarget Map" in model.case.districts
+    assert "Retarget Map" in model.status_text
+
+
 def test_inspected_case_buckets_surface_evidence_and_population_context():
     """Verify inspected cases surface evidence and population context."""
 
@@ -100,8 +111,26 @@ def test_inspected_case_buckets_surface_evidence_and_population_context():
     buckets = {bucket.label: bucket for bucket in model.case.impact_buckets}
 
     assert "high risk; 2/2 flagged evidence; 1 violation(s)" in buckets["Budget"].value
+    assert "rev $4/week" in buckets["Budget"].value
+    assert "upkeep $1/week" in buckets["Budget"].value
+    assert "net +$3" in buckets["Budget"].value
     assert buckets["Budget"].tone == "bad"
     assert "homeowners aggrieved" in buckets["People"].value
+
+
+def test_heat_ticker_explains_future_followup_pressure():
+    """Verify stakeholder heat is framed as future docket pressure."""
+
+    item, districts = _vendor_case()
+    state = rules.CityState()
+    state.stakeholder_heat["vendors"] = 3
+
+    model = build_desk_model(state, districts, [item], item.item_id)
+
+    heat_line = model.ticker_items[0]
+    assert heat_line.startswith("Heat desk: vendors 3")
+    for phrase in ("incident", "enforcement", "follow-up filing"):
+        assert phrase in heat_line
 
 
 def test_ledger_rows_surface_non_money_city_health():
@@ -510,6 +539,28 @@ def test_selected_application_draws_decision_brief_lanes():
     assert "Deny" in texts
 
 
+def test_selected_application_uses_explicit_proposed_feature_copy():
+    """Verify exhibit controls name the proposed feature, not a generic exhibit."""
+
+    item, districts = _vendor_case()
+    hidden = build_desk_model(rules.CityState(), districts, [item], item.item_id)
+    visible = build_desk_model(
+        rules.CityState(),
+        districts,
+        [item],
+        item.item_id,
+        proposal_visible_by_item={item.item_id: True},
+    )
+
+    for model, expected in ((hidden, "Show Proposed Feature"), (visible, "Hide Proposed Feature")):
+        view, _callbacks = _view_for_drawing(model)
+        canvas = _FakeCanvas()
+
+        view._draw_active_card(canvas, (0, 0, 760, 620))
+
+        assert expected in _text_values(canvas)
+
+
 def test_decision_brief_uses_vertical_lane_rows_for_breathing_room():
     """Verify action consequences use stacked rows instead of cramped columns."""
 
@@ -567,6 +618,24 @@ def test_queue_cleared_state_draws_end_week_and_cancel_autoclose():
     targets = [(kind, ident) for kind, ident, _bbox, _callback in view._click_targets]
     assert ("case-action", "End Week") in targets
     assert ("case-action", "Cancel Auto Close") in targets
+
+
+def test_start_help_overlay_explains_score_exhibits_and_resume():
+    """Verify the help overlay covers score optimization, exhibits, and resume behavior."""
+
+    model = build_desk_model(rules.CityState(), {}, [], show_start_help=True)
+    view, _callbacks = _view_for_drawing(model)
+    canvas = _FakeCanvas()
+
+    view._draw_start_help_overlay(canvas, 1120, 860)
+
+    body = " ".join(str(text) for text in _text_values(canvas))
+    for phrase in ("Activity", "Trust", "Services", "money", "Friction", "Exposure"):
+        assert phrase in body
+    for phrase in ("Show Proposed Feature", "selected application's map exhibit", "Retarget Map"):
+        assert phrase in body
+    for phrase in ("End Game", "geodatabase", "resume"):
+        assert phrase in body
 
 
 def test_summary_helpers_report_service_hazard_and_maintenance_backlog():

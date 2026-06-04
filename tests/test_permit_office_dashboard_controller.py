@@ -131,6 +131,25 @@ def test_approval_restores_missing_proposal_before_spillover(monkeypatch):
     assert order == ["ensure", "spillover", "activate", "finish"]
 
 
+def test_decision_exception_status_uses_neutral_action_copy(monkeypatch):
+    """Verify approval-path failures use visible-neutral decision copy."""
+
+    item = rules.DocketItem("CASE-error", "street_vendor_compact", "Street Vendor Compact", "POINT", 1)
+    controller = dashboard.DashboardController({}, "district_layer", 2026, object())
+    controller.selected_item_id = item.item_id
+    controller.status_text = ""
+    controller.status_var = dashboard._StatusProxy(controller)
+    controller.reload = lambda: None
+
+    monkeypatch.setattr(dashboard, "read_docket", lambda paths: [item])
+    monkeypatch.setattr(dashboard, "selected_cell_ids", lambda layer: ["D0000"])
+    monkeypatch.setattr(dashboard, "ensure_case_proposal", lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("proposal locked")))
+
+    controller.apply_decision("approve", False)
+
+    assert controller.status_text == "Decision failed: proposal locked"
+
+
 def test_successful_decision_reapplies_map_presentation_before_refresh(monkeypatch):
     """Verify successful decisions rebuild map layers before showing receipt."""
 
@@ -487,6 +506,9 @@ def test_advance_turn_records_inline_final_audit_receipt(monkeypatch):
     assert controller.last_receipt is not None
     assert controller.last_receipt.title.startswith("Final Audit:")
     assert "Audit" in controller.last_receipt.report
+    assert controller.selected_desk_tab == "reports"
+    assert controller.report_tabs[-1].kind == "scorecard"
+    assert controller.report_tabs[-1].selected is True
     assert controller._deadline_running is False
 
 
@@ -517,6 +539,8 @@ def test_completed_game_reloads_inline_final_audit_receipt(monkeypatch):
 
     assert controller.view.model.receipt is not None
     assert controller.view.model.receipt.title.startswith("Final Audit:")
+    assert controller.view.model.selected_desk_tab == "reports"
+    assert controller.view.model.report_tabs[-1].kind == "scorecard"
     assert controller.view.model.ledger_rows[0].value == "12/12 CLOSED"
 
 
@@ -548,6 +572,8 @@ def test_deadline_final_week_records_same_inline_final_audit_receipt(monkeypatch
 
     assert controller.status_text.startswith("Auto-deadline: Final audit:")
     assert controller.last_receipt is not None
+    assert controller.selected_desk_tab == "reports"
+    assert controller.report_tabs[-1].kind == "scorecard"
     assert controller.last_receipt.title.startswith("Final Audit:")
 
 

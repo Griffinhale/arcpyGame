@@ -78,7 +78,7 @@ class CaseSummary:
     status: str = ""
     category: str = ""
     fields: tuple[CaseField, ...] = ()
-    districts: str = "(seeded exhibit; use Update From Map to revise)"
+    districts: str = "(seeded exhibit; use Retarget Map to revise)"
     preview: str = "Select a docket item from the in tray."
     inspection: str = "No inspection addendum filed."
     action_note: str = ""
@@ -199,7 +199,7 @@ def build_desk_model(
     case = _case_summary(state, districts, selected)
     action_lanes = _action_lanes(state, districts, selected) if selected else ()
     ledger_rows = _ledger_rows(state, districts, active_features, active_items)
-    status = status_text or "No report yet. Select a docket row; use Update From Map when changing targets."
+    status = status_text or "No report yet. Select a docket row; use Retarget Map when changing targets."
     report_tabs = tuple(report_tabs or _legacy_report_tabs(receipt))
     selected_report_id = _resolve_selected_report_id(report_tabs, selected_report_id)
     if report_tabs and selected_report_id:
@@ -340,7 +340,7 @@ def _case_summary(state, districts, item) -> CaseSummary:
         CaseField("Failure Mode", template.failure_mode or "none filed"),
     )
     action_note = _action_note(template)
-    districts_text = ", ".join(item.target_cell_ids) if item.target_cell_ids else "(seeded exhibit; use Update From Map to revise)"
+    districts_text = ", ".join(item.target_cell_ids) if item.target_cell_ids else "(seeded exhibit; use Retarget Map to revise)"
     inspection = _inspection_summary(item)
     impact_buckets = _impact_buckets(state, districts, item, template)
     return CaseSummary(
@@ -493,7 +493,7 @@ def _recurring_bucket_value(template) -> str:
     upkeep = operating.upkeep_per_turn
     net = revenue - upkeep
     if revenue or upkeep:
-        return f"rev ${revenue}/week, upkeep ${upkeep}/week, net ${net:+d}"
+        return f"rev ${revenue}/week, upkeep ${upkeep}/week, net {_signed_money(net)}"
     return "no recurring budget"
 
 
@@ -905,6 +905,13 @@ def _maintenance_count_from_state(state) -> str:
 
     backlog = int(getattr(state, "maintenance_backlog", 0) or 0)
     return f"{backlog} active" if backlog else "none"
+
+
+def _signed_money(value: int) -> str:
+    """Format a signed dollar amount with the sign before the currency mark."""
+
+    amount = int(value or 0)
+    return f"+${amount}" if amount >= 0 else f"-${abs(amount)}"
 
 
 def _ticker_items(state, districts, active_features=None, docket=None, report_tabs=None) -> tuple[str, ...]:

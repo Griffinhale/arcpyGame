@@ -41,7 +41,7 @@ This document describes the current per-week logic and data flow for the active 
 2. If no saved game rows exist, the same desk view renders a start status with `New Game` available.
 3. Selecting a docket item calls `select_case_context`, which ensures a proposal exists, selects target districts, and selects the proposal or referenced active feature.
 4. `Toggle Exhibit` deletes or recreates only the selected unresolved proposal row, then refreshes map layers and reloads the dashboard.
-5. `Update From Map` reads selected district IDs from the district layer, replaces the selected proposal, persists the target IDs on the docket item, refreshes, and reloads.
+5. `Retarget Map` reads selected district IDs from the district layer, replaces the selected proposal, persists the target IDs on the docket item, refreshes, and reloads.
 
 ### Inspect
 
@@ -51,14 +51,14 @@ This document describes the current per-week logic and data flow for the active 
 4. The dashboard writes state, the docket item, action log, and command finish status.
 5. No proposal is activated and no district geometry changes. The filed report opens, then the dashboard reloads.
 
-### Approve Or Approve With Mitigation
+### Issue Permit Or Add Conditions
 
 1. The dashboard ensures the selected item has a proposed exhibit, using existing targets or current map selection.
 2. It computes spillover districts through ArcGIS buffer/select logic except for maintenance items.
 3. It reads state, districts, active features, and projects.
 4. `rules.resolve_decision` spends AP and money, applies target and spillover effects, applies mitigation if selected, checks contextual failure risk, updates population reactions, surfaces incidents, settles inspection violations, and advances or opens projects.
 5. Feature maintenance updates are written first when the decision changed existing active features.
-6. The proposed exhibit is activated into the appropriate support layer unless the approval failed.
+6. The proposed exhibit is activated into the appropriate support layer unless the decision failed.
 7. Districts, state, projects, docket item, action log, and command status are persisted.
 8. A targeted layer rebuild/refresh runs for `PermitDistricts` plus the changed support layer, then the filed report opens and the dashboard reloads.
 

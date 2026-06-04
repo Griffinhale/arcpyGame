@@ -512,7 +512,7 @@ class PermitDeskView:
     def _draw_case_controls(self, c, x0, y0, x1, y1):
         """Draw selected-case map, inspect, and stamp controls inside the card."""
 
-        exhibit_label = "Hide Proposed" if self.model.exhibit_visible else "Show Proposed"
+        exhibit_label = "Hide Proposed Feature" if self.model.exhibit_visible else "Show Proposed Feature"
         lanes = {lane.action_id: lane for lane in self.model.action_lanes}
         controls = (
             (exhibit_label, Palette.BLUE, self.callbacks.toggle_exhibit, False, True),
@@ -688,9 +688,11 @@ class PermitDeskView:
         lines = (
             "Review applications, inspect only what needs attention, then issue, add conditions, deny, or let filings expire.",
             "AP is institutional attention. Inspect File, Issue Permit, and Add Conditions spend AP; Deny costs 0 AP.",
-            "Show Proposed highlights the selected application's map exhibit. Retarget Map replaces it from the selected districts.",
+            "Score optimization means stabilize Activity, Trust, Services, and money while limiting Friction and Exposure.",
+            "Show Proposed Feature highlights only the selected application's map exhibit. Retarget Map replaces it from selected districts.",
             "End Week closes the filing window. Unresolved cases can expire, create pressure, or return as follow-up filings.",
             "Filed Reports and Scorecard live in the report tabs at the bottom of the desk.",
+            "End Game closes this dashboard and leaves the geodatabase ready to resume on the next launch.",
         )
         for line in lines:
             y = _text_bottom(c, body_x0, y, line, self._font(10), Palette.INK, width=body_x1 - body_x0) + 12

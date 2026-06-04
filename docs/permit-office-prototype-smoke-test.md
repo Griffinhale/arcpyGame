@@ -28,33 +28,40 @@ Permit Office Prototype
 1. Select one district on the map if you want to override the seeded exhibit.
 1. In the dashboard, pick a point-style docket item.
    - The docket row should select its proposed exhibit and target district on the map.
-   - Click `Hide Exhibit`, then `Show Exhibit`; only that selected proposed row should disappear and return.
-   - If changing placement, select a replacement district and click `Update From Map`.
-1. Click `Inspect`.
+   - Click `Hide Proposed Feature`, then `Show Proposed Feature`; only that selected proposed row should disappear and return.
+   - If changing placement, select a replacement district and click `Retarget Map`.
+1. Click `Inspect File`.
    - AP should decrease and the dashboard item text should include a risk band.
-1. Click `Approve` or `Approve + Mitigate`.
+1. Click `Issue Permit` or `Add Conditions`.
    - The proposed feature should become active.
    - District metrics and `display_state` should update.
-   - A modal effect report should appear.
+   - A filed report tab should be appended without stealing focus from the next application.
    - GP messages should include refresh attempts.
 1. Test a line item:
    - Select exactly two districts.
-   - Click `Update From Map`.
-   - Approve the corridor/procession item.
+   - Click `Retarget Map`.
+   - Click the visible approval action, usually `Issue Permit` for ordinary permit files.
 1. Test a polygon item:
    - Select one or more districts.
-   - Click `Update From Map`.
-   - Approve or deny it.
+   - Click `Retarget Map`.
+   - Click the visible approval or denial action, such as `Issue Permit`, `Add Conditions`, or `Deny`.
 1. Click `End Week`.
     - AP should reset.
     - A new four-item docket should be generated unless the final audit has completed.
     - Unresolved items should produce carried, expired, momentum, or follow-up behavior in the filed report.
 1. Click `Scorecard` in the dashboard.
-    - The scorecard dialog should show the current audit score.
+    - A scorecard report tab should show the current audit score.
 1. Optional pacing check: continue ending weeks until week 12.
     - Week 6 should file the mid-season audit while keeping the game playable.
     - Week 12 should still have a playable docket.
-    - Closing week 12 should file the final audit and stop generating new dockets.
+    - Closing week 12 should open the final audit in Filed Reports and stop generating new dockets.
+    - If buyout pressure appears, record whether vulnerable, contested, and converted districts are understandable from map labels, symbology, and filed reports without inspecting raw tables.
+1. Record map symbology observations or screenshots.
+    - District type colors and district-name labels should be readable at normal demo zoom.
+    - Proposed features should stand apart from active features.
+    - Roads and utility lines should remain distinguishable above district fills.
+    - Seeded housing, commerce, civic, industrial, campus, and park details should add context without hiding permit features.
+    - `PermitZones` transparency should preserve district identity under polygon features.
 
 ## Expected Data
 

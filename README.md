@@ -104,13 +104,14 @@ do not replace a live ArcGIS Pro smoke test.
 Permit Office is a playable prototype. It has generated districts, seeded city
 detail, weighted docket templates, inspections, approvals, no-AP ordinary
 denials, mitigation, incidents, maintenance follow-ups, recurring economy,
-projects, audits, map symbology, district identity/buyout pressure, an inline
-final audit receipt, and a Tkinter dashboard.
+projects, audits, map symbology, district identity/buyout pressure, start/help
+flow, selected-case exhibit controls, an inline final audit receipt, and a
+Tkinter dashboard.
 
-The next public-readiness work is focused on clarity and balance: better help
-and start flows, clearer action/exhibit semantics, more legible city-health
-displays, richer map symbology, final-scorecard UX, and a proven fair path to
-winning.
+The next public-readiness work is focused on evidence and balance: recording a
+live ArcGIS Pro smoke test, validating cold-start resume behavior on the target
+machine, tuning a fair 12-week route, and deepening map symbology only where the
+live map proves it is still hard to read.
 
 See `docs/current-status.md` and `docs/permit-office-prototype-smoke-test.md`
 for the latest implementation notes and manual validation checklist.

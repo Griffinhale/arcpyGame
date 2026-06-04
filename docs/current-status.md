@@ -1,6 +1,6 @@
 # Permit Office Current Status
 
-Date: 2026-06-03
+Date: 2026-06-04
 
 ## Purpose
 
@@ -17,12 +17,17 @@ This file is the quick project status source for Permit Office. It separates the
 - Active automated regression suite in `tests/test_permit_office_rules.py`.
 - Current turn/data-flow reference in `docs/permit-office-turn-data-flow.md`.
 - Refresh/cache spike interpretation in `docs/permit-office-refresh-spike-benchmark.md`: main and ArcPy refresh timings were close, while the SDK add-in strategy was slower.
+- ArcGIS pane arrangement spike in `docs/arcgis-panel-automation-spike.md`: startup repairs layers and opens the dashboard, but does not automate Contents/Geoprocessing pane layout from Python.
 - 12-week attention-scarce pacing: 2 AP per week, ordinary permit denials cost 0 AP, week 6 is the mid-season audit, and closing week 12 files the final audit.
 - Template-specific unattended-item expiration: missed windows, city momentum, mandatory carryovers, and pending follow-up cases.
 - Hidden district type ledger plus deterministic contested buyout/refusal/conversion rules for low-activity districts.
+- Buyout legibility closure note in `docs/buyout-legibility-playtest.md`: reports identify target, bidder, reason, and stabilization hint; richer multi-bid negotiation remains follow-up scope.
 - District-weighted docket generation that varies by seed and district type distribution while preserving mandatory follow-up priority.
 - ArcGIS district identity persistence and district-type-first symbology, with district-name labels.
+- Map symbology spike in `docs/map-symbology-spike.md`: districts render by identity, support layers render by workflow/detail state, and richer bivariate renderers are deferred until live ArcGIS evidence proves they are needed.
 - City health now uses Activity, Friction, Trust, Exposure, Services, and Dissatisfaction; legacy district fields are migrated into the renamed persisted fields.
+- Selected applications now show decision lanes, selected-case exhibit controls, and compact recurring revenue/upkeep/net forecasts.
+- Fresh saves open into a start/help overlay with seed-based New Game flow, while End Game closes the dashboard without clearing geodatabase state.
 - Closing week 12 automatically records an inline final audit receipt with PASS/CONDITIONAL/FAIL flavor text.
 
 ## Missing
@@ -34,11 +39,10 @@ This file is the quick project status source for Permit Office. It separates the
 
 ## Iterate Later
 
-- Dashboard layout and copy polish after the live smoke test identifies real friction.
 - Docket template balance and score tuning for a fair 12-week route that can reliably PASS with competent play.
-- Help/start flow, report/docket/tab layout polish, and live scorecard presentation tuning after ArcGIS smoke testing.
-- Deeper symbology and map presentation polish for `PermitDistricts`, `PermitPoints`, `PermitLines`, and `PermitZones`.
-- Playtest whether hidden buyout pressure is legible enough through reports and map symbology without exposing a raw ledger.
+- Dashboard layout, report/docket/tab copy, and live scorecard presentation tuning after ArcGIS smoke testing identifies real friction.
+- Live ArcGIS screenshots or notes for `PermitDistricts`, `PermitPoints`, `PermitLines`, and `PermitZones` readability.
+- Live-check whether buyout pressure, contested districts, and converted districts are visually legible in ArcGIS Pro without exposing a raw ledger.
 - If live display staleness remains, revisit the ArcPy refresh-only branch as a reliability fix, not as a confirmed speed improvement.
 - Possible `store.py` split if persistence grows beyond the current file-size budget.
 

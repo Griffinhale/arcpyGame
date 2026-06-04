@@ -145,7 +145,7 @@ def resolve_decision(
     if action_key not in ("approve", "approve_mitigated"):
         return _blocked(action, item.item_id, f"Unknown decision action {action!r}.")
     if not targets:
-        return _blocked(action, item.item_id, "Approve requires at least one selected target district.")
+        return _blocked(action, item.item_id, "Decision requires at least one selected target district.")
     total_money = template.money_cost + (template.mitigation_cost if mitigated else 0)
     blocked = _spend_resources(state, action, item.item_id, "Approval", template.ap_cost, total_money)
     if blocked:
@@ -255,7 +255,7 @@ def resolve_decision(
     mitigation_text = " with mitigation" if mitigated else ""
     failure_text = _approval_risk_report(template, failure_triggered, failure_delta, side, item.risk_band, mitigated, [districts[cid] for cid in targets])
     spillover_text = _spillover_report_fragment(spillovers, template, mitigated)
-    recurring_text = "no new active feature because the approval failed" if failure_triggered else _recurring_budget_report(archetype)
+    recurring_text = "no new active feature because the decision failed" if failure_triggered else _recurring_budget_report(archetype)
     project_text = ""
     if projects is not None and not failure_triggered:
         # Project records are either opened from a new approval or advanced when

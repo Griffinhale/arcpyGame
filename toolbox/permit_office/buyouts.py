@@ -209,7 +209,8 @@ def _start_contested_transition(
     target.transition_due_turn = state.turn + 1
     target.last_buyout_report = (
         f"{target.name} entered contested buyout from {bidder.name}; "
-        f"{bidder.district_type} bid cleared local leverage after weak activity and pressure."
+        f"{bidder.district_type} bid cleared local leverage after weak activity and pressure; "
+        "office attention can still stabilize the district before conversion."
     )
     adjust_type_ledger(
         ledger,
