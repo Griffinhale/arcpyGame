@@ -9,6 +9,10 @@ The joke is bureaucratic, but the game loop is real: every permit is tied to
 map geometry, district state, stakeholder pressure, recurring costs, and visible
 city consequences.
 
+> **Status: public beta — v0.9.0-beta.** Playable end to end; balance and live
+> ArcGIS Pro polish are still in progress. Expect rough edges. Requires ArcGIS
+> Pro with ArcPy to run; the pure-Python rules run and test without it.
+
 ## How It Plays
 
 Each office week gives you a small docket of permit applications, incidents, or
@@ -125,3 +129,9 @@ live map proves it is still hard to read.
 
 See `docs/systems-overview.md` for the implementation map, current status, and
 the live ArcGIS validation walkthrough.
+
+## License
+
+Released under the MIT License — see [`LICENSE`](LICENSE). This covers the game
+code in this repository; running it still requires your own licensed ArcGIS Pro
+/ ArcPy installation, which is not included.
