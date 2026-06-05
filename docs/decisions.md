@@ -82,7 +82,8 @@ live ArcGIS evidence proves the need.
 relabels the district and shifts fill; legibility via name/color/news-ticker/
 report, not a raw ledger. **Why:** closeable and understandable without exposing
 internals. **Rejected (deferred):** multi-bid/round-robin negotiation and ledger-
-snapshot RNG keys — larger design, follow-up scope.
+snapshot RNG keys — larger design, follow-up scope (multi-bid now picked up in
+ADR-14).
 
 ### ADR-10 — Small public stat model, hidden internals
 **Decision:** the player-facing audit goals are exactly four vitals — **Activity /
@@ -117,3 +118,51 @@ premature splits or comment-stripping when logic genuinely warrants the length.
 drawing. **Why:** keeps the map the *input* device and the dashboard the
 controller, with deterministic, reproducible exhibits. **Rejected:** freehand
 Feature Set drawing — non-deterministic and off the command flow.
+
+### ADR-14 — District identity & buyouts: 6B deepening
+**Decision:** pick up the multi-bid/round-robin work ADR-9 deferred, plus
+names-first text and type/culture-driven proposals. Four parts:
+
+1. **Names everywhere player-facing.** Audit findings, the dashboard incident
+   summary, civic-incident previews, and approval/spillover/local-delta report
+   prose read as district *names* via `helpers.district_label(profile)` (=
+   `name or cell_id`). `cell_id` stays the stable key — `finding_id`,
+   `case_json` incident identity, and `affected_cell_ids` are unchanged.
+
+2. **Type + culture shape the docket.** Alongside `TYPE_CATEGORY_WEIGHTS`,
+   `GROUP_CATEGORY_WEIGHTS` lets a district's dominant citizen groups (any
+   `population_mix` band ≥ `CULTURE_DOMINANT_BAND` = 2) pull proposals toward the
+   categories that serve them. The docket RNG key (`_district_mix_key`) now
+   encodes both the type histogram and the dominant-culture histogram, so two
+   boards with identical types but different mixes diverge. Balanced/neutral
+   boards are unaffected.
+
+3. **Multi-bidder negotiation.** `resolve_buyout_round` no longer just takes the
+   top-scored eligible neighbor. Each eligible bidder rolls a deterministic
+   **willingness** check — `chance = clamp(0.05..1.0, 0.25 + 0.01·advantage +
+   0.01·capital + 0.05·appetite − 0.05·fatigue − 0.08·overextension)` where
+   `advantage = max(0, bidder.activity − target.activity)` — on a **side RNG
+   stream** keyed `willing:{seed}:{turn}:{bidder}:{target}` so it never disturbs
+   the shared shuffle/refusal draw order (ADR-11 determinism, existing seeds
+   preserved). A flush/eager type clamps to 1.0 and always bids; a marginal one
+   often abstains, so a field of eligible neighbors can resolve to one, several,
+   or none. The strongest *willing* bidder leads. Refusal is unchanged —
+   `chance = clamp(0..0.65, 0.025·(activity−30) − 0.06·pressure)`, i.e. target
+   prosperity/leverage — and is reasonable; finer tuning is a live-playtest item.
+
+4. **Conversion shifts type + culture + resources.** On convert, the census
+   blends toward the new type's `ARCHETYPE_BASE_MIX` (the new type's two leading
+   groups rise into the dominant band, the prior strongest decays) so the
+   district reads and *generates proposals* as its new identity. Winning a
+   contested field of N costs the winner extra capital (`−3·(N−1)`) and
+   overextension (`+(N−1)`) — the upside-with-risk lever.
+
+**Data/schema:** no new persisted fields. All buyout fields
+(`identity_state`, `contesting_cell_id`, `buyout_pressure`,
+`last_buyout_report`, `prior_district_type`, …) and `population_mix_json` were
+already in `schema.py`/`store.py`; existing saved `.gdb`s load unchanged.
+**Why:** delivers ADR-9's deferred depth while keeping determinism, save-compat,
+and text legibility. **Rejected/deferred:** retuning the refusal curve and
+round-robin counter-bidding (want live feedback first); persisting a
+ledger-snapshot RNG key (still unnecessary — the side stream is keyed by the
+stable pairing).
