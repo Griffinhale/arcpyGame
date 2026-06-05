@@ -352,6 +352,7 @@ class DashboardController:
             auto_close_active=self._queue_autoclose_active,
             auto_close_seconds=self._queue_autoclose_seconds,
             audit_grade=audit_grade,
+            game_active=saved_game,
         )
         self.selected_item_id = model.selected_item_id
         self.selected_report_id = model.selected_report_id

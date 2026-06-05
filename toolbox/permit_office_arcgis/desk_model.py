@@ -158,6 +158,7 @@ class DeskViewModel:
     queue_cleared: bool = False
     auto_close_active: bool = False
     auto_close_seconds: int = 0
+    game_active: bool = True
 
 
 def build_desk_model(
@@ -179,6 +180,7 @@ def build_desk_model(
     auto_close_active=False,
     auto_close_seconds=0,
     audit_grade=None,
+    game_active=True,
 ) -> DeskViewModel:
     """Format gameplay state into a presentation-only desk model.
 
@@ -245,6 +247,7 @@ def build_desk_model(
         not bool(active_items),
         bool(auto_close_active),
         int(auto_close_seconds or 0),
+        bool(game_active),
     )
 
 

@@ -612,6 +612,43 @@ def test_draw_lookups_rebuild_only_on_model_swap():
     assert view._ledger_by_label is not first_ledger
 
 
+def test_build_desk_model_game_active_defaults_true_and_can_be_false():
+    """Verify the model carries a game_active flag (True by default)."""
+
+    assert build_desk_model(rules.CityState(), {}, []).game_active is True
+    assert build_desk_model(rules.CityState(), {}, [], game_active=False).game_active is False
+
+
+def test_empty_docket_before_a_game_shows_start_prompt_not_queue_cleared():
+    """Verify a not-started session prompts New Game, not 'all applications filed'."""
+
+    model = build_desk_model(rules.CityState(), {}, [], game_active=False)
+    view, _callbacks = _view_for_drawing(model)
+    canvas = _FakeCanvas()
+
+    view._draw_application_tab_content(canvas, (0, 0, 760, 700))
+    texts = _text_values(canvas)
+
+    assert any("No game" in (text or "") for text in texts)
+    assert any("New Game" in (text or "") for text in texts)
+    assert not any("have been filed" in (text or "") for text in texts)
+    assert not any((text or "") == "End Week" for text in texts)
+
+
+def test_empty_docket_mid_game_still_shows_queue_cleared():
+    """Verify an active game with an empty docket keeps the queue-cleared panel."""
+
+    model = build_desk_model(rules.CityState(), {}, [], game_active=True)
+    view, _callbacks = _view_for_drawing(model)
+    canvas = _FakeCanvas()
+
+    view._draw_application_tab_content(canvas, (0, 0, 760, 700))
+    texts = _text_values(canvas)
+
+    assert any("Queue cleared" in (text or "") for text in texts)
+    assert any("have been filed" in (text or "") for text in texts)
+
+
 def test_utility_menu_button_is_compact_hamburger_without_text_label():
     """Verify utility actions are collapsed behind a small menu affordance."""
 

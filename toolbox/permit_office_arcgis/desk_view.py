@@ -415,12 +415,23 @@ class PermitDeskView:
         self._add_target("docket", row.item_id, (x0, y0, x1, y1), lambda item_id=row.item_id: self.on_select_item(item_id))
 
     def _draw_queue_cleared_state(self, c, box):
-        """Draw the empty queue state and auto-close controls."""
+        """Draw the empty-docket panel: a start prompt before a game exists, or
+        the queue-cleared / End Week controls once one is running."""
 
         x0, y0, x1, y1 = box
         card_y0 = y0 + 34
         _shadow_rect(c, x0 + 4, card_y0 + 5, x1 + 4, y1 + 5)
         c.create_rectangle(x0, card_y0, x1, y1, fill=Palette.PAPER, outline=Palette.LINE, width=1)
+        if not self.model.game_active:
+            c.create_text(x0 + 24, card_y0 + 26, text="No game yet", anchor="nw", fill=Palette.INK, font=self._font(18, "bold"))
+            start_body = (
+                "This workspace has no active Permit Office board. Click New Game "
+                "to generate a city and start the 12-week season."
+            )
+            c.create_text(x0 + 24, card_y0 + 66, text=start_body, anchor="nw", fill=Palette.MUTED, font=self._font(11), width=x1 - x0 - 48)
+            by0 = y1 - 64
+            self._draw_case_action(c, x0 + 24, by0, x0 + 164, by0 + 40, "New Game", Palette.BLUE, self.callbacks.new_game, primary=True)
+            return
         c.create_text(x0 + 24, card_y0 + 26, text="Queue cleared", anchor="nw", fill=Palette.INK, font=self._font(18, "bold"))
         body = "All applications have been filed. End Week to process follow-ups."
         if self.model.auto_close_active:
