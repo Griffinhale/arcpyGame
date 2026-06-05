@@ -251,6 +251,44 @@ def test_selected_cell_ids_falls_back_to_field_scan_on_cursor_error(monkeypatch)
     assert fake.listfields_calls == 1  # fell back exactly once
 
 
+def _map_arcpy(layer_names, active=True, raise_err=False):
+    """Return an ArcPy stub whose active map carries the given layer names."""
+
+    def _project(_name):
+        if raise_err:
+            raise RuntimeError("no CURRENT project")
+        if not active:
+            return SimpleNamespace(activeMap=None)
+        layers = [SimpleNamespace(name=name) for name in layer_names]
+        return SimpleNamespace(activeMap=SimpleNamespace(listLayers=lambda: layers))
+
+    return SimpleNamespace(mp=SimpleNamespace(ArcGISProject=_project))
+
+
+def test_output_layers_present_true_when_an_output_layer_is_on_map(monkeypatch):
+    """Verify a map carrying a Permit Office layer reports present (resume)."""
+
+    monkeypatch.setattr(geometry, "arcpy", _map_arcpy([geometry.DISTRICTS, "Topographic"]))
+
+    assert geometry.output_layers_present() is True
+
+
+def test_output_layers_present_false_when_map_has_no_output_layers(monkeypatch):
+    """Verify a map with only basemaps reports absent (offer fresh start)."""
+
+    monkeypatch.setattr(geometry, "arcpy", _map_arcpy(["Topographic", "World Imagery"]))
+
+    assert geometry.output_layers_present() is False
+
+
+def test_output_layers_present_true_when_probe_unavailable(monkeypatch):
+    """Verify a probe failure is conservative and never suppresses a resume."""
+
+    monkeypatch.setattr(geometry, "arcpy", _map_arcpy([], raise_err=True))
+
+    assert geometry.output_layers_present() is True
+
+
 def test_district_identity_persistence_field_aliases_are_configured():
     """Verify district identity persistence fields use Task 7 aliases."""
 

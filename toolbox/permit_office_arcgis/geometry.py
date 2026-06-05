@@ -772,6 +772,27 @@ def refresh_all(paths, messages, layer_names=None):
             _warn(messages, "REFRESH", f"RefreshLayer({name!r}) failed: {exc}")
 
 
+def output_layers_present():
+    """Return True if any Permit Office output layer is on the active map.
+
+    Used to decide whether to auto-resume a saved board: a map with none of our
+    layers is treated as a fresh-start session even when the .gdb still holds a
+    save. Conservative -- returns True unless it can positively confirm an active
+    map that lacks every output layer, so a probe failure never suppresses a
+    normal resume.
+    """
+
+    names = {DISTRICTS, POINTS, LINES, ZONES, DISTRICT_PROSPERITY, DISTRICT_IDENTITY}
+    try:
+        aprx = arcpy.mp.ArcGISProject("CURRENT")
+        active_map = aprx.activeMap
+        if active_map is None:
+            return True
+        return any(layer.name in names for layer in active_map.listLayers())
+    except Exception:
+        return True
+
+
 def add_outputs_to_map(paths, messages, layer_names=None):
     """Add active game outputs to the map; layer_names limits to a subset when given."""
     try:

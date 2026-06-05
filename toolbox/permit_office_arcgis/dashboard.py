@@ -64,21 +64,25 @@ WORK_WEEK_DAYS = (
 WORK_DAY_SECONDS = WEEK_DEADLINE_SECONDS // len(WORK_WEEK_DAYS)
 
 
-def prepare_dashboard_session(paths, seed, messages):
+def prepare_dashboard_session(paths, seed, messages, resume=True):
     """Resume or stage a session before the dashboard opens.
 
-    Treats the geodatabase as the canonical save: if districts+state rows exist
-    we re-add the output layers and regenerate the docket only if it is empty;
-    otherwise we leave the dashboard to open on its start screen. Returns the
-    seed unchanged so the caller can thread it into the controller.
+    Treats the geodatabase as the canonical save: when ``resume`` and the save
+    rows exist we re-add the output layers and regenerate the docket only if it
+    is empty. ``resume`` is False when the caller detected an empty map (no
+    Permit Office layers) -- then the saved board is left untouched in the .gdb
+    and the dashboard opens offering a fresh start instead of silently resuming.
+    Returns the seed unchanged so the caller can thread it into the controller.
     """
 
-    if has_saved_game(paths):
+    if resume and has_saved_game(paths):
         add_outputs_to_map(paths, messages)
         if _row_count(paths["docket"]) == 0:
             generate_docket_rows(paths, seed, messages)
             refresh_all(paths, messages)
         _log(messages, "DASH", "resuming saved Permit Office game")
+    elif has_saved_game(paths):
+        _log(messages, "DASH", "saved game present but no Permit Office layers on map; offering fresh start")
     else:
         _log(messages, "DASH", "no saved Permit Office game found; open dashboard start screen")
     return seed
@@ -169,17 +173,21 @@ class DashboardController:
     bookkeeping that `reload()` re-derives from persisted rows.
     """
 
-    def __init__(self, paths, district_layer, seed, messages):
+    def __init__(self, paths, district_layer, seed, messages, offer_fresh_start=False):
         """Wire paths, the district layer name, the run seed, and GP messages.
 
         Initializes UI/session state (selection, report tabs, deadline timer,
         command-busy guard); the geodatabase rows are read later in reload().
+        offer_fresh_start is True when the launcher detected a save in this
+        workspace but no Permit Office layers on the map: the desk then opens on a
+        clean start posture (New Game) instead of surfacing the old board.
         """
 
         self.paths = paths
         self.district_layer = district_layer
         self.seed = seed
         self.messages = messages
+        self._offer_fresh_start = offer_fresh_start
         self.status_text = ""
         self.selected_item_id = ""
         self.last_receipt = None
@@ -281,6 +289,24 @@ class DashboardController:
             self._grade_dirty = False
         return self._audit_grade
 
+    def _resolve_session_state(self, state, districts, items, active_features):
+        """Return the rows to render plus whether a fresh start is being offered.
+
+        When the launcher flagged offer_fresh_start (a save exists in this
+        workspace but no Permit Office layers are on the map), render a clean
+        start posture from defaults instead of reading the stale saved board, so
+        the old game is not silently surfaced. Otherwise read persisted rows
+        (honoring any caller-supplied, fully-persisted overrides).
+        """
+
+        if self._offer_fresh_start and has_saved_game(self.paths):
+            return rules.CityState(), {}, [], [], True
+        state = read_state(self.paths) if state is None else state
+        districts = read_districts(self.paths) if districts is None else districts
+        items = read_docket(self.paths) if items is None else items
+        active_features = read_active_features(self.paths) if active_features is None else active_features
+        return state, districts, items, active_features, False
+
     def reload(self, *, state=None, districts=None, items=None, active_features=None):
         """Read persisted game rows and render a fresh desk view model.
 
@@ -291,16 +317,17 @@ class DashboardController:
         a rolled-back command, or the view will show stale/uncommitted data.
         """
 
-        state = read_state(self.paths) if state is None else state
-        districts = read_districts(self.paths) if districts is None else districts
-        items = read_docket(self.paths) if items is None else items
-        active_features = read_active_features(self.paths) if active_features is None else active_features
+        state, districts, items, active_features, offering_fresh = self._resolve_session_state(
+            state, districts, items, active_features
+        )
         self._sync_deadline_timer(state)
         self._sync_report_week(state)
         if state.status == "complete" or state.turn > state.max_turns:
             self._record_final_audit_receipt(state, districts, active_features, items)
-        saved_game = has_saved_game(self.paths)
-        if not saved_game and not self.status_text:
+        saved_game = has_saved_game(self.paths) and not offering_fresh
+        if offering_fresh and not self.status_text:
+            self.status_text = "Saved board found, but no Permit Office layers are on the map. Click New Game to start fresh."
+        elif not saved_game and not self.status_text:
             self.status_text = "No saved game found. Click New Game to create Permit Office layers and start play."
         try:
             visible = proposal_visible_map(self.paths)
@@ -658,6 +685,7 @@ class DashboardController:
                 refresh_all(self.paths, self.messages)
                 self.seed = seed
                 self.district_layer = DISTRICTS
+                self._offer_fresh_start = False
                 self._audit_grade = None
                 self._grade_dirty = True
                 self.selected_item_id = ""

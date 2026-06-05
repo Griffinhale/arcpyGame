@@ -1501,3 +1501,61 @@ def test_advance_turn_marks_audit_grade_dirty_for_recompute(monkeypatch):
     controller.advance_turn()
 
     assert controller._grade_dirty is True
+
+
+def test_prepare_dashboard_session_fresh_start_skips_layer_add(monkeypatch):
+    """Verify offering a fresh start leaves the saved board and adds no layers."""
+    calls = []
+    monkeypatch.setattr(dashboard, "has_saved_game", lambda paths: True)
+    monkeypatch.setattr(dashboard, "add_outputs_to_map", lambda paths, messages: calls.append("add"))
+
+    dashboard.prepare_dashboard_session({}, 2026, object(), resume=False)
+
+    assert calls == []
+
+
+def test_prepare_dashboard_session_resume_adds_layers(monkeypatch):
+    """Verify a normal resume re-adds the output layers."""
+    calls = []
+    monkeypatch.setattr(dashboard, "has_saved_game", lambda paths: True)
+    monkeypatch.setattr(dashboard, "add_outputs_to_map", lambda paths, messages: calls.append("add"))
+    monkeypatch.setattr(dashboard, "_row_count", lambda path: 5)
+
+    dashboard.prepare_dashboard_session({"docket": "d"}, 2026, object(), resume=True)
+
+    assert calls == ["add"]
+
+
+def test_resolve_session_state_fresh_start_uses_defaults_without_reading_save(monkeypatch):
+    """Verify fresh-start mode renders defaults and never reads the stale save."""
+    controller = dashboard.DashboardController({}, "district_layer", 2026, object(), offer_fresh_start=True)
+    monkeypatch.setattr(dashboard, "has_saved_game", lambda paths: True)
+
+    def _no_read(_paths):
+        raise AssertionError("persisted rows must not be read in fresh-start mode")
+
+    monkeypatch.setattr(dashboard, "read_state", _no_read)
+    monkeypatch.setattr(dashboard, "read_districts", _no_read)
+
+    state, districts, items, features, offering = controller._resolve_session_state(None, None, None, None)
+
+    assert offering is True
+    assert districts == {} and items == [] and features == []
+    assert state.turn == rules.CityState().turn
+
+
+def test_resolve_session_state_normal_reads_persisted_rows(monkeypatch):
+    """Verify ordinary reloads read persisted rows (no fresh-start override)."""
+    controller = dashboard.DashboardController({}, "district_layer", 2026, object(), offer_fresh_start=False)
+    sentinel = rules.CityState(turn=4)
+    monkeypatch.setattr(dashboard, "has_saved_game", lambda paths: True)
+    monkeypatch.setattr(dashboard, "read_state", lambda paths: sentinel)
+    monkeypatch.setattr(dashboard, "read_districts", lambda paths: {"D0000": "x"})
+    monkeypatch.setattr(dashboard, "read_docket", lambda paths: ["item"])
+    monkeypatch.setattr(dashboard, "read_active_features", lambda paths: ["feat"])
+
+    state, districts, items, features, offering = controller._resolve_session_state(None, None, None, None)
+
+    assert offering is False
+    assert state is sentinel
+    assert districts == {"D0000": "x"} and items == ["item"] and features == ["feat"]

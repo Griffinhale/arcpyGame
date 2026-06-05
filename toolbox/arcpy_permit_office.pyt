@@ -35,8 +35,8 @@ for _module_name in (
         importlib.reload(_module)
 
 from permit_office_arcgis import _perf
-from permit_office_arcgis.dashboard import DashboardController, prepare_dashboard_session
-from permit_office_arcgis.geometry import add_outputs_to_map
+from permit_office_arcgis.dashboard import DashboardController, has_saved_game, prepare_dashboard_session
+from permit_office_arcgis.geometry import output_layers_present
 from permit_office_arcgis.schema import (
     P_OUTPUT,
     P_PERF,
@@ -103,7 +103,10 @@ class PermitOfficePrototype(object):
         _perf.set_enabled(bool(parameters[P_PERF].value))
         gdb_path = resolve_workspace(parameters[P_WORKSPACE].value, messages)
         paths = ensure_schema(gdb_path, messages)
-        add_outputs_to_map(paths, messages)
-        seed = prepare_dashboard_session(paths, 2026, messages)
-        DashboardController(paths, DISTRICTS, seed, messages).open()
+        # Detect an empty map BEFORE adding any layers: a save in this workspace
+        # with no Permit Office layers on the map opens to a fresh-start prompt
+        # instead of silently resuming the old board.
+        offer_fresh_start = has_saved_game(paths) and not output_layers_present()
+        seed = prepare_dashboard_session(paths, 2026, messages, resume=not offer_fresh_start)
+        DashboardController(paths, DISTRICTS, seed, messages, offer_fresh_start=offer_fresh_start).open()
         arcpy.SetParameterAsText(P_OUTPUT, paths["districts"])
