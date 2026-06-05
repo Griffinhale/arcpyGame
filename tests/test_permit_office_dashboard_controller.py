@@ -17,6 +17,8 @@ sys.modules.setdefault(
 
 from toolbox import arcpy_permit_office_rules as rules
 from toolbox.permit_office_arcgis import dashboard
+from toolbox.permit_office_arcgis import desk_model
+from toolbox.permit_office_arcgis.desk_model import build_desk_model
 from toolbox.permit_office_arcgis import schema
 from toolbox.permit_office_arcgis import store
 
@@ -1304,3 +1306,134 @@ def test_deadline_tick_advances_daily_pressure_and_refreshes_districts_only(monk
     assert ("state", 2, {"D0000": 2}) in calls
     assert ("overlay", {"D0000": 2}) in calls
     assert ("refresh", {dashboard.DISTRICTS}) in calls
+
+
+def _raise_scorecard(*_args, **_kwargs):
+    """Stand-in scorecard that fails if the cached-grade path calls it."""
+
+    raise AssertionError("rules.scorecard should not be called when audit_grade is provided")
+
+
+def test_build_desk_model_uses_provided_audit_grade_without_scorecard(monkeypatch):
+    """Verify a provided audit grade skips the scorecard recompute entirely."""
+
+    item = rules.DocketItem("CASE-grade", "street_vendor_compact", "Street Vendor Compact", "POINT", 1)
+    districts = {"D0000": _profile("D0000")}
+    monkeypatch.setattr(desk_model.rules, "scorecard", _raise_scorecard)
+
+    model = build_desk_model(rules.CityState(), districts, [item], item.item_id, audit_grade="CONDITIONAL")
+
+    audit_row = next(row for row in model.ledger_rows if row.label == "Audit")
+    assert audit_row.value == desk_model._short_audit_grade("CONDITIONAL")
+
+
+def test_build_desk_model_without_audit_grade_computes_via_scorecard(monkeypatch):
+    """Verify the default path still computes the grade through scorecard."""
+
+    item = rules.DocketItem("CASE-grade", "street_vendor_compact", "Street Vendor Compact", "POINT", 1)
+    districts = {"D0000": _profile("D0000")}
+    calls = []
+
+    def fake_scorecard(state, districts_arg, features_arg, docket_arg):
+        calls.append(True)
+        return "PASS", "Audit PASS."
+
+    monkeypatch.setattr(desk_model.rules, "scorecard", fake_scorecard)
+
+    model = build_desk_model(rules.CityState(), districts, [item], item.item_id)
+
+    assert calls == [True]
+    audit_row = next(row for row in model.ledger_rows if row.label == "Audit")
+    assert audit_row.value == desk_model._short_audit_grade("PASS")
+
+
+def test_selection_only_reload_reuses_cached_audit_grade(monkeypatch):
+    """Verify back-to-back selection reloads compute the grade at most once."""
+
+    state = rules.CityState()
+    districts = {"D0000": _profile("D0000")}
+    controller = dashboard.DashboardController({}, "district_layer", 2026, object())
+    controller.status_text = ""
+    controller.status_var = dashboard._StatusProxy(controller)
+    calls = []
+
+    class FakeView:
+        def render(self, model):
+            pass
+
+    controller.view = FakeView()
+    monkeypatch.setattr(dashboard, "read_state", lambda paths: state)
+    monkeypatch.setattr(dashboard, "read_districts", lambda paths: districts)
+    monkeypatch.setattr(dashboard, "read_docket", lambda paths: [])
+    monkeypatch.setattr(dashboard, "read_active_features", lambda paths: [])
+    monkeypatch.setattr(dashboard, "has_saved_game", lambda paths: True)
+    monkeypatch.setattr(dashboard, "proposal_visible_map", lambda paths: {})
+
+    def fake_scorecard(state_arg, districts_arg, features_arg, docket_arg):
+        calls.append(True)
+        return "PASS", "Audit PASS."
+
+    monkeypatch.setattr(dashboard.rules, "scorecard", fake_scorecard)
+
+    controller.reload()
+    controller.reload()
+
+    assert len(calls) == 1
+
+
+def test_decision_marks_audit_grade_dirty_for_recompute(monkeypatch):
+    """Verify a filed decision invalidates the cached grade so it recomputes."""
+
+    item = rules.DocketItem("CASE-finish", "procession_route", "Procession Route", "LINE", 1)
+    state = rules.CityState()
+    districts = {"D0000": _profile("D0000")}
+    controller = dashboard.DashboardController({"districts": "districts"}, "district_layer", 2026, object())
+    controller.status_text = ""
+    controller.status_var = dashboard._StatusProxy(controller)
+    controller._grade_dirty = False
+
+    monkeypatch.setattr(dashboard, "write_district_updates", lambda *args, **kwargs: None)
+    monkeypatch.setattr(dashboard, "write_state", lambda *args, **kwargs: None)
+    monkeypatch.setattr(dashboard, "write_projects", lambda *args, **kwargs: None)
+    monkeypatch.setattr(dashboard, "write_docket_item", lambda *args, **kwargs: None)
+    monkeypatch.setattr(dashboard, "action_log", lambda *args, **kwargs: None)
+    monkeypatch.setattr(dashboard, "command_finish", lambda *args, **kwargs: None)
+    monkeypatch.setattr(dashboard, "rebuild_output_layers", lambda *args, **kwargs: None)
+    monkeypatch.setattr(controller, "_record_receipt", lambda *args, **kwargs: None)
+    monkeypatch.setattr(controller, "_advance_triage_selection", lambda *args, **kwargs: None)
+
+    result = rules.DecisionResult(True, "approve", item.item_id, "approved", affected_cell_ids=["D0000"])
+    controller._finish_decision("CMD-1", item, state, districts, {}, result)
+
+    assert controller._grade_dirty is True
+
+
+def test_advance_turn_marks_audit_grade_dirty_for_recompute(monkeypatch):
+    """Verify advancing the week invalidates the cached audit grade."""
+
+    controller = dashboard.DashboardController({"state": "state"}, "district_layer", 2026, object())
+    controller.status_text = ""
+    controller.status_var = dashboard._StatusProxy(controller)
+    controller.reload = lambda **kwargs: None
+    controller._grade_dirty = False
+    state = rules.CityState(turn=2)
+    districts = {"D0000": _profile("D0000")}
+
+    monkeypatch.setattr(dashboard, "command_insert", lambda paths, action, item_id, target_ids: "CMD-1")
+    monkeypatch.setattr(dashboard, "command_finish", lambda *args, **kwargs: None)
+    monkeypatch.setattr(dashboard, "read_state", lambda paths: state)
+    monkeypatch.setattr(dashboard, "read_docket", lambda paths: [])
+    monkeypatch.setattr(dashboard, "read_districts", lambda paths: districts)
+    monkeypatch.setattr(dashboard, "read_active_features", lambda paths: [])
+    monkeypatch.setattr(dashboard, "read_projects", lambda paths: {})
+    monkeypatch.setattr(dashboard, "write_state", lambda *args, **kwargs: None)
+    monkeypatch.setattr(dashboard, "write_projects", lambda *args, **kwargs: None)
+    monkeypatch.setattr(dashboard, "write_district_updates", lambda *args, **kwargs: None)
+    monkeypatch.setattr(dashboard, "write_active_features", lambda *args, **kwargs: None)
+    monkeypatch.setattr(dashboard, "write_docket_item", lambda *args, **kwargs: None)
+    monkeypatch.setattr(dashboard, "generate_docket_rows", lambda *args, **kwargs: None)
+    monkeypatch.setattr(dashboard, "rebuild_output_layers", lambda *args, **kwargs: None)
+
+    controller.advance_turn()
+
+    assert controller._grade_dirty is True
