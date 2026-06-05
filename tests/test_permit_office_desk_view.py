@@ -446,6 +446,7 @@ def _view_for_drawing(model):
     view._click_targets = []
     view._hover_key = ""
     view._font_cache = {}
+    view._fit_cache = {}
     view._menu_open = False
     view.root = None
     view._font = lambda size, weight="normal": ("Segoe UI", size, weight)
@@ -500,6 +501,30 @@ def test_application_workspace_caps_queued_stack_and_reports_overflow():
     target_ids = [ident for kind, ident, _bbox, _callback in view._click_targets if kind == "docket"]
     assert 0 < len(target_ids) < 10
     assert any(text.startswith("+") and "queued" in text for text in _text_values(canvas))
+
+
+def test_fit_px_memoizes_so_repeated_draws_skip_recompute():
+    """Verify _fit_px caches per (text, size, weight, max_px) across redraws.
+
+    The hover/redraw path re-fits every label string each frame; _fit_px is a pure
+    function of its args (font metrics are fixed at runtime), so repeated calls
+    must reuse the cached result instead of re-running the fit each time.
+    """
+
+    item, districts = _vendor_case()
+    model = build_desk_model(rules.CityState(), districts, [item], item.item_id)
+    view, _callbacks = _view_for_drawing(model)
+
+    calls = []
+    real_compute = view._fit_px_compute
+    view._fit_px_compute = lambda *args: (calls.append(args), real_compute(*args))[1]
+
+    first = view._fit_px("A district label that may need clipping", 9, "bold", 70)
+    second = view._fit_px("A district label that may need clipping", 9, "bold", 70)
+
+    assert first == second
+    assert len(calls) == 1  # second call served from the memo
+    assert ("A district label that may need clipping", 9, "bold", 70) in view._fit_cache
 
 
 def test_utility_menu_button_is_compact_hamburger_without_text_label():

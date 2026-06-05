@@ -213,6 +213,19 @@ def test_rebuild_force_readd_removes_every_layer(monkeypatch):
     assert ("remove", None) in calls
 
 
+def test_final_audit_report_includes_grade_flavor():
+    """Verify the inline final audit carries PASS/CONDITIONAL/FAIL ending flavor (#7)."""
+
+    for grade in ("PASS", "CONDITIONAL", "FAIL"):
+        report = dashboard._final_audit_report(grade, "Audit score summary.")
+        assert report.startswith(f"Final audit: {grade}.")
+        assert dashboard.FINAL_AUDIT_FLAVOR[grade] in report
+        assert "Audit score summary." in report
+    # An unknown/blank grade still closes the file gracefully.
+    fallback = dashboard._final_audit_report("", "Audit score summary.")
+    assert "Audit closes the current file." in fallback
+
+
 def test_filed_report_text_includes_local_decision_changes():
     """Verify filed reports summarize local metric and feature changes."""
 

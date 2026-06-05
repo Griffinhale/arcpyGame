@@ -129,6 +129,7 @@ class PermitDeskView:
         self._hover_key = ""
         self._last_size = (0, 0)
         self._font_cache: dict = {}
+        self._fit_cache: dict = {}
         self._menu_open = False
         self._menu_anchor = None
 
@@ -143,6 +144,9 @@ class PermitDeskView:
         """Store and draw the latest view model."""
 
         self.model = model
+        # New frame content: bound the text-fit memo to this model's strings.
+        # (Left warm across hover redraws and deadline ticks, which keep the model.)
+        self._fit_cache.clear()
         width = max(self.canvas.winfo_width(), MIN_DESK_W)
         height = max(self.canvas.winfo_height(), MIN_DESK_H)
         self._draw(width, height)
@@ -770,11 +774,24 @@ class PermitDeskView:
     def _fit_px(self, text, size, weight, max_px):
         """Truncate text with an ellipsis so it renders within ``max_px`` pixels.
 
-        Uses real Tk font metrics when available, falling back to a conservative
-        character estimate (so headless rendering and tests still work).
+        Memoized on ``(text, size, weight, max_px)``: the fit is a pure function of
+        its args (runtime font metrics are fixed), so the hover/redraw path reuses
+        results instead of re-running the binary search every frame. The cache is
+        cleared on model swap (`render`) to bound memory to one frame's strings.
         """
 
         text = " ".join(str(text or "").split())
+        key = (text, size, weight, max_px)
+        cached = self._fit_cache.get(key)
+        if cached is not None:
+            return cached
+        result = self._fit_px_compute(text, size, weight, max_px)
+        self._fit_cache[key] = result
+        return result
+
+    def _fit_px_compute(self, text, size, weight, max_px):
+        """Run the (uncached) text-fit for already-normalized ``text``."""
+
         measure = self._px_measurer(size, weight)
         if measure is None:
             return _clip(text, max(4, int(max_px // (size * 0.62))))
