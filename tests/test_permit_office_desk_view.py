@@ -334,6 +334,29 @@ def test_permit_deny_stays_enabled_when_ap_empty():
     assert lanes["deny"].cost.startswith("0 AP")
 
 
+def test_maintenance_case_uses_repair_action_family():
+    """Verify maintenance follow-ups read as Fund Repair / Patch / Defer (#2)."""
+
+    item = rules.DocketItem(
+        "maint",
+        rules.MAINTENANCE_TEMPLATE_ID,
+        "Feature Maintenance Order",
+        "POINT",
+        1,
+        target_cell_ids=["D0000"],
+    )
+    profile = rules.DistrictProfile("D0000", "Market Row", 1000, 50, 20, 35, 25, 50, "mercantile")
+    districts = {profile.cell_id: rules.normalize_profile(profile)}
+
+    model = build_desk_model(rules.CityState(ap=3, money=60), districts, [item], item.item_id)
+    lanes = {lane.action_id: lane for lane in model.action_lanes}
+
+    assert lanes["approve"].label == "Fund Repair"
+    assert lanes["approve_mitigated"].label == "Patch"
+    assert lanes["deny"].label == "Defer"
+    assert "maintenance" in lanes["deny"].city_effect
+
+
 def test_build_desk_model_marks_queue_cleared_when_no_active_items():
     """Verify empty active dockets expose the queue-cleared state."""
 

@@ -434,8 +434,12 @@ def _resource_available(state, ap_cost, money_cost) -> tuple[bool, str]:
 
 
 def _action_lane_labels(template) -> tuple[str, str, str]:
-    """Return action labels matched to incident/enforcement/permit language."""
+    """Return action labels matched to maintenance/incident/enforcement/permit language."""
 
+    # Maintenance reads as a repair order, not enforcement, even though it shares
+    # the is_enforcement plumbing — so check pressure_category first.
+    if getattr(template, "pressure_category", "") == "maintenance":
+        return "Fund Repair", "Patch", "Defer"
     if template.is_incident:
         return "Respond", "Settlement", "Defer"
     if template.is_enforcement:
@@ -446,6 +450,8 @@ def _action_lane_labels(template) -> tuple[str, str, str]:
 def _deny_forecast(template) -> str:
     """Return a compact deny/defer consequence forecast."""
 
+    if getattr(template, "pressure_category", "") == "maintenance":
+        return "maintenance deferred; condition keeps degrading"
     if template.is_incident:
         return "incident remains open"
     if template.is_enforcement:
