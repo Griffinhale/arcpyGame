@@ -190,11 +190,13 @@ def read_state(paths):
             values[current] = values[legacy]
     state = rules.CityState()
     for key in ("turn", "max_turns", "ap", "max_ap", "money", "audit_stage", "activity", "friction", "trust", "exposure", "last_revenue", "last_upkeep", "last_net", "maintenance_backlog", "week_day"):
-        if key in values and values[key][1] is not None:
-            setattr(state, key, int(values[key][1]))
+        entry = values.get(key)
+        if entry is not None and entry[1] is not None:
+            setattr(state, key, int(entry[1]))
     for key in ("status", "last_report", "scenario_id"):
-        if key in values:
-            setattr(state, key, values[key][0] or ("default" if key == "scenario_id" else ""))
+        entry = values.get(key)
+        if entry is not None:
+            setattr(state, key, entry[0] or ("default" if key == "scenario_id" else ""))
     default_max_turns = rules.CityState().max_turns
     if state.status == "playing" and state.max_turns < default_max_turns:
         state.max_turns = default_max_turns

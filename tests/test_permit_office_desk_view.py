@@ -638,6 +638,30 @@ def test_city_health_rail_draws_only_slim_pulse_signals():
     assert "MAINTENANCE" not in texts
 
 
+def test_build_desk_model_does_not_mutate_districts_argument():
+    """Verify scoring the Audit row leaves the caller's district profiles intact.
+
+    `_ledger_rows` scores the live audit for the Audit row. It must not mutate the
+    districts passed in — we rely on `normalize_profile` being idempotent instead
+    of a defensive `deepcopy`, so a normalized profile must round-trip unchanged.
+    """
+
+    import copy
+
+    item, districts = _vendor_case()
+    before = copy.deepcopy(districts)
+
+    model = build_desk_model(
+        rules.CityState(activity=70, trust=55, friction=15, exposure=20),
+        districts,
+        [item],
+        item.item_id,
+    )
+
+    assert districts == before
+    assert "Audit" in {row.label for row in model.ledger_rows}
+
+
 def test_city_health_index_folds_core_metrics():
     """Verify the City Health headline summarizes the four core metrics."""
 

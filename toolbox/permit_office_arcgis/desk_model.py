@@ -13,7 +13,7 @@ from typing import Callable
 from .rules_loader import rules
 
 
-ACTIVE_STATUSES = ("open", "inspected", "active", "carried")
+ACTIVE_STATUSES = frozenset(("open", "inspected", "active", "carried"))
 HEADLINE_METRICS = (("Week", "WEEK"), ("AP", "AP"), ("Money", "$"), ("Heat", "HEAT"), ("Audit", "AUDIT"), ("Pressure", "PRESS"))
 
 
@@ -833,6 +833,13 @@ def _ledger_rows(state, districts, active_features=None, docket=None) -> tuple[L
     health = _city_health_index(state)
     health_word, health_tone = _city_health_descriptor(health)
     heat = rules.heat_summary(state)
+    # NOTE: the deepcopy is load-bearing. `scorecard` -> `generate_audit_result`
+    # calls `normalize_profile` in place, which re-derives service_gap /
+    # displacement / etc. On normalized inputs that is idempotent, but the ledger
+    # summaries below read the same `districts`, so mutating them here would
+    # change Services/Housing/Pressure for any caller passing semi-normalized
+    # state. Dropping this copy safely needs a controller-side grade cache (see
+    # render-optimization spike), not a bare removal.
     audit_grade, _audit_report = rules.scorecard(state, deepcopy(districts), _feature_snapshots(active_features), deepcopy(docket or ()))
     population = rules.population_city_summary(districts)
     incidents = rules.incident_summary(districts)
