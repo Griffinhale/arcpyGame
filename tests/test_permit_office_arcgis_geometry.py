@@ -193,6 +193,64 @@ def _rows():
     return {"districts": [], "points": [], "lines": [], "zones": []}
 
 
+class _SelectionArcpy:
+    """Tailored ArcPy stub for selected_cell_ids fast-path tests."""
+
+    def __init__(self, fidset, cursor_rows, legacy_field=None, fail_cell_id=False):
+        """Configure selection state, cursor rows, and an optional legacy field name."""
+
+        self.da = self
+        self._fidset = fidset
+        self._cursor_rows = cursor_rows
+        self._legacy_field = legacy_field
+        self._fail_cell_id = fail_cell_id
+        self.listfields_calls = 0
+
+    def Describe(self, _layer):
+        """Report the configured FIDSet so has_selection is True."""
+
+        return {"FIDSet": self._fidset}
+
+    def SearchCursor(self, _layer, fields):
+        """Return rows for the resolved field, or fail the direct cell_id read."""
+
+        if fields == ["cell_id"] and self._fail_cell_id:
+            raise RuntimeError("Field cell_id does not exist")
+        return iter([[value] for value in self._cursor_rows])
+
+    def ListFields(self, _layer):
+        """Count field scans and expose the legacy field name on fallback."""
+
+        self.listfields_calls += 1
+        return [FakeField(self._legacy_field)] if self._legacy_field else []
+
+
+def test_selected_cell_ids_reads_cell_id_directly_without_field_scan(monkeypatch):
+    """Verify the common path reads the known cell_id column and skips ListFields."""
+
+    fake = _SelectionArcpy(fidset="0;1", cursor_rows=["D0000", "D0001"])
+    monkeypatch.setattr(geometry, "arcpy", fake)
+
+    result = geometry.selected_cell_ids("districts_layer")
+
+    assert result == ["D0000", "D0001"]
+    assert fake.listfields_calls == 0  # fast path avoided the metadata round-trip
+
+
+def test_selected_cell_ids_falls_back_to_field_scan_on_cursor_error(monkeypatch):
+    """Verify a legacy/renamed column still resolves via the ListFields fallback."""
+
+    fake = _SelectionArcpy(
+        fidset="0", cursor_rows=["D0000"], legacy_field="CELL_ID", fail_cell_id=True
+    )
+    monkeypatch.setattr(geometry, "arcpy", fake)
+
+    result = geometry.selected_cell_ids("districts_layer")
+
+    assert result == ["D0000"]
+    assert fake.listfields_calls == 1  # fell back exactly once
+
+
 def test_district_identity_persistence_field_aliases_are_configured():
     """Verify district identity persistence fields use Task 7 aliases."""
 

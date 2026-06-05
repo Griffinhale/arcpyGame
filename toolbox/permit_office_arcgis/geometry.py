@@ -61,11 +61,18 @@ def selected_cell_ids(layer):
             has_selection = False
     if not has_selection:
         return []
-    fields = {field.name.lower(): field.name for field in arcpy.ListFields(layer)}
-    cell_field = fields.get("cell_id")
-    if not cell_field:
-        return []
-    return [row[0] for row in arcpy.da.SearchCursor(layer, [cell_field])]
+    # Fast path: read the canonical cell_id column directly. The schema always
+    # names it "cell_id", so the common case skips the ListFields metadata scan;
+    # only a legacy/renamed layer (cursor raises on the missing field) pays for
+    # the case-insensitive field lookup fallback.
+    try:
+        return [row[0] for row in arcpy.da.SearchCursor(layer, ["cell_id"])]
+    except Exception:
+        fields = {field.name.lower(): field.name for field in arcpy.ListFields(layer)}
+        cell_field = fields.get("cell_id")
+        if not cell_field:
+            return []
+        return [row[0] for row in arcpy.da.SearchCursor(layer, [cell_field])]
 
 
 def ensure_case_proposal(paths, item, seed, messages, target_ids=None) -> list[str]:
