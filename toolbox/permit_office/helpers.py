@@ -720,12 +720,20 @@ def _top_dissatisfaction(profile: DistrictProfile) -> tuple[str, int]:
 
 
 def _top_dissatisfaction_for_profiles(profiles: list[DistrictProfile]) -> tuple[str, int]:
-    """Return the strongest aggregate dissatisfaction across profiles."""
-    totals = {group: 0 for group in CITIZEN_GROUPS}
+    """Return the worst single dissatisfaction band across profiles.
+
+    Bands aggregate as a max, not a sum, so the result stays on the per-profile
+    0-4 band scale: it remains a valid GRIEVANCE_BAND_LABELS index, and the
+    threshold checks read as "at least one target district is this aggrieved"
+    instead of inflating with the number of targets (summing two band-3 districts
+    used to yield 6 and crash the resume path).
+    """
+    maxima = {group: 0 for group in CITIZEN_GROUPS}
     for profile in profiles:
         for group, band in _normalize_bands(profile.dissatisfaction, 4).items():
-            totals[group] += band
-    return min(totals.items(), key=lambda pair: (-pair[1], pair[0]))
+            if band > maxima[group]:
+                maxima[group] = band
+    return min(maxima.items(), key=lambda pair: (-pair[1], pair[0]))
 
 
 def _present_template_groups(profiles: list[DistrictProfile], groups: Iterable[str]) -> tuple[str, ...]:

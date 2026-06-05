@@ -1267,6 +1267,51 @@ def test_inspect_item_adds_target_population_context_when_available():
     assert "Highest local grievance: renters are aggrieved" in item.preview_text
 
 
+def test_target_population_hint_handles_multi_district_grievance():
+    """Verify grievance across several target districts stays a valid band.
+
+    Regression: dissatisfaction was summed across targets, producing a band above
+    the GRIEVANCE_BAND_LABELS range and crashing the saved-game resume path.
+    """
+    profiles = []
+    for cell_id, name in (("D0000", "Harbor Flats"), ("D0001", "Old Row")):
+        profile = rules.DistrictProfile(
+            cell_id, name, 1000, 40, 25, 35, 20, 40, "residential",
+            population_mix={"renters": 3}, dissatisfaction={"renters": 3},
+        )
+        rules.normalize_profile(profile)
+        profiles.append(profile)
+    item = rules.DocketItem(
+        "CASE", "street_vendor_compact",
+        rules.TEMPLATES["street_vendor_compact"].title, "POINT", 1,
+    )
+
+    hint = rules.target_population_hint(item, profiles)
+
+    # Worst single grievance is band 3 (aggrieved), not the inflated sum of 6.
+    assert "renters are aggrieved" in hint
+
+
+def test_top_dissatisfaction_for_profiles_band_stays_in_label_range():
+    """Verify aggregated grievance band stays on the 0-4 label scale (max, not sum)."""
+    from toolbox.permit_office import helpers
+
+    profiles = []
+    for cell_id in ("D0000", "D0001", "D0100"):
+        profile = rules.DistrictProfile(
+            cell_id, cell_id, 1000, 40, 25, 35, 20, 40, "residential",
+            dissatisfaction={"renters": 4},
+        )
+        rules.normalize_profile(profile)
+        profiles.append(profile)
+
+    group, band = helpers._top_dissatisfaction_for_profiles(profiles)
+
+    assert group == "renters"
+    assert band == 4  # max across profiles, not 12
+    assert 0 <= band < len(rules.GRIEVANCE_BAND_LABELS)
+
+
 def test_approve_applies_costs_district_deltas_and_city_delta():
     """Verify a normal approval spends resources and updates city/district state."""
     profiles = {p.cell_id: p for p in rules.generate_district_profiles(rows=2, cols=2, seed=2026)}
