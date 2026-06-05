@@ -213,40 +213,6 @@ def test_rebuild_force_readd_removes_every_layer(monkeypatch):
     assert ("remove", None) in calls
 
 
-def test_rebuild_skips_district_readd_when_no_rendered_field_changed(monkeypatch):
-    """Verify a clean rendered state falls back to refresh-only (no district readd).
-
-    When write_district_updates reports no district_type/prosperity_band/
-    identity_state change, the expensive remove+re-add is skipped: districts just
-    refresh like the feature layers.
-    """
-
-    calls = []
-    monkeypatch.setattr(dashboard, "clear_output_selections", lambda paths: None)
-    monkeypatch.setattr(dashboard, "remove_outputs_from_map", lambda messages, layer_names=None: calls.append(("remove", layer_names)))
-    monkeypatch.setattr(dashboard, "add_outputs_to_map", lambda paths, messages, layer_names=None: calls.append(("add", layer_names)))
-    monkeypatch.setattr(dashboard, "refresh_all", lambda paths, messages, layer_names=None: calls.append(("refresh", layer_names)))
-
-    dashboard.rebuild_output_layers({}, object(), districts_render_dirty=False)
-
-    assert [kind for kind, _scope in calls] == ["add", "refresh"]
-    assert not any(kind == "remove" for kind, _scope in calls)
-
-
-def test_rebuild_readds_districts_when_rendered_field_dirty(monkeypatch):
-    """Verify an explicit dirty signal still removes+re-adds the district family."""
-
-    calls = []
-    monkeypatch.setattr(dashboard, "clear_output_selections", lambda paths: None)
-    monkeypatch.setattr(dashboard, "remove_outputs_from_map", lambda messages, layer_names=None: calls.append(("remove", layer_names)))
-    monkeypatch.setattr(dashboard, "add_outputs_to_map", lambda paths, messages, layer_names=None: calls.append(("add", layer_names)))
-    monkeypatch.setattr(dashboard, "refresh_all", lambda paths, messages, layer_names=None: calls.append(("refresh", layer_names)))
-
-    dashboard.rebuild_output_layers({}, object(), districts_render_dirty=True)
-
-    assert ("remove", {dashboard.DISTRICTS}) in calls
-
-
 def test_final_audit_report_includes_grade_flavor():
     """Verify the inline final audit carries PASS/CONDITIONAL/FAIL ending flavor (#7)."""
 

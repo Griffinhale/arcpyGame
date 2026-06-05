@@ -386,17 +386,9 @@ def read_districts(paths):
 
 @perf_traced("write_district_updates")
 def write_district_updates(paths, districts, report, affected_ids=None):
-    """Write changed district profiles and per-district reports back to ArcGIS.
-
-    Returns True when any *rendered* district field (district_type,
-    prosperity_band, identity_state) changed for an updated row, so the caller
-    can skip the expensive district remove+re-add when nothing the map renders on
-    moved (see rebuild_output_layers). Conservative by construction: only an
-    observed match across all three rendered fields yields False.
-    """
+    """Write changed district profiles and per-district reports back to ArcGIS."""
 
     affected = set(affected_ids or districts)
-    rendered_changed = False
     # Every district row is refreshed from normalized state, while last_report is
     # only changed for affected districts so unrelated map notes survive.
     fields = [
@@ -441,14 +433,6 @@ def write_district_updates(paths, districts, report, affected_ids=None):
                 continue
             profile = districts[cid]
             rules.normalize_profile(profile)
-            # Compare the rendered fields against the stored values before the
-            # overwrite below; any move means the district family must re-add.
-            if (
-                row[7] != profile.district_type
-                or row[9] != profile.identity_state
-                or row[32] != profile.prosperity_band
-            ):
-                rendered_changed = True
             row[1] = profile.population
             row[2] = profile.activity
             row[3] = profile.friction
@@ -483,7 +467,6 @@ def write_district_updates(paths, districts, report, affected_ids=None):
                 row[31] = report[:512]
             row[32] = profile.prosperity_band
             cursor.updateRow(row)
-    return rendered_changed
 
 
 @perf_traced("write_daily_pressure_overlays")
