@@ -869,13 +869,13 @@ class DashboardController:
 
         filed_report = _filed_report_text(result, districts)
         with perf_block("writes"):
-            write_district_updates(self.paths, districts, result.report, result.affected_cell_ids)
+            render_dirty = write_district_updates(self.paths, districts, result.report, result.affected_cell_ids)
             write_state(self.paths, state)
             write_projects(self.paths, projects)
             write_docket_item(self.paths, item)
             action_log(self.paths, state, result)
             command_finish(self.paths, command_id, result.command_status, filed_report)
-        rebuild_output_layers(self.paths, self.messages, layer_names=layer_names)
+        rebuild_output_layers(self.paths, self.messages, layer_names=layer_names, districts_render_dirty=render_dirty)
         self.district_layer = DISTRICTS
         self.status_var.set(filed_report)
         self._record_receipt(item.title, filed_report, result.affected_cell_ids, state)
@@ -936,14 +936,14 @@ class DashboardController:
                 with perf_block("writes"):
                     write_state(self.paths, state)
                     write_projects(self.paths, projects)
-                    write_district_updates(self.paths, districts, report)
+                    render_dirty = write_district_updates(self.paths, districts, report)
                     write_active_features(self.paths, active_features)
                     for item in items:
                         write_docket_item(self.paths, item)
                     if state.status != "complete":
                         generate_docket_rows(self.paths, self.seed, self.messages)
                     command_finish(self.paths, command_id, "applied", report)
-                rebuild_output_layers(self.paths, self.messages)
+                rebuild_output_layers(self.paths, self.messages, districts_render_dirty=render_dirty)
                 self.district_layer = DISTRICTS
                 prefix = "Auto-deadline: " if auto else ""
                 if state.status == "complete":
@@ -1009,7 +1009,7 @@ def _decision_layer_names(item):
     return {DISTRICTS, feature_layer}
 
 
-def rebuild_output_layers(paths, messages, layer_names=None, force_readd=False):
+def rebuild_output_layers(paths, messages, layer_names=None, force_readd=False, districts_render_dirty=True):
     """Refresh (or, when forced, recreate) map layers after GDB edits.
 
     layer_names: optional iterable restricting the work to those names. None
@@ -1018,13 +1018,14 @@ def rebuild_output_layers(paths, messages, layer_names=None, force_readd=False):
     force_readd: remove and re-add *every* in-scope layer from scratch. Needed
     when the layer set or symbology changes (e.g. a new game).
 
-    The default path is district-readd: the district base + prosperity/identity
-    overlays render on attribute values (district_type, prosperity_band,
-    identity_state) that change every decision and turn. ``arcpy.RefreshLayer``
-    only redraws the cached renderer and does NOT reload GDB attribute writes, so
-    those layers must be removed + re-added to show new state. The feature layers
-    (points/lines/zones) stay refresh-only, which keeps most of the per-turn
-    ``addDataFromPath`` savings.
+    districts_render_dirty: whether a *rendered* district field (district_type,
+    prosperity_band, identity_state) actually changed in the write that preceded
+    this rebuild. ``arcpy.RefreshLayer`` cannot reload changed GDB attributes, so
+    those layers must be removed + re-added to show new state -- but when nothing
+    they render on changed, that readd is wasted and districts can stay
+    refresh-only like the feature layers. Defaults to True (conservative: any
+    caller that does not measure the change, or any doubt, re-adds). The feature
+    layers (points/lines/zones) are always refresh-only.
     """
 
     with perf_block("rebuild"):
@@ -1032,7 +1033,7 @@ def rebuild_output_layers(paths, messages, layer_names=None, force_readd=False):
         district_in_scope = layer_names is None or DISTRICTS in layer_names
         if force_readd:
             remove_scope, do_remove = layer_names, True
-        elif district_in_scope:
+        elif district_in_scope and districts_render_dirty:
             # RefreshLayer cannot reload the districts' changed attributes, so
             # re-add the district family (overlays cascade inside the helpers).
             remove_scope, do_remove = {DISTRICTS}, True
