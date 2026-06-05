@@ -298,6 +298,57 @@ def test_buyout_target_can_refuse_bid_deterministically():
     assert districts["A"].last_buyout_report == result.report
 
 
+def test_buyout_multiple_willing_bidders_compete_and_strongest_leads():
+    """Verify several valid neighbors bid and the strongest leads the contest."""
+    state = rules.CityState()
+    districts = {
+        "A": _district_for_buyout("A", "residential", 35, ["B", "C"]),
+        "B": _district_for_buyout("B", "mercantile", 78, ["A"]),
+        "C": _district_for_buyout("C", "industrial", 90, ["A"]),
+    }
+    ledger = rules.rebuild_type_ledger(districts)
+    for dtype in ("mercantile", "industrial"):
+        ledger[dtype]["capital"] = 100
+        ledger[dtype]["appetite"] = 20
+
+    result = rules.resolve_buyout_round(state, districts, ledger, seed=2026)
+
+    assert result.started == ["A"]
+    # C (industrial, activity 90) outbids B (mercantile, activity 78).
+    assert districts["A"].contesting_cell_id == "C"
+    assert districts["A"].contesting_type == "industrial"
+    # The report reads as a competitive field, not a lone bid.
+    report = districts["A"].last_buyout_report
+    assert "industrial" in report
+    assert any(word in report.lower() for word in ("rival", "outbid", "bids", "field"))
+
+
+def test_buyout_marginal_bidder_willingness_is_probabilistic():
+    """Verify a barely-eligible, low-resource neighbor does not always bid.
+
+    Target activity is pinned at 30 so the refusal formula can never fire
+    (refusal chance is 0 at/below 30): the only source of a no-start round is the
+    bidder declining to bid, isolating the willingness mechanic.
+    """
+    started_outcomes = set()
+    for seed in range(20):
+        districts = {
+            "A": _district_for_buyout("A", "residential", 30, ["B"]),
+            "B": _district_for_buyout("B", "mercantile", 38, ["A"]),
+        }
+        ledger = rules.rebuild_type_ledger(districts)
+        ledger["mercantile"]["capital"] = 1
+        ledger["mercantile"]["appetite"] = 1
+
+        result = rules.resolve_buyout_round(rules.CityState(), districts, ledger, seed=seed)
+
+        assert result.refused == []  # refusal disabled by low target activity
+        started_outcomes.add(bool(result.started))
+
+    # Across seeds the marginal neighbor sometimes bids and sometimes declines.
+    assert started_outcomes == {True, False}
+
+
 def test_contested_transition_converts_when_pressure_remains_high():
     state = rules.CityState(turn=2)
     target = _district_for_buyout("A", "residential", 32, ["B"])

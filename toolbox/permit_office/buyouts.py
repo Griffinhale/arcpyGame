@@ -77,7 +77,17 @@ def resolve_buyout_round(
         bidders = _eligible_bidders(target, districts, ledger, rng)
         if not bidders:
             continue
-        bidder = bidders[0]
+        # Each resourced neighbor independently decides whether to file a bid this
+        # round, so a field of eligible bidders can shrink to one, several, or
+        # none. The strongest willing bidder (bidders stay score-sorted) leads.
+        willing = [
+            bidder
+            for bidder in bidders
+            if _bidder_is_willing(bidder, target, ledger, seed, state.turn)
+        ]
+        if not willing:
+            continue
+        bidder = willing[0]
         if _target_refuses_buyout(target, rng):
             refused.append(cell_id)
             target.last_buyout_report = (
@@ -87,7 +97,7 @@ def resolve_buyout_round(
             reports.append(target.last_buyout_report)
             adjust_type_ledger(ledger, bidder.district_type, appetite_delta=-1, fatigue_delta=1)
             continue
-        _start_contested_transition(state, target, bidder, ledger)
+        _start_contested_transition(state, target, bidder, ledger, bid_count=len(willing))
         started.append(cell_id)
         reports.append(target.last_buyout_report)
 
@@ -198,6 +208,42 @@ def _eligible_bidders(
     return sorted(bidders, key=lambda bidder: _bidder_score(bidder, ledger), reverse=True)
 
 
+def _bidder_is_willing(
+    bidder: DistrictProfile,
+    target: DistrictProfile,
+    ledger: Mapping[str, Mapping[str, int]],
+    seed: int,
+    turn: int,
+) -> bool:
+    """Return whether a resourced neighbor chooses to file a bid this round.
+
+    Willingness rises with the bidder's prosperity advantage over the target and
+    with its type's capital/appetite, and falls with fatigue/overextension, so a
+    flush, eager type bids reliably while a stretched or marginal one often
+    abstains. Uses a side RNG stream keyed by the pairing so the willingness draw
+    never disturbs the shared draw order that bidder shuffling and target refusal
+    depend on.
+    """
+
+    entry = ledger.get(bidder.district_type, {})
+    capital = int(entry.get("capital", 0) or 0)
+    appetite = int(entry.get("appetite", 0) or 0)
+    fatigue = int(entry.get("fatigue", 0) or 0)
+    overextension = int(entry.get("overextension", 0) or 0)
+    advantage = max(0, int(bidder.activity or 0) - int(target.activity or 0))
+    chance = (
+        0.25
+        + advantage * 0.01
+        + capital * 0.01
+        + appetite * 0.05
+        - fatigue * 0.05
+        - overextension * 0.08
+    )
+    chance = max(0.05, min(1.0, chance))
+    rng = random.Random(f"willing:{seed}:{turn}:{bidder.cell_id}:{target.cell_id}")
+    return rng.random() < chance
+
+
 def _target_refuses_buyout(target: DistrictProfile, rng: random.Random) -> bool:
     """Return whether target leverage blocks the current buyout bid."""
 
@@ -228,25 +274,37 @@ def _start_contested_transition(
     target: DistrictProfile,
     bidder: DistrictProfile,
     ledger: dict[str, dict[str, int]],
+    bid_count: int = 1,
 ) -> None:
-    """Mutate target and ledger for a newly filed contested transition."""
+    """Mutate target and ledger for a newly filed contested transition.
 
+    A contested field of more than one willing bidder costs the winner extra
+    capital and overextension: outbidding rivals is the upside-with-risk lever
+    that can stretch an aggressive type thin across the map.
+    """
+
+    rivals = max(0, int(bid_count) - 1)
+    competition_clause = ""
+    if rivals:
+        plural = "s" if rivals != 1 else ""
+        competition_clause = f" {bidder.name} outbid {rivals} rival bid{plural} to lead the contest."
     target.identity_state = "contested"
     target.contesting_cell_id = bidder.cell_id
     target.contesting_type = bidder.district_type
     target.transition_due_turn = state.turn + 1
     target.last_buyout_report = (
         f"{target.name} entered contested buyout from {bidder.name}; "
-        f"{bidder.district_type} bid cleared local leverage after weak activity and pressure; "
+        f"{bidder.district_type} bid cleared local leverage after weak activity and pressure;"
+        f"{competition_clause} "
         "office attention can still stabilize the district before conversion."
     )
     adjust_type_ledger(
         ledger,
         bidder.district_type,
-        capital_delta=-10,
+        capital_delta=-10 - 3 * rivals,
         appetite_delta=-3,
         fatigue_delta=2,
-        overextension_delta=1,
+        overextension_delta=1 + rivals,
     )
     adjust_type_ledger(ledger, target.district_type, fatigue_delta=1)
     normalize_profile(target)
