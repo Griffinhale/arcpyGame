@@ -135,6 +135,27 @@ TYPE_CATEGORY_WEIGHTS = {
     "residential": {"residential": 4, "education": 2, "development": 2, "business": 1},
 }
 
+# Culture pull: a district's dominant citizen groups demand the kind of work that
+# serves them, so the population mix (not just the district type) shapes the
+# docket. Parallels TYPE_CATEGORY_WEIGHTS but keys on CITIZEN_GROUPS. Only groups
+# at or above CULTURE_DOMINANT_BAND contribute, so a balanced mix stays neutral.
+GROUP_CATEGORY_WEIGHTS = {
+    "families": {"education": 3, "residential": 2},
+    "elders": {"department": 3, "residential": 2},
+    "students": {"education": 3, "culture": 2},
+    "commuters": {"transit": 3, "utility": 2},
+    "workers": {"business": 2, "utility": 3},
+    "artists": {"culture": 3, "event": 3},
+    "vendors": {"business": 3, "development": 2},
+    "homeowners": {"residential": 3, "compliance": 2},
+    "renters": {"residential": 3, "development": 2},
+    "civil_servants": {"department": 3, "compliance": 2},
+    "developers": {"development": 3, "business": 2},
+    "conservationists": {"land": 3, "culture": 2},
+}
+
+CULTURE_DOMINANT_BAND = 2
+
 
 def _weighted_template_pool(
     turn: int,
@@ -170,10 +191,22 @@ def _weighted_template_pool(
             # The category weight map depends only on the district type; hoist it
             # out of the per-template loop.
             type_weights = TYPE_CATEGORY_WEIGHTS.get(profile.district_type, {})
+            # Fold this district's dominant cultures into a single category->weight
+            # map so the per-template loop stays a flat dict lookup. A district can
+            # have several strong groups; their category pulls accumulate.
+            culture_weights: dict[str, int] = {}
+            for group, band in (profile.population_mix or {}).items():
+                if int(band or 0) < CULTURE_DOMINANT_BAND:
+                    continue
+                for category, weight in GROUP_CATEGORY_WEIGHTS.get(group, {}).items():
+                    culture_weights[category] = culture_weights.get(category, 0) + weight
             for template_id, template in relevant_templates:
                 type_weight = type_weights.get(template.category, 0)
                 if type_weight:
                     weights[template_id] += type_weight + round(type_weight * pop_bonus)
+                culture_weight = culture_weights.get(template.category, 0)
+                if culture_weight:
+                    weights[template_id] += culture_weight + round(culture_weight * pop_bonus)
                 if profile.district_type in template.good_fit_types:
                     weights[template_id] += 2 + round(2 * pop_bonus)
                 if profile.district_type in template.bad_fit_types:
@@ -224,18 +257,26 @@ def _weighted_template_pool(
 
 
 def _district_mix_key(districts: dict[str, DistrictProfile] | None) -> str:
-    """Return a stable type-distribution signature (e.g. "civic:3,natural:2").
+    """Return a stable type+culture distribution signature.
 
-    Folded into the docket RNG seed so two boards with different type mixes
-    generate different dockets while a given board stays deterministic.
+    Encodes both the district-type histogram (e.g. "civic:3,natural:2") and the
+    dominant-culture histogram (e.g. "artists:4") so two boards with the same
+    types but different population mixes generate different dockets, while a given
+    board stays deterministic.
     """
 
     if not districts:
         return "none"
-    counts = {}
+    type_counts: dict[str, int] = {}
+    culture_counts: dict[str, int] = {}
     for profile in districts.values():
-        counts[profile.district_type] = counts.get(profile.district_type, 0) + 1
-    return ",".join(f"{key}:{counts[key]}" for key in sorted(counts))
+        type_counts[profile.district_type] = type_counts.get(profile.district_type, 0) + 1
+        for group, band in (profile.population_mix or {}).items():
+            if int(band or 0) >= CULTURE_DOMINANT_BAND:
+                culture_counts[group] = culture_counts.get(group, 0) + 1
+    type_key = ",".join(f"{key}:{type_counts[key]}" for key in sorted(type_counts))
+    culture_key = ",".join(f"{key}:{culture_counts[key]}" for key in sorted(culture_counts))
+    return f"{type_key}|{culture_key}"
 
 
 def _project_due_items(turn: int, projects: Iterable[ProjectRecord] | dict[str, ProjectRecord] | None) -> list[DocketItem]:

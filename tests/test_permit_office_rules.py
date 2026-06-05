@@ -2153,6 +2153,40 @@ def test_maintenance_decision_repairs_feature_and_reschedules_due_turn():
     assert result.feature_updates["F-market"]["condition"] == feature.condition
 
 
+def _single_culture_board(group):
+    """Build a 4-district board, identical types, dominated by one citizen group."""
+    profiles = {}
+    for idx, cell_id in enumerate(["D0000", "D0001", "D0100", "D0101"]):
+        profile = rules.DistrictProfile(
+            cell_id, f"Culture District {idx}", 1000, 50, 20, 35, 20, 50, "civic",
+            population_mix={group: 3}, dissatisfaction={},
+        )
+        rules.normalize_profile(profile)
+        profiles[cell_id] = profile
+    return profiles
+
+
+def _docket_category_counts(profiles):
+    """Count proposal categories surfaced across a deterministic 12-turn sweep."""
+    counts: dict[str, int] = {}
+    for turn in range(1, 13):
+        for item in rules.generate_docket(turn, count=4, districts=profiles):
+            template = rules.TEMPLATES.get(item.template_id)
+            if template:
+                counts[template.category] = counts.get(template.category, 0) + 1
+    return counts
+
+
+def test_dominant_culture_shifts_proposal_mix():
+    """Verify a district's dominant citizen culture pulls the docket toward it."""
+    artists = _docket_category_counts(_single_culture_board("artists"))
+    developers = _docket_category_counts(_single_culture_board("developers"))
+
+    # Artists pull culture/event work; developers pull development/business work.
+    assert artists.get("culture", 0) + artists.get("event", 0) > developers.get("culture", 0) + developers.get("event", 0)
+    assert developers.get("development", 0) + developers.get("business", 0) > artists.get("development", 0) + artists.get("business", 0)
+
+
 def test_audit_findings_include_money_features_services_and_violations():
     """Verify audits include money, feature, service, and inspection findings."""
     profile = rules.DistrictProfile("D0000", "Gap Row", 1400, 35, 25, 30, 75, 5, "residential", population_mix={"families": 3})
