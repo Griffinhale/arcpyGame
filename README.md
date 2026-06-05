@@ -68,10 +68,20 @@ filing, approving, delaying, and explaining official decisions.
 
 ### Requirements
 
-- ArcGIS Pro with ArcPy available.
+- ArcGIS Pro with ArcPy available (to run the game in Pro).
 - Python 3 for the pure rules tests.
-- `pytest` if you want to run the test suite outside ArcGIS Pro:
-  `python3 -m pip install -r requirements-dev.txt`
+- `pytest` to run the test suite outside ArcGIS Pro. Install it (and populate the
+  Python environment / `__pycache__` the project imports against) with **either**
+  pip or [uv](https://docs.astral.sh/uv/):
+
+  ```bash
+  # pip
+  python3 -m pip install -r requirements-dev.txt
+
+  # uv (creates an isolated .venv, then installs)
+  uv venv
+  uv pip install -r requirements-dev.txt
+  ```
 
 ### Run In ArcGIS Pro
 
@@ -92,7 +102,7 @@ board. The geodatabase is local generated state and should not be committed.
 ### Run Pure Python Tests
 
 ```bash
-python3 -m pytest -q
+python3 -m pytest -q     # or: uv run pytest -q
 ```
 
 The tests cover the ArcPy-free rules and lightweight ArcGIS adapter shims. They
