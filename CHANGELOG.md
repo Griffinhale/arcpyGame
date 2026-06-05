@@ -53,6 +53,11 @@ civic season inside ArcGIS Pro.
 - A manual **End Week** control is always available from the desk utility menu
   (previously it only appeared once the queue was empty, trapping players out of
   AP with unaffordable cases queued).
+- A blank/Unknown active-map coordinate system no longer breaks New Game: a map
+  SR without a real WKID (factoryCode 0) now falls back to Web Mercator (3857)
+  instead of seeding feature classes with an Unknown SR and crashing the first
+  linear `arcpy.analysis.Buffer` with a spatial-reference `RuntimeError`
+  (reproduced on a 3.3.2 project whose active map had no coordinate system).
 
 ### Performance
 - Controller-side **audit-grade cache:** the scorecard (and its district
@@ -67,9 +72,9 @@ civic season inside ArcGIS Pro.
   family must re-add unconditionally (ADR-4).
 
 ### Known gaps
-- Developed and tested on **ArcGIS Pro 3.6**; earlier versions are untested and
-  may lack some arcpy APIs the toolbox uses (`arcpy.mp`, `arcpy.da.Describe`, CIM
-  renderer definitions, spatial-reference handling). 3.6+ recommended.
+- Developed and tested on **ArcGIS Pro 3.6**; **3.3+** is the practical floor
+  (the only version-gated arcpy call, `arcpy.RefreshLayer`, arrived at 3.3 and is
+  guarded). Spatial-reference handling is not version-gated.
 - Live ArcGIS Pro smoke-test results on a target machine are not yet recorded
   (see `docs/arcgis-pro-smoke-checklist.md`; open issues #9, #11).
 - 12-week balance tuning toward a reliable PASS is ongoing.
