@@ -96,3 +96,61 @@ def test_resolve_workspace_none_falls_back_to_project_home(monkeypatch):
     path = schema.resolve_workspace(None, None)
 
     assert path == os.path.join("C:/proj", "data", schema.DEFAULT_GDB_NAME)
+
+
+def _sr(factory_code):
+    """Fake SpatialReference exposing only factoryCode."""
+    return SimpleNamespace(factoryCode=factory_code)
+
+
+def _sr_arcpy(active_map, sentinel, raise_err=False):
+    """ArcPy stub: an active map (or None) plus a Web Mercator fallback factory."""
+
+    def _project(_name):
+        if raise_err:
+            raise RuntimeError("no project")
+        return SimpleNamespace(activeMap=active_map)
+
+    return SimpleNamespace(
+        mp=SimpleNamespace(ArcGISProject=_project),
+        SpatialReference=lambda wkid: sentinel,
+        AddMessage=lambda text: None,
+        AddWarning=lambda text: None,
+    )
+
+
+def test_active_spatial_reference_uses_real_map_sr(monkeypatch):
+    """Verify a map with a real (WKID-bearing) SR is used as-is."""
+    real = _sr(3857)
+    monkeypatch.setattr(schema, "arcpy", _sr_arcpy(SimpleNamespace(spatialReference=real), _sr(0)))
+
+    assert schema.active_spatial_reference(None) is real
+
+
+def test_active_spatial_reference_falls_back_on_unknown_sr(monkeypatch):
+    """Verify an Unknown map SR (factoryCode 0) falls back to Web Mercator.
+
+    Regression: an Unknown SR is truthy, so it used to propagate into feature-class
+    creation and break the first linear Buffer with a RuntimeError on machines
+    whose active map had no coordinate system.
+    """
+    sentinel = _sr(3857)
+    monkeypatch.setattr(schema, "arcpy", _sr_arcpy(SimpleNamespace(spatialReference=_sr(0)), sentinel))
+
+    assert schema.active_spatial_reference(None) is sentinel
+
+
+def test_active_spatial_reference_falls_back_when_no_active_map(monkeypatch):
+    """Verify no active map falls back to Web Mercator."""
+    sentinel = _sr(3857)
+    monkeypatch.setattr(schema, "arcpy", _sr_arcpy(None, sentinel))
+
+    assert schema.active_spatial_reference(None) is sentinel
+
+
+def test_active_spatial_reference_falls_back_on_error(monkeypatch):
+    """Verify any probe failure falls back to Web Mercator."""
+    sentinel = _sr(3857)
+    monkeypatch.setattr(schema, "arcpy", _sr_arcpy(None, sentinel, raise_err=True))
+
+    assert schema.active_spatial_reference(None) is sentinel

@@ -277,15 +277,26 @@ def migrate_legacy_city_health_fields(table, messages):
 
 
 def active_spatial_reference(messages):
-    """Use the active ArcGIS map spatial reference, falling back to Web Mercator."""
+    """Use the active ArcGIS map spatial reference, falling back to Web Mercator.
+
+    Only a map SR with a real WKID (factoryCode != 0) is used; a blank/Unknown
+    map coordinate system (factoryCode 0), a missing property, or any probe
+    failure falls back to Web Mercator (3857). An Unknown SR is otherwise truthy
+    and would propagate into feature-class creation, then crash the first linear
+    `arcpy.analysis.Buffer` with a spatial-reference RuntimeError on machines
+    whose active map has no coordinate system. Logs which path was taken.
+    """
 
     try:
         aprx = arcpy.mp.ArcGISProject("CURRENT")
         active_map = aprx.activeMap
-        if active_map and active_map.spatialReference:
-            return active_map.spatialReference
+        sr = getattr(active_map, "spatialReference", None) if active_map else None
+        if sr is not None and getattr(sr, "factoryCode", 0):
+            _log(messages, "MAP", f"using active map spatial reference (wkid {sr.factoryCode})")
+            return sr
+        _log(messages, "MAP", "active map has no usable spatial reference; using Web Mercator (3857)")
     except Exception as exc:
-        _warn(messages, "MAP", f"active map SR unavailable: {exc}")
+        _warn(messages, "MAP", f"active map SR unavailable ({exc}); using Web Mercator (3857)")
     return arcpy.SpatialReference(3857)
 
 
