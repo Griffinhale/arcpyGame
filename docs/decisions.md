@@ -30,14 +30,22 @@ simple and correct, and the timer can't interleave with a command.
 responsiveness win but real concurrency risk; revisit as a spike only if live
 runs show UI-freeze pain.
 
-### ADR-4 — Refresh-only layer rebuild by default
-**Decision:** `rebuild_output_layers()` refreshes existing layers and only
-re-adds missing ones; full remove→add is `force_readd=True`, used for New Game /
-symbology changes. **Why:** `addDataFromPath` is the dominant per-turn cost and
-`add_outputs_to_map` is already idempotent, so the per-turn `remove` was pure
-churn. **Rejected:** unconditional remove→add every turn (slow, flicker-prone).
-*(Folds in the 2026-05-27 refresh spike: ArcPy refresh-only timed close to main
-and is kept as the reliability-safe path.)*
+### ADR-4 — District-readd layer rebuild by default
+**Decision:** `rebuild_output_layers()` removes + re-adds the **district family**
+(`PermitDistricts` base + prosperity/identity overlays) every rebuild, and keeps
+the **feature layers** (points/lines/zones) refresh-only; `force_readd=True` does
+a full remove→add of every in-scope layer (New Game / schema / symbology change).
+**Why:** `arcpy.RefreshLayer` only redraws the cached renderer — it does **not**
+reload GDB attribute writes. The district layers render on attribute values
+(`district_type`, `prosperity_band`, `identity_state`) that change every decision
+and turn, so refresh-only left them frozen on the new-game snapshot (districts
+"not rendering"). Removing + re-adding only the district family restores correct
+rendering while still skipping the bulk of the per-turn `addDataFromPath` churn
+on the feature layers. **Rejected:** unconditional remove→add of *all* layers
+every turn (slow, flicker-prone); pure refresh-only (correctness bug above).
+*(Supersedes the 2026-05-27 refresh spike, which mis-measured refresh-only as
+reliability-safe; the RefreshLayer-does-not-reload-data behavior was confirmed
+later.)*
 
 ### ADR-5 — Cursor efficiency: hint + guard, memoize, read-once
 **Decision:** single-row cursors carry a `where_clause` **and** keep the in-Python

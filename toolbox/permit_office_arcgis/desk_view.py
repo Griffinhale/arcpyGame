@@ -675,6 +675,7 @@ class PermitDeskView:
         """Draw dropdown utility actions over the desk surface."""
 
         entries = (
+            ("End Week", Palette.INK, self.callbacks.advance_turn),
             ("New Game", Palette.BLUE, self.callbacks.new_game),
             ("Scorecard", Palette.GOLD, self.callbacks.scorecard),
             ("Help", Palette.TEAL, self.callbacks.show_help),

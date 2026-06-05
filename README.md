@@ -122,10 +122,14 @@ projects, audits, map symbology, district identity/buyout pressure, start/help
 flow, selected-case exhibit controls, an inline final audit receipt, and a
 Tkinter dashboard.
 
-The next public-readiness work is focused on evidence and balance: recording a
-live ArcGIS Pro smoke test, validating cold-start resume behavior on the target
-machine, tuning a fair 12-week route, and deepening map symbology only where the
-live map proves it is still hard to read.
+Live ArcGIS Pro verification (2026-06-04) confirmed district layers render and
+repaint their state across an End Week, and a manual End Week control is now
+always available from the desk utility menu.
+
+The next public-readiness work is focused on evidence and balance: a fuller live
+ArcGIS Pro smoke test (feature-layer repaint, cold-start resume, legacy `.gdb`
+migration), tuning a fair 12-week route, and deepening map symbology only where
+the live map proves it is still hard to read.
 
 See `docs/systems-overview.md` for the implementation map, current status, and
 the live ArcGIS validation walkthrough.

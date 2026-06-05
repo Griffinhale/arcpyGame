@@ -1015,21 +1015,35 @@ def rebuild_output_layers(paths, messages, layer_names=None, force_readd=False):
     layer_names: optional iterable restricting the work to those names. None
     covers all four (plus district overlays). Unknown values pass through.
 
-    force_readd: remove and re-add layers from scratch. Needed only when the
-    layer set or symbology changes (e.g. a new game). The default path is
-    refresh-only: ``add_outputs_to_map`` already no-ops for layers that exist,
-    so for data-only edits we skip the expensive remove + ``addDataFromPath``
-    churn (the dominant per-turn cost) and let ``refresh_all`` pick up changes.
+    force_readd: remove and re-add *every* in-scope layer from scratch. Needed
+    when the layer set or symbology changes (e.g. a new game).
+
+    The default path is district-readd: the district base + prosperity/identity
+    overlays render on attribute values (district_type, prosperity_band,
+    identity_state) that change every decision and turn. ``arcpy.RefreshLayer``
+    only redraws the cached renderer and does NOT reload GDB attribute writes, so
+    those layers must be removed + re-added to show new state. The feature layers
+    (points/lines/zones) stay refresh-only, which keeps most of the per-turn
+    ``addDataFromPath`` savings.
     """
 
     with perf_block("rebuild"):
         clear_output_selections(paths)
-        mode = "force-readd" if force_readd else "refresh-only"
+        district_in_scope = layer_names is None or DISTRICTS in layer_names
+        if force_readd:
+            remove_scope, do_remove = layer_names, True
+        elif district_in_scope:
+            # RefreshLayer cannot reload the districts' changed attributes, so
+            # re-add the district family (overlays cascade inside the helpers).
+            remove_scope, do_remove = {DISTRICTS}, True
+        else:
+            remove_scope, do_remove = None, False
+        mode = "force-readd" if force_readd else ("district-readd" if do_remove else "refresh-only")
         scope = "all" if layer_names is None else f"targeted={sorted(layer_names)}"
         _log(messages, "REBUILD", f"{scope} ({mode})")
-        if force_readd:
+        if do_remove:
             with perf_block("remove"):
-                remove_outputs_from_map(messages, layer_names=layer_names)
+                remove_outputs_from_map(messages, layer_names=remove_scope)
         with perf_block("add"):
             add_outputs_to_map(paths, messages, layer_names=layer_names)
         with perf_block("refresh"):

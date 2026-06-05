@@ -707,6 +707,30 @@ def test_queue_cleared_state_draws_end_week_and_cancel_autoclose():
     assert ("case-action", "Cancel Auto Close") in targets
 
 
+def test_session_menu_offers_manual_end_week_when_out_of_ap():
+    """Verify the utility menu always exposes a manual End Week control.
+
+    When the player is out of AP with cases still queued (especially incidents,
+    whose Deny lane also costs AP), no in-card lane is affordable and the
+    queue-cleared End Week button never appears. The session menu must offer a
+    manual way to close the week regardless of AP.
+    """
+
+    item, districts = _vendor_case()
+    model = build_desk_model(rules.CityState(ap=0, money=0), districts, [item], item.item_id)
+    view, callbacks = _view_for_drawing(model)
+    canvas = _FakeCanvas()
+
+    view._draw_menu_button(canvas, 720, 20, 760, 48)
+    view._draw_session_menu(canvas, 1300)
+
+    assert "END WEEK" in _text_values(canvas)
+    end_week = [cb for kind, ident, _bbox, cb in view._click_targets if (kind, ident) == ("session", "End Week")]
+    assert end_week
+    end_week[0]()
+    assert ("advance_turn", ()) in callbacks.calls
+
+
 def test_start_help_overlay_explains_score_exhibits_and_resume():
     """Verify the help overlay covers score optimization, exhibits, and resume behavior."""
 

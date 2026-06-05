@@ -156,9 +156,15 @@ maintenance follow-ups, recurring economy, projects, audits, symbology, district
 identity/buyout pressure, start/help flow, exhibit controls, and an inline final
 audit receipt.
 
-Outstanding evidence (not code): a recorded **live ArcGIS Pro smoke test** on the
-target machine — map refresh/layer reliability, cold-start resume, legacy field
-migration on an existing `.gdb`, and 12-week balance tuning toward a fair PASS.
+Verified live (2026-06-04, ArcGIS Pro): district layers render on launch and
+**repaint their evolving state across an End Week** — type/identity/prosperity
+fills update after the district-readd rebuild (see ADR-4). A manual **End Week**
+control is available from the desk utility menu regardless of AP.
+
+Outstanding evidence (not code): a fuller recorded **live ArcGIS Pro smoke test**
+on the target machine — feature-layer (`points/lines/zones`) `display_state`
+repaint on the refresh-only path, cold-start resume, legacy field migration on an
+existing `.gdb`, and 12-week balance tuning toward a fair PASS.
 
 ## Validation
 

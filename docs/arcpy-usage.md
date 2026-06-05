@@ -71,12 +71,17 @@ the dashboard must tolerate no open map).
 - **Remove:** `active_map.removeLayer(layer)` for our known output names.
 - **Refresh:** `arcpy.RefreshLayer(name)` per layer.
 
-**Refresh/redraw strategy.** `rebuild_output_layers()` defaults to **refresh-only**
-for data-only edits: it skips `remove_outputs_from_map` (the add is already
-idempotent) and just re-adds-any-missing + `RefreshLayer`. `force_readd=True`
-does the full remove→add→refresh, used only when the layer set or symbology
-changes (New Game). This avoids the costly `addDataFromPath` churn every turn —
-the dominant per-turn cost. Timings are visible under `PERMIT_OFFICE_PERF=1`.
+**Refresh/redraw strategy.** `arcpy.RefreshLayer` only redraws a layer's cached
+renderer — it does **not** reload attribute values written to the GDB. So
+`rebuild_output_layers()` defaults to **district-readd**: it removes + re-adds the
+district family (`PermitDistricts` + prosperity/identity overlays), whose
+rendering keys on attributes that change every decision/turn, and leaves the
+feature layers (points/lines/zones) refresh-only (re-add-any-missing +
+`RefreshLayer`). `force_readd=True` does the full remove→add→refresh of every
+in-scope layer, used when the layer set or symbology changes (New Game). This
+keeps the bulk of the per-turn `addDataFromPath` savings on the feature layers
+while ensuring district state actually renders. Timings are visible under
+`PERMIT_OFFICE_PERF=1`.
 
 **Symbology** (`symbology_config.py` + `geometry.py`): a `UniqueValueRenderer` set
 via `sym.updateRenderer("UniqueValueRenderer")`, with the render field assigned

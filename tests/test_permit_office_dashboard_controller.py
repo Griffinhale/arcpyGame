@@ -178,6 +178,41 @@ def test_successful_decision_reapplies_map_presentation_before_refresh(monkeypat
     assert order[-5:] == ["clear", "remove", "map", "refresh", "receipt"]
 
 
+def test_rebuild_readds_district_family_on_refresh_only_path(monkeypatch):
+    """Verify district layers are removed+re-added even on the default fast path.
+
+    ``RefreshLayer`` only redraws the cached renderer; it does not reload GDB
+    attribute writes. District base/prosperity/identity render on values that
+    change every decision and turn, so they must be removed + re-added (full
+    ``addDataFromPath``) to show new state. Feature layers stay refresh-only.
+    """
+
+    calls = []
+    monkeypatch.setattr(dashboard, "clear_output_selections", lambda paths: None)
+    monkeypatch.setattr(dashboard, "remove_outputs_from_map", lambda messages, layer_names=None: calls.append(("remove", layer_names)))
+    monkeypatch.setattr(dashboard, "add_outputs_to_map", lambda paths, messages, layer_names=None: calls.append(("add", layer_names)))
+    monkeypatch.setattr(dashboard, "refresh_all", lambda paths, messages, layer_names=None: calls.append(("refresh", layer_names)))
+
+    dashboard.rebuild_output_layers({}, object())
+
+    assert ("remove", {dashboard.DISTRICTS}) in calls
+    assert [kind for kind, _scope in calls] == ["remove", "add", "refresh"]
+
+
+def test_rebuild_force_readd_removes_every_layer(monkeypatch):
+    """Verify an explicit force_readd still clears the full output set."""
+
+    calls = []
+    monkeypatch.setattr(dashboard, "clear_output_selections", lambda paths: None)
+    monkeypatch.setattr(dashboard, "remove_outputs_from_map", lambda messages, layer_names=None: calls.append(("remove", layer_names)))
+    monkeypatch.setattr(dashboard, "add_outputs_to_map", lambda paths, messages, layer_names=None: calls.append(("add", layer_names)))
+    monkeypatch.setattr(dashboard, "refresh_all", lambda paths, messages, layer_names=None: calls.append(("refresh", layer_names)))
+
+    dashboard.rebuild_output_layers({}, object(), force_readd=True)
+
+    assert ("remove", None) in calls
+
+
 def test_filed_report_text_includes_local_decision_changes():
     """Verify filed reports summarize local metric and feature changes."""
 
