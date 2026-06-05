@@ -67,6 +67,9 @@ civic season inside ArcGIS Pro.
   family must re-add unconditionally (ADR-4).
 
 ### Known gaps
+- Developed and tested on **ArcGIS Pro 3.6**; earlier versions are untested and
+  may lack some arcpy APIs the toolbox uses (`arcpy.mp`, `arcpy.da.Describe`, CIM
+  renderer definitions, spatial-reference handling). 3.6+ recommended.
 - Live ArcGIS Pro smoke-test results on a target machine are not yet recorded
   (see `docs/arcgis-pro-smoke-checklist.md`; open issues #9, #11).
 - 12-week balance tuning toward a reliable PASS is ongoing.

@@ -11,7 +11,7 @@ city consequences.
 
 > **Status: public beta — v0.9.0.** Playable end to end; balance and live
 > ArcGIS Pro polish are still in progress. Expect rough edges. Requires ArcGIS
-> Pro with ArcPy to run; the pure-Python rules run and test without it.
+> Pro 3.6+ with ArcPy to run; the pure-Python rules run and test without it.
 
 ## How It Plays
 
@@ -68,11 +68,13 @@ filing, approving, delaying, and explaining official decisions.
 
 ### Requirements
 
-- ArcGIS Pro with ArcPy available (to run the game in Pro).
-- Python 3 for the pure rules tests.
-- `pytest` to run the test suite outside ArcGIS Pro. Install it (and populate the
-  Python environment / `__pycache__` the project imports against) with **either**
-  pip or [uv](https://docs.astral.sh/uv/):
+- **ArcGIS Pro with ArcPy** to run the game. Developed and tested on **ArcGIS
+  Pro 3.6**; earlier versions are untested and may lack some of the arcpy APIs the
+  toolbox uses (parts of `arcpy.mp`, `arcpy.da.Describe`, CIM renderer
+  definitions, and spatial-reference handling), so **3.6+ is recommended**.
+- **Python 3** for the pure-rules test suite (this runs without ArcGIS). Install
+  the test dependency (`pytest`) with **either** pip or
+  [uv](https://docs.astral.sh/uv/):
 
   ```bash
   # pip
@@ -82,6 +84,9 @@ filing, approving, delaying, and explaining official decisions.
   uv venv
   uv pip install -r requirements-dev.txt
   ```
+
+  pip/uv only set up the **offline test** environment — running the game itself
+  uses ArcGIS Pro's bundled Python and arcpy, not a pip/uv install.
 
 ### Run In ArcGIS Pro
 
