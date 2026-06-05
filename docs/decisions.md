@@ -85,11 +85,18 @@ internals. **Rejected (deferred):** multi-bid/round-robin negotiation and ledger
 snapshot RNG keys — larger design, follow-up scope.
 
 ### ADR-10 — Small public stat model, hidden internals
-**Decision:** the audit model is Activity / Friction / Trust / Exposure / Services
-+ a local Dissatisfaction band; population mix, hazards, housing, identity, heat,
-risk bands stay internal (they influence the public stats). **Why:** a few legible
-metrics + rich docket events beat many shallow exposed systems.
-**Rejected:** surfacing every internal system as a player-facing stat.
+**Decision:** the player-facing audit goals are exactly four vitals — **Activity /
+Friction / Trust / Exposure** — shown on the City Pulse rail under a folded
+**City Health** headline, with **Heat** (stakeholder pressure) and a single
+**Pressure** causes-rollup as the at-a-glance risk signals. Everything else —
+**services**, dissatisfaction, hazards, housing/affordability, maintenance,
+population mix, identity, heat bands, economy detail — is internal/derived and
+surfaces only in the **scorecard report and inspected cases**, not the always-on
+rail (it still influences the four vitals and the audit score). **Why:** a few
+legible goals + rich docket/scorecard detail beat many shallow exposed systems;
+the same names are used in the rail, the audit report, and the help overlay.
+**Rejected:** keeping Services (or any granular support system) on the always-on
+rail; surfacing every internal system as a player-facing stat.
 
 ### ADR-11 — Deterministic seeded generation
 **Decision:** boards and dockets are generated from an RNG keyed on

@@ -194,6 +194,34 @@ def test_ledger_rows_use_renamed_city_health_vitals():
         assert legacy not in ledger
 
 
+def test_player_facing_vitals_are_exactly_the_four_audit_goals():
+    """Lock the 5A model (ADR-10): the rail vitals are the four the audit scores.
+
+    Player-facing goals = Activity/Friction/Trust/Exposure, mirroring state and the
+    audit report; the granular support systems are detail, not part of this set.
+    """
+
+    item, districts = _vendor_case()
+    state = rules.CityState(activity=63, friction=28, trust=47, exposure=19)
+
+    model = build_desk_model(state, districts, [item], item.item_id)
+    ledger = {row.label: row for row in model.ledger_rows}
+
+    assert ledger["Activity"].value == "63"
+    assert ledger["Friction"].value == "28"
+    assert ledger["Trust"].value == "47"
+    assert ledger["Exposure"].value == "19"
+
+    # The audit scores and reports those same four vitals by the same names.
+    _grade, report = rules.scorecard(state, districts, None, [item])
+    for vital in ("activity", "friction", "trust", "exposure"):
+        assert vital in report
+
+    # Heat is a distinct stakeholder-pressure signal, not one of the four vitals.
+    assert "Heat" in ledger
+    assert ledger["Heat"].label not in ("Activity", "Friction", "Trust", "Exposure")
+
+
 def test_headline_metrics_hide_generic_city_builder_stats():
     """Verify headline banner focuses on desk triage signals."""
 
