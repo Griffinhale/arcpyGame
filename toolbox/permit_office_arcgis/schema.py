@@ -172,23 +172,33 @@ LEGACY_CITY_HEALTH_FIELD_MIGRATIONS = {
 
 
 def resolve_workspace(value, messages):
-    """Resolve the geodatabase path from user input, project home, or scratch."""
+    """Resolve the geodatabase path from user input, project home, or scratch.
 
-    if value:
-        text = str(value)
-        if text.lower().endswith(".gdb"):
-            return text
-        return os.path.join(text, DEFAULT_GDB_NAME)
+    A workspace supplied via the optional tool parameter is honored verbatim and
+    the project/scratch default chain is NEVER consulted -- even when the target
+    has no game rows yet (an empty workspace starts a new game there). The default
+    chain is reached only when no real workspace was given. ``""``, whitespace,
+    and the ArcGIS ``"#"`` unspecified sentinel all count as "not provided".
+    """
+
+    text = str(value).strip() if value is not None else ""
+    if text and text != "#":
+        if not text.lower().endswith(".gdb"):
+            text = os.path.join(text, DEFAULT_GDB_NAME)
+        _log(messages, "WORKSPACE", f"using provided game workspace: {text}")
+        return text
     try:
         aprx = arcpy.mp.ArcGISProject("CURRENT")
         if aprx.homeFolder:
-            return os.path.join(aprx.homeFolder, "data", DEFAULT_GDB_NAME)
+            home = os.path.join(aprx.homeFolder, "data", DEFAULT_GDB_NAME)
+            _log(messages, "WORKSPACE", f"no workspace given; using project default: {home}")
+            return home
     except Exception as exc:
         _warn(messages, "WORKSPACE", f"ArcGISProject('CURRENT') failed: {exc}")
     scratch = arcpy.env.scratchWorkspace or arcpy.env.scratchFolder or os.getcwd()
-    if str(scratch).lower().endswith(".gdb"):
-        return str(scratch)
-    return os.path.join(str(scratch), DEFAULT_GDB_NAME)
+    fallback = str(scratch) if str(scratch).lower().endswith(".gdb") else os.path.join(str(scratch), DEFAULT_GDB_NAME)
+    _log(messages, "WORKSPACE", f"no workspace or project home; using scratch: {fallback}")
+    return fallback
 
 
 def ensure_gdb(gdb_path, messages):
