@@ -1218,11 +1218,38 @@ def test_approve_applies_costs_district_deltas_and_city_delta():
     assert "Approved" in result.report
     assert "Certain effects:" in result.report
     assert "immediate city delta" in result.report
-    assert "spillover D0001, D0100 gets" in result.report
+    assert "spillover Cinder Yard, Old Row gets" in result.report
     assert "Exposure/side effects:" in result.report
     assert "recurring budget" in result.report
     assert result.city_delta
     assert profiles["D0000"].display_state in rules.DISPLAY_STATES
+
+
+def test_approval_report_names_districts_not_cell_ids():
+    """Verify the approval report prose reads as district names, not cell_ids."""
+    profiles = {p.cell_id: p for p in rules.generate_district_profiles(rows=2, cols=2, seed=2026)}
+    state = rules.CityState(ap=3, money=60)
+    item = rules.DocketItem(
+        item_id="T01-03-street_vendor_compact",
+        template_id="street_vendor_compact",
+        title=rules.TEMPLATES["street_vendor_compact"].title,
+        geometry_type="POINT",
+        turn=1,
+    )
+
+    result = rules.resolve_decision(
+        state, item, profiles, action="approve",
+        target_cell_ids=["D0000"], spillover_cell_ids=["D0001", "D0100"], seed=2026,
+    )
+
+    # Names surface; the stable cell_id keys never leak into the prose report.
+    assert "Civic Green" in result.report
+    assert "spillover Cinder Yard, Old Row gets" in result.report
+    assert "D0000" not in result.report
+    assert "D0001" not in result.report
+    assert "D0100" not in result.report
+    # The structured key field still carries the stable cell_ids for routing.
+    assert result.affected_cell_ids == ["D0000", "D0001", "D0100"]
 
 
 def test_approval_adjusts_population_pressure_and_local_grievance():
@@ -2142,6 +2169,65 @@ def test_audit_findings_include_money_features_services_and_violations():
     assert any(finding.source == "features" for finding in audit.findings)
     assert any(finding.source == "services" for finding in audit.findings)
     assert any(finding.source == "inspection" for finding in audit.findings)
+
+
+def test_audit_findings_name_districts_not_cell_ids():
+    """Verify district risk findings read as names, keeping cell_id as the key."""
+    profile = rules.DistrictProfile("D0000", "Harbor Flats", 1400, 35, 75, 30, 75, 5, "residential")
+    rules.normalize_profile(profile)
+    state = rules.CityState(turn=3)
+
+    audit = rules.generate_audit_result(state, {profile.cell_id: profile})
+
+    district_findings = [finding for finding in audit.findings if finding.source == "district"]
+    assert district_findings, "expected at least one district risk finding"
+    for finding in district_findings:
+        assert "Harbor Flats" in finding.message
+        assert "D0000" not in finding.message
+        # The stable key still carries the cell_id so callers can route on it.
+        assert "D0000" in finding.finding_id
+
+
+def test_district_label_prefers_name_falls_back_to_cell_id():
+    """Verify the shared label helper reads as a name but never blanks out."""
+    named = rules.DistrictProfile("D0000", "Harbor Flats", 1000, 40, 25, 35, 20, 40, "residential")
+    unnamed = rules.DistrictProfile("D0001", "", 1000, 40, 25, 35, 20, 40, "residential")
+
+    assert rules.district_label(named) == "Harbor Flats"
+    assert rules.district_label(unnamed) == "D0001"
+
+
+def test_incident_summary_names_districts_not_cell_ids():
+    """Verify the dashboard incident summary reads as a district name."""
+    profile = rules.DistrictProfile(
+        "D0000", "Harbor Flats", 1200, 42, 35, 35, 30, 35, "residential",
+        population_mix={"renters": 3}, dissatisfaction={"renters": 4},
+    )
+    rules.normalize_profile(profile)
+    assert profile.incident_state != "none"
+
+    summary = rules.incident_summary({profile.cell_id: profile})
+
+    assert "Harbor Flats" in summary
+    assert "D0000" not in summary
+
+
+def test_incident_followup_preview_names_district_not_cell_id():
+    """Verify the civic incident follow-up preview reads as a district name."""
+    profile = rules.DistrictProfile(
+        "D0000", "Harbor Flats", 1200, 42, 35, 35, 30, 35, "residential",
+        population_mix={"renters": 3}, dissatisfaction={"renters": 4},
+    )
+    rules.normalize_profile(profile)
+    assert profile.incident_state != "none"
+
+    docket = rules.generate_docket(3, count=4, districts={profile.cell_id: profile})
+
+    followups = [item for item in docket if "Visible condition" in item.preview_text]
+    assert followups, "expected a visible civic incident follow-up"
+    for item in followups:
+        assert "Harbor Flats" in item.preview_text
+        assert "D0000" not in item.preview_text
 
 
 def test_seeded_city_detail_descriptors_are_deterministic_and_moderate():

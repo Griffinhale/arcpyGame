@@ -461,7 +461,8 @@ def _incident_followup_item(
     item = _make_docket_item(turn, idx, CIVIC_INCIDENT_TEMPLATE_ID, stakeholder=group, origin_item_id=f"dissatisfaction:{cell_id}:{group}")
     item.target_cell_ids = [cell_id]
     write_incident_case_identity(item, cell_id, group, incident_state)
-    item.preview_text = f"{item.preview_text} Visible condition: {incident_state} in {cell_id}."
+    label = district_label(districts[cell_id]) if cell_id in districts else cell_id
+    item.preview_text = f"{item.preview_text} Visible condition: {incident_state} in {label}."
     return item
 
 

@@ -371,10 +371,11 @@ def generate_audit_result(
         normalize_profile(profile)
         if profile.incident_state != "none":
             incident_count += 1
+        label = district_label(profile)
         if profile.exposure >= 70:
-            findings.append(AuditFinding(f"exposure.{profile.cell_id}", "critical", "district", f"{profile.cell_id} exposure is critical.", -12))
+            findings.append(AuditFinding(f"exposure.{profile.cell_id}", "critical", "district", f"{label} exposure is critical.", -12))
         if profile.friction >= 70:
-            findings.append(AuditFinding(f"friction.{profile.cell_id}", "critical", "district", f"{profile.cell_id} friction is critical.", -12))
+            findings.append(AuditFinding(f"friction.{profile.cell_id}", "critical", "district", f"{label} friction is critical.", -12))
         for service, gap in profile.service_gap.items():
             if gap >= AUDIT_THRESHOLDS["service_gap_critical"]:
                 service_gap_total += 1

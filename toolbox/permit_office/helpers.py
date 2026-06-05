@@ -257,11 +257,16 @@ def population_city_summary(districts: Iterable[DistrictProfile] | dict[str, Dis
     return f"Pop {total_population(profiles)}{note}"
 
 
+def district_label(profile: DistrictProfile) -> str:
+    """Return the player-facing district label, keeping cell_id as the fallback key."""
+    return profile.name or profile.cell_id
+
+
 def incident_summary(districts: Iterable[DistrictProfile] | dict[str, DistrictProfile]) -> str:
     """Format visible civic incident files for dashboard metrics."""
     profiles = list(districts.values() if isinstance(districts, dict) else districts)
     incidents = [
-        f"{profile.cell_id} {_group_label(profile.incident_group)} {profile.incident_state}"
+        f"{district_label(profile)} {_group_label(profile.incident_group)} {profile.incident_state}"
         for profile in profiles
         if profile.incident_state != "none" and profile.incident_group
     ]

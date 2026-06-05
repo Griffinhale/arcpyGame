@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import random
-from typing import Iterable
+from typing import Iterable, Mapping
 
 from .models import *
 from .catalogs import *
@@ -254,7 +254,7 @@ def resolve_decision(
     _settle_item_violations(item, mitigated)
     mitigation_text = " with mitigation" if mitigated else ""
     failure_text = _approval_risk_report(template, failure_triggered, failure_delta, side, item.risk_band, mitigated, [districts[cid] for cid in targets])
-    spillover_text = _spillover_report_fragment(spillovers, template, mitigated)
+    spillover_text = _spillover_report_fragment(spillovers, template, mitigated, districts)
     recurring_text = "no new active feature because the decision failed" if failure_triggered else _recurring_budget_report(archetype)
     project_text = ""
     if projects is not None and not failure_triggered:
@@ -275,7 +275,7 @@ def resolve_decision(
             project_text = f" Project {project.project_id} status {project.status}."
     report = (
         f"Approved {item.title}{mitigation_text}. Certain effects: affected {len(affected)} district(s): "
-        f"{_district_list_fragment(affected)}; immediate city delta {_format_delta(averaged)}; "
+        f"{_district_list_fragment(affected, districts)}; immediate city delta {_format_delta(averaged)}; "
         f"{_local_cause_fragment([districts[cid] for cid in affected], district_deltas)}; {spillover_text}; recurring budget {recurring_text}. "
         f"Exposure/side effects: {failure_text} "
         f"{_population_report_fragment([districts[cid] for cid in targets])}{project_text}"
@@ -700,22 +700,39 @@ def _recurring_budget_report(archetype: FeatureArchetype) -> str:
     return f"budget neutral: revenue ${revenue}/week, upkeep ${upkeep}/week, net ${net:+d}"
 
 
-def _spillover_report_fragment(spillovers: list[str], template: DocketTemplate, mitigated: bool) -> str:
+def _spillover_report_fragment(
+    spillovers: list[str],
+    template: DocketTemplate,
+    mitigated: bool,
+    districts: Mapping[str, DistrictProfile] | None = None,
+) -> str:
     """Format spillover effects separately from target and city effects."""
 
     if not spillovers:
         return "spillover none"
     delta = _mitigate(template.spillover_effects) if mitigated else dict(template.spillover_effects)
-    return f"spillover {_district_list_fragment(spillovers)} gets {_format_delta(delta)}"
+    return f"spillover {_district_list_fragment(spillovers, districts)} gets {_format_delta(delta)}"
 
 
-def _district_list_fragment(cell_ids: list[str]) -> str:
-    """Keep report prose readable when many districts are affected."""
+def _district_list_fragment(
+    cell_ids: list[str],
+    districts: Mapping[str, DistrictProfile] | None = None,
+) -> str:
+    """Keep report prose readable when many districts are affected.
 
-    if len(cell_ids) <= 4:
-        return ", ".join(cell_ids)
-    shown = ", ".join(cell_ids[:3])
-    return f"{shown}, +{len(cell_ids) - 3} more"
+    Resolves cell_ids to human-readable district names when a districts map is
+    supplied, falling back to the cell_id key for any unknown district.
+    """
+
+    def label(cid: str) -> str:
+        profile = districts.get(cid) if districts else None
+        return district_label(profile) if profile is not None else cid
+
+    labels = [label(cid) for cid in cell_ids]
+    if len(labels) <= 4:
+        return ", ".join(labels)
+    shown = ", ".join(labels[:3])
+    return f"{shown}, +{len(labels) - 3} more"
 
 
 def _local_cause_fragment(profiles: list[DistrictProfile], district_deltas: dict[str, dict[str, int]]) -> str:
@@ -727,7 +744,7 @@ def _local_cause_fragment(profiles: list[DistrictProfile], district_deltas: dict
         counts[profile.display_state] = counts.get(profile.display_state, 0) + 1
         delta_text = _format_delta(district_deltas.get(profile.cell_id, {}))
         if delta_text != "no net citywide metric change":
-            deltas.append(f"{profile.cell_id} {delta_text}")
+            deltas.append(f"{district_label(profile)} {delta_text}")
     causes = ", ".join(f"{cause.replace('_', ' ')} x{count}" for cause, count in sorted(counts.items()))
     if deltas:
         return f"primary pressure {causes}; local deltas {'; '.join(deltas[:3])}"

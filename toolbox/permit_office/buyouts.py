@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 import random
 from typing import Mapping
 
-from .helpers import normalize_profile
+from .helpers import district_label, normalize_profile
 from .models import DISTRICT_TYPES, CityState, DistrictProfile
 from .type_pressure import adjust_type_ledger
 
@@ -31,7 +31,7 @@ def _rename_for_type(profile: DistrictProfile, new_type: str) -> None:
     suffixes = _TYPE_NAME_SUFFIXES.get(new_type)
     if not suffixes:
         return
-    parts = (profile.name or profile.cell_id).split()
+    parts = district_label(profile).split()
     prefix = parts[0] if parts else profile.cell_id
     rng = random.Random(f"rename:{profile.cell_id}:{new_type}")
     profile.name = f"{prefix} {rng.choice(suffixes)}"
