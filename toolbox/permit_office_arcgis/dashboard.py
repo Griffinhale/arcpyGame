@@ -867,7 +867,7 @@ class DashboardController:
     def _finish_decision(self, command_id, item, state, districts, projects, result, layer_names=None):
         """Persist a successful decision result and show its filed report."""
 
-        filed_report = _filed_report_text(result)
+        filed_report = _filed_report_text(result, districts)
         with perf_block("writes"):
             write_district_updates(self.paths, districts, result.report, result.affected_cell_ids)
             write_state(self.paths, state)
@@ -1050,10 +1050,10 @@ def rebuild_output_layers(paths, messages, layer_names=None, force_readd=False):
             refresh_all(paths, messages, layer_names=layer_names)
 
 
-def _filed_report_text(result):
+def _filed_report_text(result, districts=None):
     """Append compact non-money local changes to a decision report."""
 
-    local = _local_changes_fragment(result)
+    local = _local_changes_fragment(result, districts)
     if not local:
         return result.report
     return f"{result.report} Local changes: {local}."
@@ -1097,14 +1097,16 @@ def _receipt_from_tab(tab):
     return ReceiptModel(tab.title, tab.report, tab.affected, tab.metrics)
 
 
-def _local_changes_fragment(result):
+def _local_changes_fragment(result, districts=None):
     """Summarize district deltas and feature updates for filed receipts."""
 
     parts = []
     for cell_id, delta in sorted((result.district_deltas or {}).items())[:3]:
         text = _compact_delta(delta)
         if text:
-            parts.append(f"{cell_id} {text}")
+            profile = districts.get(cell_id) if districts else None
+            label = rules.district_label(profile) if profile is not None else cell_id
+            parts.append(f"{label} {text}")
     extra = max(0, len(result.district_deltas or {}) - 3)
     if extra:
         parts.append(f"+{extra} district(s)")

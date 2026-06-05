@@ -1352,3 +1352,19 @@ def test_deadline_tick_advances_daily_pressure_and_refreshes_districts_only(monk
     assert ("state", 2, {"D0000": 2}) in calls
     assert ("overlay", {"D0000": 2}) in calls
     assert ("refresh", {dashboard.DISTRICTS}) in calls
+
+
+def test_filed_report_local_changes_names_districts():
+    """Verify the filed-report local-changes summary reads as district names."""
+    result = SimpleNamespace(
+        report="Approved Street Vendor Compact.",
+        district_deltas={"D0000": {"activity": 3}},
+        feature_updates={},
+    )
+    profile = rules.DistrictProfile("D0000", "Harbor Flats", 1000, 50, 20, 35, 25, 50, "mercantile")
+    rules.normalize_profile(profile)
+
+    text = dashboard._filed_report_text(result, {"D0000": profile})
+
+    assert "Harbor Flats" in text
+    assert "D0000" not in text
