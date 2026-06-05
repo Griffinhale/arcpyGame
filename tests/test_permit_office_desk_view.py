@@ -498,6 +498,9 @@ def _view_for_drawing(model):
     view._hover_key = ""
     view._font_cache = {}
     view._fit_cache = {}
+    view._lookup_model = None
+    view._ledger_by_label = {}
+    view._lane_by_action = {}
     view._menu_open = False
     view.root = None
     view._font = lambda size, weight="normal": ("Segoe UI", size, weight)
@@ -576,6 +579,37 @@ def test_fit_px_memoizes_so_repeated_draws_skip_recompute():
     assert first == second
     assert len(calls) == 1  # second call served from the memo
     assert ("A district label that may need clipping", 9, "bold", 70) in view._fit_cache
+
+
+def test_draw_lookups_rebuild_only_on_model_swap():
+    """Verify ledger/lane lookup dicts are cached and rebuilt only when the model changes.
+
+    The banner and ledger rail both index ledger rows by label, and case controls
+    index action lanes by action_id, every redraw. Those maps are a pure function
+    of the current model, so they are built once per model swap and reused across
+    hover/deadline redraws instead of rebuilt each frame.
+    """
+
+    item, districts = _vendor_case()
+    model = build_desk_model(rules.CityState(), districts, [item], item.item_id)
+    view, _callbacks = _view_for_drawing(model)
+
+    view._ensure_lookups()
+    first_ledger = view._ledger_by_label
+    first_lanes = view._lane_by_action
+    assert first_ledger["Audit"].label == "Audit"
+    assert {lane.action_id for lane in model.action_lanes} == set(first_lanes)
+
+    view._ensure_lookups()
+    # Same model object -> the cached dicts are reused, not rebuilt.
+    assert view._ledger_by_label is first_ledger
+    assert view._lane_by_action is first_lanes
+
+    # A new model object invalidates the cache and rebuilds the maps.
+    model2 = build_desk_model(rules.CityState(), districts, [item], item.item_id)
+    view.model = model2
+    view._ensure_lookups()
+    assert view._ledger_by_label is not first_ledger
 
 
 def test_utility_menu_button_is_compact_hamburger_without_text_label():

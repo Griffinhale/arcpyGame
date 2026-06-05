@@ -130,6 +130,11 @@ class PermitDeskView:
         self._last_size = (0, 0)
         self._font_cache: dict = {}
         self._fit_cache: dict = {}
+        # Per-model lookup maps (label->row, action_id->lane), rebuilt only when
+        # the model object changes (see _ensure_lookups).
+        self._lookup_model = None
+        self._ledger_by_label: dict = {}
+        self._lane_by_action: dict = {}
         self._menu_open = False
         self._menu_anchor = None
 
@@ -276,7 +281,8 @@ class PermitDeskView:
         c.create_rectangle(0, 0, width, h, fill=Palette.DESK_DARK, outline="")
         c.create_rectangle(0, h - 3, width, h, fill=Palette.CARD_SHADOW, outline="")
         c.create_text(28, h // 2, text="PERMIT OFFICE", anchor="w", fill=Palette.PAPER, font=self._font(14, "bold"))
-        metrics = {row.label: row for row in self.model.ledger_rows}
+        self._ensure_lookups()
+        metrics = self._ledger_by_label
         headlines = HEADLINE_METRICS
         x_start = 310
         right_pad = 216 if self.model.deadline_text else 28
@@ -546,7 +552,8 @@ class PermitDeskView:
         """Draw selected-case map, inspect, and stamp controls inside the card."""
 
         exhibit_label = "Hide Proposed Feature" if self.model.exhibit_visible else "Show Proposed Feature"
-        lanes = {lane.action_id: lane for lane in self.model.action_lanes}
+        self._ensure_lookups()
+        lanes = self._lane_by_action
         controls = (
             (exhibit_label, Palette.BLUE, self.callbacks.toggle_exhibit, False, True),
             ("Retarget Map", Palette.TEAL, self.callbacks.update_from_map, False, True),
@@ -588,7 +595,8 @@ class PermitDeskView:
 
         inner_x0 = x0 + 14
         inner_x1 = x1 - 14
-        by_label = {row.label: row for row in self.model.ledger_rows}
+        self._ensure_lookups()
+        by_label = self._ledger_by_label
 
         # Headline: one City Health gauge folds the four core metrics together.
         y = y0 + 50
@@ -770,6 +778,22 @@ class PermitDeskView:
         """Return the Segoe UI font tuple used by the desk canvas."""
 
         return ("Segoe UI", size, weight)
+
+    def _ensure_lookups(self):
+        """Rebuild the per-model lookup maps only when the model object changed.
+
+        The label->ledger-row and action_id->lane maps are pure functions of the
+        current model, so they are cached by model identity and reused across
+        hover/deadline redraws (which keep the same model) instead of rebuilt by
+        each draw method every frame.
+        """
+
+        if self._lookup_model is self.model:
+            return
+        model = self.model
+        self._ledger_by_label = {row.label: row for row in model.ledger_rows}
+        self._lane_by_action = {lane.action_id: lane for lane in model.action_lanes}
+        self._lookup_model = model
 
     def _fit_px(self, text, size, weight, max_px):
         """Truncate text with an ellipsis so it renders within ``max_px`` pixels.
