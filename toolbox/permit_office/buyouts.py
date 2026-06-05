@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 import random
 from typing import Mapping
 
+from .catalogs import ARCHETYPE_BASE_MIX
 from .helpers import district_label, normalize_profile
 from .models import DISTRICT_TYPES, CityState, DistrictProfile
 from .type_pressure import adjust_type_ledger
@@ -35,6 +36,29 @@ def _rename_for_type(profile: DistrictProfile, new_type: str) -> None:
     prefix = parts[0] if parts else profile.cell_id
     rng = random.Random(f"rename:{profile.cell_id}:{new_type}")
     profile.name = f"{prefix} {rng.choice(suffixes)}"
+
+
+def _shift_culture_for_type(profile: DistrictProfile, new_type: str) -> None:
+    """Blend a converted district's census toward its new type's archetype mix.
+
+    The new type's two leading archetype groups rise into the dominant band so the
+    district reads -- and generates proposals -- as its new identity, while the
+    prior strongest group decays. This is the culture half of the type/culture/
+    resource shift a successful buyout brings.
+    """
+
+    base = ARCHETYPE_BASE_MIX.get(new_type)
+    if not base:
+        return
+    mix = dict(profile.population_mix or {})
+    if mix:
+        strongest = max(mix, key=lambda group: (mix.get(group, 0), group))
+        if mix.get(strongest, 0) > 0:
+            mix[strongest] = mix[strongest] - 1
+    leading = sorted(base, key=lambda group: (-base[group], group))[:2]
+    for group in leading:
+        mix[group] = min(3, max(mix.get(group, 0) + 1, 2))
+    profile.population_mix = mix
 
 
 @dataclass
@@ -340,6 +364,7 @@ def _convert_transition(
     profile.buyout_pressure = max(0, int(profile.buyout_pressure or 0) - 2)
     profile.activity = max(0, min(100, int(profile.activity or 0) + 4))
     profile.friction = max(0, min(100, int(profile.friction or 0) + 4))
+    _shift_culture_for_type(profile, new_type)
     _rename_for_type(profile, new_type)
     profile.last_buyout_report = f"{old_name} converted from {old_type} to {new_type} and is now {profile.name}."
     adjust_type_ledger(ledger, old_type, holdings_delta=-1, fatigue_delta=1)

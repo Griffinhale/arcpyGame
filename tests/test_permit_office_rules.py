@@ -400,6 +400,34 @@ def test_converted_district_is_renamed_to_signal_new_identity():
     assert renamed in result.report
 
 
+def test_converted_district_culture_shifts_toward_new_type():
+    """Verify a buyout conversion shifts the district's culture, not just its type."""
+    state = rules.CityState(turn=2)
+    target = _district_for_buyout("A", "residential", 32, ["B"])
+    # Starts with a clearly residential culture (no mercantile-leaning groups).
+    target.population_mix = {"families": 3, "homeowners": 2, "elders": 1}
+    rules.normalize_profile(target)
+    target.identity_state = "contested"
+    target.contesting_cell_id = "B"
+    target.contesting_type = "mercantile"
+    target.transition_due_turn = 2
+    target.buyout_pressure = 5
+    districts = {
+        "A": target,
+        "B": _district_for_buyout("B", "mercantile", 80, ["A"]),
+    }
+    ledger = rules.rebuild_type_ledger(districts)
+
+    result = rules.resolve_contested_transitions(state, districts, ledger)
+
+    assert result.converted == ["A"]
+    assert districts["A"].district_type == "mercantile"
+    mix = districts["A"].population_mix
+    # The new mercantile identity now carries a dominant mercantile-leaning culture,
+    # strong enough to pull the docket toward mercantile work (band >= 2).
+    assert mix.get("vendors", 0) >= 2
+
+
 def test_converted_transition_does_not_recontest_during_same_week_close():
     state = rules.CityState(turn=2)
     target = _district_for_buyout("A", "residential", 32, ["B", "C"])
