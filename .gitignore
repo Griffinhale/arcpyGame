@@ -21,6 +21,9 @@ dist/
 .claude/
 .serena/
 
+# Internal superpowers planning/spec workspace (kept local, not in the public repo).
+docs/superpowers/
+
 *.aprx.lock
 *.lock
 
