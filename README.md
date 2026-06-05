@@ -9,7 +9,7 @@ The joke is bureaucratic, but the game loop is real: every permit is tied to
 map geometry, district state, stakeholder pressure, recurring costs, and visible
 city consequences.
 
-> **Status: public beta — v0.9.0-beta.** Playable end to end; balance and live
+> **Status: public beta — v0.9.0.** Playable end to end; balance and live
 > ArcGIS Pro polish are still in progress. Expect rough edges. Requires ArcGIS
 > Pro with ArcPy to run; the pure-Python rules run and test without it.
 
@@ -56,9 +56,11 @@ filing, approving, delaying, and explaining official decisions.
 - **Procedural civic texture:** district names, populations, services,
   grievances, hazards, housing pressure, stakeholder heat, and docket items are
   generated from a seed.
-- **District identity pressure:** district type mix influences dockets, ignored
-  proposals can create hidden momentum, and low-activity districts can enter
-  contested buyout transitions from stronger neighbors.
+- **District identity pressure:** district type *and* citizen-culture mix
+  influence which proposals appear, ignored proposals can create hidden momentum,
+  and low-activity districts can enter contested buyout transitions where multiple
+  stronger neighbors bid — a successful buyout shifts the district's type,
+  culture, and name.
 - **Dry municipal absurdism:** the interface is built like a cluttered permit
   desk, with filed reports and audit language instead of fantasy UI tropes.
 
@@ -80,9 +82,12 @@ filing, approving, delaying, and explaining official decisions.
 5. Use the dashboard and map together: select docket rows, update targets from
    map selections, inspect files, issue or deny permits, and end the week.
 
-By default the tool creates or resumes `permit_office.gdb` under the ArcGIS
-project's `data/` folder. The geodatabase is local generated state and should
-not be committed.
+By default (no **Game Workspace** chosen) the tool creates or resumes
+`permit_office.gdb` under the ArcGIS project's `data/` folder; set the optional
+**Game Workspace** parameter to use a specific geodatabase or folder instead. The
+geodatabase *is* the save file, so opening a project whose map has no Permit
+Office layers offers a fresh `New Game` rather than silently resuming the stored
+board. The geodatabase is local generated state and should not be committed.
 
 ### Run Pure Python Tests
 
@@ -116,9 +121,10 @@ do not replace a live ArcGIS Pro smoke test.
 ## Current Status
 
 Permit Office is a playable prototype. It has generated districts, seeded city
-detail, weighted docket templates, inspections, approvals, no-AP ordinary
-denials, mitigation, incidents, maintenance follow-ups, recurring economy,
-projects, audits, map symbology, district identity/buyout pressure, start/help
+detail, weighted docket templates (driven by district type and citizen culture),
+inspections, approvals, no-AP ordinary denials, mitigation, incidents,
+maintenance follow-ups, recurring economy, projects, audits, map symbology,
+human-readable district identity with multi-bidder buyout pressure, start/help
 flow, selected-case exhibit controls, an inline final audit receipt, and a
 Tkinter dashboard.
 
@@ -126,9 +132,10 @@ Live ArcGIS Pro verification (2026-06-04) confirmed district layers render and
 repaint their state across an End Week, and a manual End Week control is now
 always available from the desk utility menu.
 
-The next public-readiness work is focused on evidence and balance: a fuller live
-ArcGIS Pro smoke test (feature-layer repaint, cold-start resume, legacy `.gdb`
-migration), tuning a fair 12-week route, and deepening map symbology only where
+The next public-readiness work is focused on evidence and balance: running the
+live ArcGIS Pro smoke test (`docs/arcgis-pro-smoke-checklist.md`: workspace
+routing, feature-layer repaint, cold-start resume, legacy `.gdb` migration,
+symbology), tuning a fair 12-week route, and deepening map symbology only where
 the live map proves it is still hard to read.
 
 See `docs/systems-overview.md` for the implementation map, current status, and
