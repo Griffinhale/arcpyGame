@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import time
 import traceback
+from copy import deepcopy
 
 import arcpy
 
@@ -45,6 +46,7 @@ from .store import (
     write_projects,
     write_state,
 )
+from . import desk_model
 from .desk_view import DeskCallbacks, Palette, PermitDeskView, ReceiptModel, ReportTab, build_desk_model, receipt_metrics
 
 
@@ -196,6 +198,11 @@ class DashboardController:
         self._deadline_after_id = None
         self._deadline_running = False
         self._command_busy = False
+        # Audit grade is expensive (scorecard + two deepcopies of 25 districts).
+        # Cache it and recompute only when a write path marks it dirty, so
+        # selection-only reloads reuse the last computed grade.
+        self._audit_grade = None
+        self._grade_dirty = True
 
     def open(self):
         try:
@@ -255,6 +262,25 @@ class DashboardController:
                 _warn(self.messages, "DASH", traceback.format_exc().strip().splitlines()[-1])
         self.reload()
 
+    def _current_audit_grade(self, state, districts, active_features, items):
+        """Return the cached audit grade, recomputing it only when dirty.
+
+        Recompute mirrors `desk_model._ledger_rows`: copy districts and the
+        docket before handing them to `rules.scorecard` so its in-place profile
+        normalization never mutates the controller's live district objects.
+        """
+
+        if self._grade_dirty or self._audit_grade is None:
+            grade, _report = rules.scorecard(
+                state,
+                deepcopy(districts),
+                desk_model._feature_snapshots(active_features),
+                deepcopy(items or ()),
+            )
+            self._audit_grade = grade
+            self._grade_dirty = False
+        return self._audit_grade
+
     def reload(self, *, state=None, districts=None, items=None, active_features=None):
         """Read persisted game rows and render a fresh desk view model.
 
@@ -281,6 +307,7 @@ class DashboardController:
         except Exception:
             visible = {}
         proposal_visible_by_item = {item.item_id: bool(visible.get(item.item_id)) for item in items}
+        audit_grade = self._current_audit_grade(state, districts, active_features, items)
         model = build_desk_model(
             state,
             districts,
@@ -297,6 +324,7 @@ class DashboardController:
             selected_desk_tab=self.selected_desk_tab,
             auto_close_active=self._queue_autoclose_active,
             auto_close_seconds=self._queue_autoclose_seconds,
+            audit_grade=audit_grade,
         )
         self.selected_item_id = model.selected_item_id
         self.selected_report_id = model.selected_report_id
@@ -552,6 +580,7 @@ class DashboardController:
             districts = read_districts(self.paths)
             active_features = read_active_features(self.paths)
             pressure = rules.advance_daily_pressure(state, items, districts, active_features, target_day)
+            self._grade_dirty = True
             write_state(self.paths, state)
             write_daily_pressure_overlays(self.paths, districts, pressure)
             refresh_all(self.paths, self.messages, layer_names={DISTRICTS})
@@ -629,6 +658,8 @@ class DashboardController:
                 refresh_all(self.paths, self.messages)
                 self.seed = seed
                 self.district_layer = DISTRICTS
+                self._audit_grade = None
+                self._grade_dirty = True
                 self.selected_item_id = ""
                 self.last_receipt = None
                 self.report_tabs = []
@@ -868,6 +899,7 @@ class DashboardController:
         """Persist a successful decision result and show its filed report."""
 
         filed_report = _filed_report_text(result, districts)
+        self._grade_dirty = True
         with perf_block("writes"):
             write_district_updates(self.paths, districts, result.report, result.affected_cell_ids)
             write_state(self.paths, state)
@@ -933,6 +965,7 @@ class DashboardController:
                 with perf_block("resolve"):
                     turn_result = rules.advance_turn_result(state, items, districts, active_features, projects)
                 report = turn_result.report
+                self._grade_dirty = True
                 with perf_block("writes"):
                     write_state(self.paths, state)
                     write_projects(self.paths, projects)

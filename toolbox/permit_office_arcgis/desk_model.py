@@ -178,8 +178,14 @@ def build_desk_model(
     selected_desk_tab="applications",
     auto_close_active=False,
     auto_close_seconds=0,
+    audit_grade=None,
 ) -> DeskViewModel:
-    """Format gameplay state into a presentation-only desk model."""
+    """Format gameplay state into a presentation-only desk model.
+
+    `audit_grade`, when provided, is a controller-cached grade that lets the
+    ledger skip the scorecard recompute on selection-only redraws; None keeps
+    the original recompute-via-scorecard behavior.
+    """
 
     proposal_visible_by_item = proposal_visible_by_item or {}
     active_items = [item for item in items if item.status in ACTIVE_STATUSES]
@@ -199,7 +205,7 @@ def build_desk_model(
     )
     case = _case_summary(state, districts, selected)
     action_lanes = _action_lanes(state, districts, selected) if selected else ()
-    ledger_rows = _ledger_rows(state, districts, active_features, active_items)
+    ledger_rows = _ledger_rows(state, districts, active_features, active_items, audit_grade=audit_grade)
     status = status_text or "No report yet. Select a docket row; use Retarget Map when changing targets."
     report_tabs = tuple(report_tabs or _legacy_report_tabs(receipt))
     selected_report_id = _resolve_selected_report_id(report_tabs, selected_report_id)
@@ -833,20 +839,28 @@ def _city_health_descriptor(value: int) -> tuple[str, str]:
     return "Failing", "bad"
 
 
-def _ledger_rows(state, districts, active_features=None, docket=None) -> tuple[LedgerRow, ...]:
-    """Build the city ledger rows shown in the dashboard sidebar."""
+def _ledger_rows(state, districts, active_features=None, docket=None, audit_grade=None) -> tuple[LedgerRow, ...]:
+    """Build the city ledger rows shown in the dashboard sidebar.
+
+    When `audit_grade` is provided the caller has a cached grade, so the
+    scorecard recompute (and its two load-bearing deepcopies) is skipped.
+    When it is None we recompute via `rules.scorecard`, copying districts and
+    the docket so `generate_audit_result`'s in-place normalize cannot mutate the
+    districts this function reads afterward.
+    """
 
     health = _city_health_index(state)
     health_word, health_tone = _city_health_descriptor(health)
     heat = rules.heat_summary(state)
-    # NOTE: the deepcopy is load-bearing. `scorecard` -> `generate_audit_result`
-    # calls `normalize_profile` in place, which re-derives service_gap /
-    # displacement / etc. On normalized inputs that is idempotent, but the ledger
-    # summaries below read the same `districts`, so mutating them here would
-    # change Services/Housing/Pressure for any caller passing semi-normalized
-    # state. Dropping this copy safely needs a controller-side grade cache (see
-    # render-optimization spike), not a bare removal.
-    audit_grade, _audit_report = rules.scorecard(state, deepcopy(districts), _feature_snapshots(active_features), deepcopy(docket or ()))
+    # NOTE: the deepcopy on the None path is load-bearing. `scorecard` ->
+    # `generate_audit_result` calls `normalize_profile` in place, which re-derives
+    # service_gap / displacement / etc. On normalized inputs that is idempotent,
+    # but the ledger summaries below read the same `districts`, so mutating them
+    # here would change Services/Housing/Pressure for any caller passing
+    # semi-normalized state. The controller passes a cached `audit_grade` to skip
+    # this recompute on selection-only reloads; the None path keeps the safe copy.
+    if audit_grade is None:
+        audit_grade, _audit_report = rules.scorecard(state, deepcopy(districts), _feature_snapshots(active_features), deepcopy(docket or ()))
     population = rules.population_city_summary(districts)
     incidents = rules.incident_summary(districts)
     service_summary = _city_service_summary(districts)
