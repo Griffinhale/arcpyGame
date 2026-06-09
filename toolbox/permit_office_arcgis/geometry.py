@@ -900,14 +900,21 @@ def _get_or_add_layer(active_map, source, name):
     return layer, True
 
 
+def _set_definition_query(layer, definition_query):
+    """Set a layer definition query when the ArcGIS object supports it."""
+
+    if definition_query is None:
+        return
+    try:
+        layer.definitionQuery = definition_query
+    except Exception:
+        pass
+
+
 def _prepare_district_display_layer(layer, messages, definition_query=None):
     """Style a district-source layer by display_state for redraw experiments."""
 
-    if definition_query is not None:
-        try:
-            layer.definitionQuery = definition_query
-        except Exception:
-            pass
+    _set_definition_query(layer, definition_query)
     _tune_layer_visibility(layer, "district_display")
     _configure_labels(layer, "districts")
     apply_simple_symbology(layer, "district_display", messages)
@@ -922,7 +929,10 @@ def _experiment_volatile_overlay(paths, messages, name, layer_names):
         _log_experiment(messages, name, "volatile-overlay", "no-active-map", started)
         return
     layer, added = _get_or_add_layer(active_map, paths["districts"], VOLATILE_OVERLAY_LAYER)
-    _prepare_district_display_layer(layer, messages, VOLATILE_OVERLAY_QUERY)
+    if added:
+        _prepare_district_display_layer(layer, messages, VOLATILE_OVERLAY_QUERY)
+    else:
+        _set_definition_query(layer, VOLATILE_OVERLAY_QUERY)
     arcpy.RefreshLayer(VOLATILE_OVERLAY_LAYER)
     _log_experiment(messages, name, "volatile-overlay", "ok", started, f"target={VOLATILE_OVERLAY_LAYER!r} added={added}")
 

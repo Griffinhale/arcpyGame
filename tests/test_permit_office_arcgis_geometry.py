@@ -327,6 +327,28 @@ def test_redraw_experiment_volatile_overlay_adds_symbolized_map_layer(monkeypatc
     assert any("name=volatile-overlay path=volatile-overlay status=ok" in line for line in messages.messages)
 
 
+def test_redraw_experiment_volatile_overlay_reuses_existing_symbology(monkeypatch):
+    """Verify hot volatile overlay refresh avoids reapplying symbology."""
+
+    calls = []
+    layer = SimpleNamespace(name=geometry.VOLATILE_OVERLAY_LAYER, visible=True, definitionQuery="", transparency=None)
+    fake_map = SimpleNamespace(listLayers=lambda: [layer], addDataFromPath=lambda source: calls.append(("add", source)))
+    fake = SimpleNamespace(
+        mp=SimpleNamespace(ArcGISProject=lambda current: SimpleNamespace(activeMap=fake_map)),
+        RefreshLayer=lambda name: calls.append(("refresh", name)),
+    )
+    monkeypatch.setattr(geometry, "arcpy", fake)
+    monkeypatch.setattr(geometry, "apply_simple_symbology", lambda target, key, messages: calls.append(("sym", target.name, key)))
+    messages = CapturingMessages()
+
+    geometry.run_redraw_experiment(_paths(), messages, "volatile-overlay", layer_names={geometry.DISTRICTS}, dirty_scope="districts", mode="district-readd")
+
+    assert ("add", "districts") not in calls
+    assert layer.definitionQuery == "display_state = 'daily_pressure'"
+    assert not any(call[0] == "sym" for call in calls)
+    assert ("refresh", "Permit Office Volatile Overlay") in calls
+
+
 def test_redraw_experiment_predrawn_swap_toggles_snapshot_visibility(monkeypatch):
     """Verify the pre-drawn swap probe toggles candidate snapshot layers."""
 
