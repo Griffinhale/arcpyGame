@@ -82,6 +82,30 @@ lines (`[WORKSPACE]`, `[REBUILD]`, `[DASH]`, `[SYM]`).
       PASS/CONDITIONAL/FAIL flavor; the week label reads `12/12 CLOSED`. Repeated
       End Week after close is idempotent (no duplicate receipts).
 
+## 10. Pacing and redraw budget
+- [ ] Start a game with `PERMIT_OFFICE_PERF=1`. Confirm the filing deadline is
+      2:30 and each office day lasts about 30 seconds.
+- [ ] Let the week advance from Monday to Tuesday. Confirm the desk status names
+      rising pressure, and the log does not show a district re-add unless a
+      configured checkpoint is reached.
+- [ ] Let the week advance to a configured checkpoint. Confirm the log includes
+      `[REBUILD] targeted=['PermitDistricts'] mode=district-readd dirty=districts`.
+- [ ] Record baseline timings for a normal decision and a checkpoint tick:
+      `remove`, `add`, `refresh`, and total `rebuild`.
+
+## 11. Redraw experiments
+- [ ] Volatile overlay experiment: create a small pressure/odds overlay layer and
+      compare refresh/recreate timing against district-family re-add.
+- [ ] ArcGIS alternative-path experiment: test definition query swap, layer-file
+      apply, CIM renderer edit, in-memory layer, and apply-symbology-from-layer.
+      Record whether each path reloads changed visual state correctly.
+- [ ] Pre-drawn state experiment: generate mid-week band snapshots before the
+      week starts, then test visibility/source/definition swaps at runtime.
+      Record startup cost, resume behavior, Contents clutter, and runtime swap
+      timing.
+- [ ] Promote no experiment unless it preserves visual correctness after GDB
+      writes and reduces live redraw time versus the baseline.
+
 ---
 **On any failure:** capture the Geoprocessing message log + a screenshot, note the
 exact step, and file it. Items 2 (grievance), 1 (workspace), 3 (repaint), and 7
