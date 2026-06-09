@@ -1010,6 +1010,7 @@ def _experiment_predrawn_rehydrate(paths, messages, name, layer_names):
     """Re-add one hidden predrawn snapshot from the GDB, then swap visibility."""
 
     started = time.perf_counter()
+    use_style_cache = name == "predrawn-rehydrate-style-cache"
     phases = _PhaseTimer()
     active_map = _active_map()
     if active_map is None:
@@ -1033,8 +1034,8 @@ def _experiment_predrawn_rehydrate(paths, messages, name, layer_names):
     phases.mark("remove_hidden")
     layer, _added = _get_or_add_layer(active_map, paths["districts"], hidden_name)
     phases.mark("addDataFromPath")
-    _prepare_district_display_layer(layer, messages, "1=1")
-    phases.mark("labels_symbology")
+    skipped_style = _prepare_district_display_layer(layer, messages, "1=1", skip_if_style_matches=use_style_cache)
+    phases.mark("style_cached" if skipped_style else "labels_symbology")
     for snapshot in _predrawn_snapshots(active_map):
         snapshot.visible = snapshot is layer
     phases.mark("visibility_swap")

@@ -539,6 +539,41 @@ def test_redraw_experiment_rehydrate_variants_dispatch_to_rehydrate(monkeypatch)
     assert calls == [("predrawn-rehydrate-style-cache", {geometry.DISTRICTS})]
 
 
+def test_predrawn_rehydrate_style_cache_variant_requests_style_skip(monkeypatch):
+    """Verify style-cache variant probes skipping repeated style transforms."""
+
+    calls = []
+    active = SimpleNamespace(name="Permit Office Predrawn Active", visible=True, definitionQuery="1=1", transparency=None)
+    idle = SimpleNamespace(name="Permit Office Predrawn Idle", visible=False, definitionQuery="1=1", transparency=None)
+    layers = [active, idle]
+
+    def remove_layer(layer):
+        layers.remove(layer)
+
+    def add_data(source):
+        layer = SimpleNamespace(name="raw", visible=True, definitionQuery="", transparency=None)
+        layers.append(layer)
+        return layer
+
+    fake_map = SimpleNamespace(listLayers=lambda: list(layers), removeLayer=remove_layer, addDataFromPath=add_data)
+    fake = SimpleNamespace(
+        mp=SimpleNamespace(ArcGISProject=lambda current: SimpleNamespace(activeMap=fake_map)),
+        RefreshLayer=lambda name: calls.append(("refresh", name)),
+    )
+    monkeypatch.setattr(geometry, "arcpy", fake)
+    monkeypatch.setattr(
+        geometry,
+        "_prepare_district_display_layer",
+        lambda layer, messages, definition_query=None, skip_if_style_matches=False: calls.append(("prepare", skip_if_style_matches)) or False,
+    )
+    messages = CapturingMessages()
+
+    handled = geometry.run_redraw_experiment(_paths(), messages, "predrawn-rehydrate-style-cache", layer_names={geometry.DISTRICTS})
+
+    assert handled is True
+    assert ("prepare", True) in calls
+
+
 def test_redraw_experiment_alt_refresh_tries_non_readd_paths(monkeypatch):
     """Verify the alt-refresh probe tries query, visibility, CIM, and temp-layer paths."""
 
