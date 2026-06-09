@@ -530,13 +530,13 @@ def test_redraw_experiment_rehydrate_variants_dispatch_to_rehydrate(monkeypatch)
     """Verify corrected rehydrate variants start from the known-correct path."""
 
     calls = []
-    monkeypatch.setattr(geometry, "_experiment_predrawn_rehydrate", lambda paths, messages, name, layer_names: calls.append((name, layer_names)))
+    monkeypatch.setattr(geometry, "_experiment_predrawn_rehydrate", lambda paths, messages, name, layer_names, remove_scope=None: calls.append((name, layer_names, remove_scope)))
     messages = CapturingMessages()
 
     handled = geometry.run_redraw_experiment(_paths(), messages, "predrawn-rehydrate-style-cache", layer_names={geometry.DISTRICTS})
 
     assert handled is True
-    assert calls == [("predrawn-rehydrate-style-cache", {geometry.DISTRICTS})]
+    assert calls == [("predrawn-rehydrate-style-cache", {geometry.DISTRICTS}, None)]
 
 
 def test_predrawn_rehydrate_style_cache_variant_requests_style_skip(monkeypatch):
@@ -634,6 +634,46 @@ def test_predrawn_rehydrate_hidden_first_refreshes_before_visibility_swap(monkey
 
     assert handled is True
     assert ("refresh", "Permit Office Predrawn Idle", False) in calls
+
+
+def test_predrawn_rehydrate_refreshes_feature_layers_in_scope(monkeypatch):
+    """Verify rehydrate variants still redraw non-district layers in scope."""
+
+    calls = []
+    active = SimpleNamespace(name="Permit Office Predrawn Active", visible=True, definitionQuery="1=1", transparency=None)
+    idle = SimpleNamespace(name="Permit Office Predrawn Idle", visible=False, definitionQuery="1=1", transparency=None)
+    points = SimpleNamespace(name=geometry.POINTS, visible=True)
+    layers = [active, idle, points]
+
+    def remove_layer(layer):
+        layers.remove(layer)
+
+    def add_data(source):
+        layer = SimpleNamespace(name="raw", visible=True, definitionQuery="", transparency=None)
+        layers.append(layer)
+        return layer
+
+    fake_map = SimpleNamespace(listLayers=lambda: list(layers), removeLayer=remove_layer, addDataFromPath=add_data)
+    fake = SimpleNamespace(
+        mp=SimpleNamespace(ArcGISProject=lambda current: SimpleNamespace(activeMap=fake_map)),
+        RefreshLayer=lambda name: calls.append(("refresh", name)),
+    )
+    monkeypatch.setattr(geometry, "arcpy", fake)
+    monkeypatch.setattr(geometry, "apply_simple_symbology", lambda target, key, messages: None)
+    messages = CapturingMessages()
+
+    handled = geometry.run_redraw_experiment(
+        _paths(),
+        messages,
+        "predrawn-rehydrate-style-cache",
+        layer_names={geometry.DISTRICTS, geometry.POINTS},
+        dirty_scope="districts",
+        mode="district-readd",
+    )
+
+    assert handled is True
+    assert ("refresh", "Permit Office Predrawn Idle") in calls
+    assert ("refresh", geometry.POINTS) in calls
 
 
 def test_redraw_experiment_alt_refresh_tries_non_readd_paths(monkeypatch):

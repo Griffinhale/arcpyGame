@@ -1006,7 +1006,29 @@ def _experiment_predrawn_swap(paths, messages, name, layer_names):
     _log_experiment(messages, name, "predrawn-swap", "ok", started, f"target={getattr(target, 'name', PREDRAWN_ACTIVE_LAYER)!r}")
 
 
-def _experiment_predrawn_rehydrate(paths, messages, name, layer_names):
+def _feature_layer_scope(layer_names):
+    """Return support feature layers that a redraw experiment must still refresh."""
+
+    feature_layers = frozenset((POINTS, LINES, ZONES))
+    if layer_names is None:
+        return set(feature_layers)
+    return set(layer_names) & feature_layers
+
+
+def _refresh_feature_scope(paths, messages, layer_names, remove_scope=None):
+    """Refresh/re-add non-district layers left outside predrawn district snapshots."""
+
+    feature_scope = _feature_layer_scope(layer_names)
+    if not feature_scope:
+        return
+    readd_scope = feature_scope & set(remove_scope or ())
+    if readd_scope:
+        remove_outputs_from_map(messages, layer_names=readd_scope)
+    add_outputs_to_map(paths, messages, layer_names=feature_scope)
+    refresh_all(paths, messages, layer_names=feature_scope)
+
+
+def _experiment_predrawn_rehydrate(paths, messages, name, layer_names, remove_scope=None):
     """Re-add one hidden predrawn snapshot from the GDB, then swap visibility."""
 
     started = time.perf_counter()
@@ -1024,6 +1046,8 @@ def _experiment_predrawn_rehydrate(paths, messages, name, layer_names):
         phases.mark("seed_snapshots")
         arcpy.RefreshLayer(PREDRAWN_ACTIVE_LAYER)
         phases.mark("RefreshLayer")
+        _refresh_feature_scope(paths, messages, layer_names, remove_scope=remove_scope)
+        phases.mark("feature_layers")
         _log_experiment(messages, name, "predrawn-rehydrate", "seeded", started, f"target={PREDRAWN_ACTIVE_LAYER!r} {phases.summary()}")
         return
     hidden = next((layer for layer in snapshots if not bool(getattr(layer, "visible", True))), snapshots[-1])
@@ -1047,6 +1071,8 @@ def _experiment_predrawn_rehydrate(paths, messages, name, layer_names):
     if not refresh_hidden_first:
         arcpy.RefreshLayer(hidden_name)
         phases.mark("RefreshLayer")
+    _refresh_feature_scope(paths, messages, layer_names, remove_scope=remove_scope)
+    phases.mark("feature_layers")
     _log_experiment(messages, name, "predrawn-rehydrate", "ok", started, f"target={hidden_name!r} {phases.summary()}")
 
 
@@ -1128,9 +1154,9 @@ def run_redraw_experiment(paths, messages, experiment, layer_names=None, remove_
         elif name == "predrawn-swap":
             _experiment_predrawn_swap(paths, messages, name, layer_names)
         elif name == "predrawn-rehydrate":
-            _experiment_predrawn_rehydrate(paths, messages, name, layer_names)
+            _experiment_predrawn_rehydrate(paths, messages, name, layer_names, remove_scope=remove_scope)
         elif name.startswith("predrawn-rehydrate-"):
-            _experiment_predrawn_rehydrate(paths, messages, name, layer_names)
+            _experiment_predrawn_rehydrate(paths, messages, name, layer_names, remove_scope=remove_scope)
         elif name == "alt-refresh":
             _experiment_alt_refresh(paths, messages, name, layer_names)
         elif name.startswith("alt-"):
