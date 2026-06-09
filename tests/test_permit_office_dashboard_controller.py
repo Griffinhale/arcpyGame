@@ -480,6 +480,36 @@ def test_selecting_reports_pauses_queue_autoclose():
     assert ("cancel", "after-1") in canceled
 
 
+def test_week_deadline_is_two_and_half_minutes_split_across_five_days():
+    """Verify the faster pacing constants keep the five office-day structure."""
+
+    assert dashboard.WEEK_DEADLINE_SECONDS == 150
+    assert len(dashboard.WORK_WEEK_DAYS) == 5
+    assert dashboard.WORK_DAY_SECONDS == 30
+
+
+def test_queue_autoclose_defaults_to_two_seconds():
+    """Verify queue clear auto-close uses the faster default delay."""
+
+    calls = []
+    controller = dashboard.DashboardController({}, "district_layer", 2026, object())
+    controller.status_var = dashboard._StatusProxy(controller)
+
+    class FakeRoot:
+        def after(self, delay, callback):
+            calls.append(("after", delay, callback.__name__))
+            return "after-1"
+
+    controller.root = FakeRoot()
+
+    controller._schedule_queue_autoclose()
+
+    assert controller._queue_autoclose_active is True
+    assert controller._queue_autoclose_seconds == 2
+    assert calls == [("after", 2000, "_queue_autoclose_tick")]
+    assert controller.status_text == "Queue cleared. Week closes automatically in 2 seconds."
+
+
 def test_end_game_closes_dashboard_without_clearing_rows():
     """Verify End Game only closes the dashboard window."""
 

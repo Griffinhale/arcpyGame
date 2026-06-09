@@ -50,8 +50,9 @@ from . import desk_model
 from .desk_view import DeskCallbacks, Palette, PermitDeskView, ReceiptModel, ReportTab, build_desk_model, receipt_metrics
 
 
-WEEK_DEADLINE_SECONDS = 5 * 60
+WEEK_DEADLINE_SECONDS = 150
 TIMER_TICK_MS = 1000
+QUEUE_AUTOCLOSE_SECONDS = 2
 STARTUP_GEOMETRY = "1360x1040"
 STARTUP_MIN_SIZE = (1180, 860)
 WORK_WEEK_DAYS = (
@@ -458,7 +459,7 @@ class DashboardController:
         self._show_help = not self._show_help
         self.reload()
 
-    def _schedule_queue_autoclose(self, seconds=3):
+    def _schedule_queue_autoclose(self, seconds=QUEUE_AUTOCLOSE_SECONDS):
         self._cancel_queue_autoclose_timer()
         self._queue_autoclose_active = True
         self._queue_autoclose_seconds = int(seconds)
