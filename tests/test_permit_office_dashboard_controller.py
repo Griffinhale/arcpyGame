@@ -309,6 +309,39 @@ def test_rebuild_logs_dirty_scope_and_mode(monkeypatch):
     assert ("REBUILD", "targeted=['PermitDistricts'] mode=district-readd dirty=districts") in logs
 
 
+def test_rebuild_uses_experiment_when_env_is_set(monkeypatch):
+    """Verify redraw experiments replace normal remove/add work only when opted in."""
+
+    calls = []
+    monkeypatch.setenv(dashboard.REDRAW_EXPERIMENT_ENV, "volatile-overlay")
+    monkeypatch.setattr(dashboard, "clear_output_selections", lambda paths: calls.append(("clear", None)))
+    monkeypatch.setattr(dashboard, "remove_outputs_from_map", lambda messages, layer_names=None: calls.append(("remove", layer_names)))
+    monkeypatch.setattr(dashboard, "add_outputs_to_map", lambda paths, messages, layer_names=None: calls.append(("add", layer_names)))
+    monkeypatch.setattr(dashboard, "refresh_all", lambda paths, messages, layer_names=None: calls.append(("refresh", layer_names)))
+    monkeypatch.setattr(
+        dashboard,
+        "run_redraw_experiment",
+        lambda paths, messages, experiment, **kwargs: calls.append(("experiment", experiment, kwargs)),
+    )
+
+    plan = dashboard.rebuild_output_layers({}, object(), layer_names={dashboard.DISTRICTS}, dirty_scope=dashboard.DIRTY_DISTRICTS)
+
+    assert plan.mode == "district-readd"
+    assert calls == [
+        ("clear", None),
+        (
+            "experiment",
+            "volatile-overlay",
+            {
+                "layer_names": {dashboard.DISTRICTS},
+                "remove_scope": {dashboard.DISTRICTS},
+                "dirty_scope": dashboard.DIRTY_DISTRICTS,
+                "mode": "district-readd",
+            },
+        ),
+    ]
+
+
 def test_standalone_rebuild_emits_perf_summary(monkeypatch):
     """Verify timer/checkpoint rebuilds log perf outside turn sessions."""
 

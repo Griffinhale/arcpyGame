@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import random
+import time
 import uuid
 
 import arcpy
@@ -19,6 +20,10 @@ from .symbology_config import LAYER_TRANSPARENCY, RENDER_FIELD_BY_LAYER_KEY, SYM
 # own visual channel without one fill having to encode all three.
 DISTRICT_PROSPERITY = "District Prosperity"
 DISTRICT_IDENTITY = "District Identity"
+VOLATILE_OVERLAY_LAYER = "Permit Office Volatile Overlay"
+PREDRAWN_LAYER_PREFIX = "Permit Office Predrawn"
+PREDRAWN_ACTIVE_LAYER = "Permit Office Predrawn Active"
+ALT_REFRESH_VIEW_LAYER = "Permit Office Alt Refresh View"
 
 # District geometry is fixed for the life of a game (only attributes change), so
 # the SHAPE@ pull — the most expensive field on the districts table — is memoized
@@ -851,6 +856,148 @@ def remove_outputs_from_map(messages, layer_names=None):
             _log(messages, "MAP", f"removed {removed} stale Permit Office layer(s)")
     except Exception as exc:
         _warn(messages, "MAP", f"remove stale outputs failed: {exc}")
+
+
+def _active_map():
+    """Return the current active ArcGIS map, or None when unavailable."""
+
+    aprx = arcpy.mp.ArcGISProject("CURRENT")
+    return aprx.activeMap
+
+
+def _layers_by_name(active_map):
+    """Return active map layers keyed by their display name."""
+
+    if active_map is None:
+        return {}
+    return {getattr(layer, "name", ""): layer for layer in active_map.listLayers()}
+
+
+def _experiment_layer_names(layer_names):
+    """Return layer names targeted by an experiment."""
+
+    return set(layer_names or (DISTRICTS, POINTS, LINES, ZONES))
+
+
+def _log_experiment(messages, name, path, status, started, detail=""):
+    """Emit one compact live-experiment timing line."""
+
+    elapsed = time.perf_counter() - started
+    suffix = f" {detail}" if detail else ""
+    _log(messages, "EXPERIMENT", f"name={name} path={path} status={status} elapsed={elapsed:.3f}{suffix}")
+
+
+def _experiment_volatile_overlay(paths, messages, name, layer_names):
+    """Create or refresh a small volatile pressure overlay layer."""
+
+    started = time.perf_counter()
+    where = "daily_pressure > 0 OR display_state <> 'normal'"
+    arcpy.management.MakeFeatureLayer(paths["districts"], VOLATILE_OVERLAY_LAYER, where)
+    arcpy.RefreshLayer(VOLATILE_OVERLAY_LAYER)
+    _log_experiment(messages, name, "volatile-overlay", "ok", started, f"target={VOLATILE_OVERLAY_LAYER!r}")
+
+
+def _experiment_predrawn_swap(paths, messages, name, layer_names):
+    """Swap visibility among pre-drawn district snapshot layers."""
+
+    started = time.perf_counter()
+    active_map = _active_map()
+    snapshots = [layer for layer in _layers_by_name(active_map).values() if getattr(layer, "name", "").startswith(PREDRAWN_LAYER_PREFIX)]
+    if not snapshots:
+        arcpy.management.MakeFeatureLayer(paths["districts"], PREDRAWN_ACTIVE_LAYER, "1=1")
+        arcpy.RefreshLayer(PREDRAWN_ACTIVE_LAYER)
+        _log_experiment(messages, name, "predrawn-swap", "seeded", started, f"target={PREDRAWN_ACTIVE_LAYER!r}")
+        return
+    target = snapshots[0]
+    for layer in snapshots:
+        layer.visible = layer is target
+    arcpy.RefreshLayer(getattr(target, "name", PREDRAWN_ACTIVE_LAYER))
+    _log_experiment(messages, name, "predrawn-swap", "ok", started, f"target={getattr(target, 'name', PREDRAWN_ACTIVE_LAYER)!r}")
+
+
+def _experiment_definition_query(layer):
+    """Poke a layer definition query without changing its final value."""
+
+    original = getattr(layer, "definitionQuery", "")
+    layer.definitionQuery = "1=1" if not original else f"({original}) AND 1=1"
+    layer.definitionQuery = original
+
+
+def _experiment_visibility(layer):
+    """Flip layer visibility without changing its final value."""
+
+    original = getattr(layer, "visible", True)
+    layer.visible = not bool(original)
+    layer.visible = original
+
+
+def _experiment_cim(layer):
+    """Round-trip a layer CIM definition when supported."""
+
+    if not hasattr(layer, "getDefinition") or not hasattr(layer, "setDefinition"):
+        return
+    definition = layer.getDefinition("V3")
+    layer.setDefinition(definition)
+
+
+def _experiment_apply_symbology(layer):
+    """Apply a layer's current symbology back onto itself when supported."""
+
+    apply_symbology = getattr(arcpy.management, "ApplySymbologyFromLayer", None)
+    if apply_symbology is None:
+        return
+    apply_symbology(layer, layer)
+
+
+def _experiment_make_feature_layer(paths):
+    """Create a temporary feature-layer view as an alternative paint path."""
+
+    arcpy.management.MakeFeatureLayer(paths["districts"], ALT_REFRESH_VIEW_LAYER, "1=1")
+    arcpy.RefreshLayer(ALT_REFRESH_VIEW_LAYER)
+
+
+def _experiment_alt_refresh(paths, messages, name, layer_names, variant="all"):
+    """Try ArcGIS refresh paths that avoid remove/add."""
+
+    started = time.perf_counter()
+    active_map = _active_map()
+    targets = _experiment_layer_names(layer_names)
+    layers = [layer for layer in _layers_by_name(active_map).values() if getattr(layer, "name", "") in targets]
+    for layer in layers:
+        if variant in ("all", "definition-query"):
+            _experiment_definition_query(layer)
+        if variant in ("all", "visibility"):
+            _experiment_visibility(layer)
+        if variant in ("all", "cim"):
+            _experiment_cim(layer)
+        if variant in ("all", "symbology"):
+            _experiment_apply_symbology(layer)
+        arcpy.RefreshLayer(getattr(layer, "name", layer))
+    if variant in ("all", "make-feature-layer"):
+        _experiment_make_feature_layer(paths)
+    path = "alt-refresh" if variant == "all" else f"alt-{variant}"
+    _log_experiment(messages, name, path, "ok", started, f"layers={len(layers)}")
+
+
+def run_redraw_experiment(paths, messages, experiment, layer_names=None, remove_scope=None, dirty_scope=None, mode=None):
+    """Run an opt-in live redraw experiment without raising into gameplay."""
+
+    name = str(experiment or "").strip()
+    try:
+        if name == "volatile-overlay":
+            _experiment_volatile_overlay(paths, messages, name, layer_names)
+        elif name == "predrawn-swap":
+            _experiment_predrawn_swap(paths, messages, name, layer_names)
+        elif name == "alt-refresh":
+            _experiment_alt_refresh(paths, messages, name, layer_names)
+        elif name.startswith("alt-"):
+            _experiment_alt_refresh(paths, messages, name, layer_names, variant=name.removeprefix("alt-"))
+        else:
+            started = time.perf_counter()
+            refresh_all(paths, messages, layer_names=layer_names)
+            _log_experiment(messages, name, "fallback-refresh", "unknown", started)
+    except Exception as exc:
+        _warn(messages, "EXPERIMENT", f"name={name} failed: {exc}")
 
 
 def apply_simple_symbology(layer, key, messages):

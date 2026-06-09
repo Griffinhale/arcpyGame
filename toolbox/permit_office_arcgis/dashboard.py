@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import time
 import traceback
+import os
 from copy import deepcopy
 from dataclasses import dataclass
 
@@ -22,6 +23,7 @@ from .geometry import (
     proposal_visible_map,
     refresh_all,
     remove_outputs_from_map,
+    run_redraw_experiment,
     select_case_context,
     selected_cell_ids,
     seed_city_features,
@@ -65,6 +67,7 @@ WORK_WEEK_DAYS = (
 )
 WORK_DAY_SECONDS = WEEK_DEADLINE_SECONDS // len(WORK_WEEK_DAYS)
 MIDWEEK_MAP_REDRAW_DAYS = frozenset((2, 4))
+REDRAW_EXPERIMENT_ENV = "PERMIT_OFFICE_REDRAW_EXPERIMENT"
 
 
 def prepare_dashboard_session(paths, seed, messages, resume=True):
@@ -1111,6 +1114,12 @@ def _normalize_layer_names(layer_names):
     return frozenset(layer_names)
 
 
+def _configured_redraw_experiment():
+    """Return the opt-in redraw experiment name, or an empty string."""
+
+    return os.environ.get(REDRAW_EXPERIMENT_ENV, "").strip()
+
+
 def _redraw_plan(layer_names=None, force_readd=False, dirty_scope=None):
     """Return concrete map work for a dirty scope."""
 
@@ -1161,6 +1170,20 @@ def rebuild_output_layers(paths, messages, layer_names=None, force_readd=False, 
         scope = "all" if effective_layer_names is None else f"targeted={sorted(effective_layer_names)}"
         dirty = dirty_scope or "layers"
         _log(messages, "REBUILD", f"{scope} mode={mode} dirty={dirty}")
+        experiment = _configured_redraw_experiment()
+        if experiment:
+            remove_scope = None if plan.remove_scope is None else set(plan.remove_scope)
+            with perf_block(f"experiment_{experiment}"):
+                run_redraw_experiment(
+                    paths,
+                    messages,
+                    experiment,
+                    layer_names=effective_layer_names,
+                    remove_scope=remove_scope,
+                    dirty_scope=dirty_scope,
+                    mode=mode,
+                )
+            return plan
         if plan.remove_scope is not None or plan.mode == "force-readd":
             remove_scope = None if plan.remove_scope is None else set(plan.remove_scope)
             with perf_block("remove"):
