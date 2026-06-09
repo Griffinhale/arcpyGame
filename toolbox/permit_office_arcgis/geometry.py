@@ -1024,7 +1024,7 @@ def _refresh_feature_scope(paths, messages, layer_names, remove_scope=None):
     readd_scope = feature_scope & set(remove_scope or ())
     if readd_scope:
         remove_outputs_from_map(messages, layer_names=readd_scope)
-    add_outputs_to_map(paths, messages, layer_names=feature_scope)
+        add_outputs_to_map(paths, messages, layer_names=readd_scope)
     refresh_all(paths, messages, layer_names=feature_scope)
 
 

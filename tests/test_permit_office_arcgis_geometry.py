@@ -676,6 +676,46 @@ def test_predrawn_rehydrate_refreshes_feature_layers_in_scope(monkeypatch):
     assert ("refresh", geometry.POINTS) in calls
 
 
+def test_refresh_feature_scope_refreshes_without_readd_when_not_in_remove_scope(monkeypatch):
+    """Verify broad rehydrate rebuilds do not re-symbolize unchanged feature layers."""
+
+    calls = []
+    monkeypatch.setattr(geometry, "remove_outputs_from_map", lambda messages, layer_names=None: calls.append(("remove", layer_names)))
+    monkeypatch.setattr(geometry, "add_outputs_to_map", lambda paths, messages, layer_names=None: calls.append(("add", layer_names)))
+    monkeypatch.setattr(geometry, "refresh_all", lambda paths, messages, layer_names=None: calls.append(("refresh", layer_names)))
+
+    geometry._refresh_feature_scope(
+        _paths(),
+        CapturingMessages(),
+        layer_names={geometry.DISTRICTS, geometry.POINTS, geometry.LINES, geometry.ZONES},
+        remove_scope={geometry.DISTRICTS},
+    )
+
+    assert calls == [("refresh", {geometry.POINTS, geometry.LINES, geometry.ZONES})]
+
+
+def test_refresh_feature_scope_readds_only_features_in_remove_scope(monkeypatch):
+    """Verify point decisions can still re-add dirty point layers."""
+
+    calls = []
+    monkeypatch.setattr(geometry, "remove_outputs_from_map", lambda messages, layer_names=None: calls.append(("remove", layer_names)))
+    monkeypatch.setattr(geometry, "add_outputs_to_map", lambda paths, messages, layer_names=None: calls.append(("add", layer_names)))
+    monkeypatch.setattr(geometry, "refresh_all", lambda paths, messages, layer_names=None: calls.append(("refresh", layer_names)))
+
+    geometry._refresh_feature_scope(
+        _paths(),
+        CapturingMessages(),
+        layer_names={geometry.DISTRICTS, geometry.POINTS},
+        remove_scope={geometry.DISTRICTS, geometry.POINTS},
+    )
+
+    assert calls == [
+        ("remove", {geometry.POINTS}),
+        ("add", {geometry.POINTS}),
+        ("refresh", {geometry.POINTS}),
+    ]
+
+
 def test_redraw_experiment_alt_refresh_tries_non_readd_paths(monkeypatch):
     """Verify the alt-refresh probe tries query, visibility, CIM, and temp-layer paths."""
 
