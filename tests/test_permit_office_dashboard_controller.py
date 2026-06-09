@@ -501,6 +501,31 @@ def test_finish_decision_schedules_queue_autoclose_when_no_open_apps(monkeypatch
     assert calls == ["autoclose"]
 
 
+def test_finish_decision_passes_dirty_district_scope_to_rebuild(monkeypatch):
+    """Verify decisions declare their district render dirtiness explicitly."""
+
+    controller = dashboard.DashboardController({"districts": "districts"}, "district_layer", 2026, object())
+    controller.status_var = dashboard._StatusProxy(controller)
+    item = rules.DocketItem("open", "street_vendor_compact", "Street Vendor Compact", "POINT", 1, target_cell_ids=["D0000"])
+    state = rules.CityState()
+    result = rules.DecisionResult(True, "approve", item.item_id, "Approved.", affected_cell_ids=["D0000"])
+    calls = []
+
+    monkeypatch.setattr(dashboard, "write_district_updates", lambda *args, **kwargs: None)
+    monkeypatch.setattr(dashboard, "write_state", lambda *args, **kwargs: None)
+    monkeypatch.setattr(dashboard, "write_projects", lambda *args, **kwargs: None)
+    monkeypatch.setattr(dashboard, "write_docket_item", lambda *args, **kwargs: None)
+    monkeypatch.setattr(dashboard, "action_log", lambda *args, **kwargs: None)
+    monkeypatch.setattr(dashboard, "command_finish", lambda *args, **kwargs: None)
+    monkeypatch.setattr(dashboard, "read_docket", lambda paths: [])
+    monkeypatch.setattr(dashboard, "rebuild_output_layers", lambda paths, messages, **kwargs: calls.append(kwargs))
+    monkeypatch.setattr(controller, "_schedule_queue_autoclose", lambda: None)
+
+    controller._finish_decision("CMD-1", item, state, {}, {}, result, layer_names={dashboard.DISTRICTS, dashboard.POINTS})
+
+    assert calls == [{"layer_names": {dashboard.DISTRICTS, dashboard.POINTS}, "dirty_scope": dashboard.DIRTY_DISTRICTS}]
+
+
 def test_cancel_queue_autoclose_cancels_scheduled_callback():
     """Verify explicit cancel clears the queue auto-close timer."""
 

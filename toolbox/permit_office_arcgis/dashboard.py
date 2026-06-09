@@ -942,7 +942,7 @@ class DashboardController:
             write_docket_item(self.paths, item)
             action_log(self.paths, state, result)
             command_finish(self.paths, command_id, result.command_status, filed_report)
-        rebuild_output_layers(self.paths, self.messages, layer_names=layer_names)
+        rebuild_output_layers(self.paths, self.messages, layer_names=layer_names, dirty_scope=DIRTY_DISTRICTS)
         self.district_layer = DISTRICTS
         self.status_var.set(filed_report)
         self._record_receipt(item.title, filed_report, result.affected_cell_ids, state)
