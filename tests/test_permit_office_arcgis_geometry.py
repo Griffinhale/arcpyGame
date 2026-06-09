@@ -574,6 +574,68 @@ def test_predrawn_rehydrate_style_cache_variant_requests_style_skip(monkeypatch)
     assert ("prepare", True) in calls
 
 
+def test_predrawn_rehydrate_visible_first_refreshes_after_visibility_swap(monkeypatch):
+    """Verify visible-first variant keeps refresh after layer is shown."""
+
+    calls = []
+    active = SimpleNamespace(name="Permit Office Predrawn Active", visible=True, definitionQuery="1=1", transparency=None)
+    idle = SimpleNamespace(name="Permit Office Predrawn Idle", visible=False, definitionQuery="1=1", transparency=None)
+    layers = [active, idle]
+
+    def remove_layer(layer):
+        layers.remove(layer)
+
+    def add_data(source):
+        layer = SimpleNamespace(name="raw", visible=True, definitionQuery="", transparency=None)
+        layers.append(layer)
+        return layer
+
+    fake_map = SimpleNamespace(listLayers=lambda: list(layers), removeLayer=remove_layer, addDataFromPath=add_data)
+    fake = SimpleNamespace(
+        mp=SimpleNamespace(ArcGISProject=lambda current: SimpleNamespace(activeMap=fake_map)),
+        RefreshLayer=lambda name: calls.append(("refresh", name, next(layer.visible for layer in layers if layer.name == name))),
+    )
+    monkeypatch.setattr(geometry, "arcpy", fake)
+    monkeypatch.setattr(geometry, "apply_simple_symbology", lambda target, key, messages: None)
+    messages = CapturingMessages()
+
+    handled = geometry.run_redraw_experiment(_paths(), messages, "predrawn-rehydrate-refresh-visible-first", layer_names={geometry.DISTRICTS})
+
+    assert handled is True
+    assert ("refresh", "Permit Office Predrawn Idle", True) in calls
+
+
+def test_predrawn_rehydrate_hidden_first_refreshes_before_visibility_swap(monkeypatch):
+    """Verify hidden-first variant can measure refresh while layer is hidden."""
+
+    calls = []
+    active = SimpleNamespace(name="Permit Office Predrawn Active", visible=True, definitionQuery="1=1", transparency=None)
+    idle = SimpleNamespace(name="Permit Office Predrawn Idle", visible=False, definitionQuery="1=1", transparency=None)
+    layers = [active, idle]
+
+    def remove_layer(layer):
+        layers.remove(layer)
+
+    def add_data(source):
+        layer = SimpleNamespace(name="raw", visible=True, definitionQuery="", transparency=None)
+        layers.append(layer)
+        return layer
+
+    fake_map = SimpleNamespace(listLayers=lambda: list(layers), removeLayer=remove_layer, addDataFromPath=add_data)
+    fake = SimpleNamespace(
+        mp=SimpleNamespace(ArcGISProject=lambda current: SimpleNamespace(activeMap=fake_map)),
+        RefreshLayer=lambda name: calls.append(("refresh", name, next(layer.visible for layer in layers if layer.name == name))),
+    )
+    monkeypatch.setattr(geometry, "arcpy", fake)
+    monkeypatch.setattr(geometry, "apply_simple_symbology", lambda target, key, messages: None)
+    messages = CapturingMessages()
+
+    handled = geometry.run_redraw_experiment(_paths(), messages, "predrawn-rehydrate-refresh-hidden-first", layer_names={geometry.DISTRICTS})
+
+    assert handled is True
+    assert ("refresh", "Permit Office Predrawn Idle", False) in calls
+
+
 def test_redraw_experiment_alt_refresh_tries_non_readd_paths(monkeypatch):
     """Verify the alt-refresh probe tries query, visibility, CIM, and temp-layer paths."""
 

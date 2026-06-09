@@ -1011,6 +1011,7 @@ def _experiment_predrawn_rehydrate(paths, messages, name, layer_names):
 
     started = time.perf_counter()
     use_style_cache = name == "predrawn-rehydrate-style-cache"
+    refresh_hidden_first = name == "predrawn-rehydrate-refresh-hidden-first"
     phases = _PhaseTimer()
     active_map = _active_map()
     if active_map is None:
@@ -1036,11 +1037,16 @@ def _experiment_predrawn_rehydrate(paths, messages, name, layer_names):
     phases.mark("addDataFromPath")
     skipped_style = _prepare_district_display_layer(layer, messages, "1=1", skip_if_style_matches=use_style_cache)
     phases.mark("style_cached" if skipped_style else "labels_symbology")
+    if refresh_hidden_first:
+        layer.visible = False
+        arcpy.RefreshLayer(hidden_name)
+        phases.mark("RefreshLayer_hidden")
     for snapshot in _predrawn_snapshots(active_map):
         snapshot.visible = snapshot is layer
     phases.mark("visibility_swap")
-    arcpy.RefreshLayer(hidden_name)
-    phases.mark("RefreshLayer")
+    if not refresh_hidden_first:
+        arcpy.RefreshLayer(hidden_name)
+        phases.mark("RefreshLayer")
     _log_experiment(messages, name, "predrawn-rehydrate", "ok", started, f"target={hidden_name!r} {phases.summary()}")
 
 
