@@ -2559,11 +2559,14 @@ def test_arcpy_toolbox_exposes_redraw_experiment_dropdown_parameter():
         "None",
         "volatile-overlay",
         "predrawn-swap",
+        "predrawn-swap-refresh",
         "predrawn-rehydrate",
+        "predrawn-rehydrate-smart-features",
         "predrawn-rehydrate-style-cache",
         "predrawn-rehydrate-template-style",
         "predrawn-rehydrate-refresh-hidden-first",
         "predrawn-rehydrate-refresh-visible-first",
+        "hybrid-rehydrate-districts-swap-points",
         "alt-refresh",
         "alt-definition-query",
         "alt-visibility",
@@ -2573,6 +2576,49 @@ def test_arcpy_toolbox_exposes_redraw_experiment_dropdown_parameter():
     ):
         assert f'"{option}"' in toolbox_text
     assert "os.environ[REDRAW_EXPERIMENT_ENV] = redraw_experiment" in toolbox_text
+
+
+def test_arcpy_toolbox_exposes_redraw_benchmark_runs_parameter():
+    """Verify redraw benchmark runs are selectable from the Geoprocessing pane."""
+
+    toolbox_dir = Path(__file__).parents[1] / "toolbox"
+    toolbox_text = (toolbox_dir / "arcpy_permit_office.pyt").read_text()
+    schema_text = (toolbox_dir / "permit_office_arcgis" / "schema.py").read_text()
+
+    assert "P_REDRAW_BENCHMARK_RUNS = 4" in schema_text
+    assert 'displayName="Redraw Benchmark Runs"' in toolbox_text
+    assert 'name="redraw_benchmark_runs"' in toolbox_text
+    assert 'datatype="GPLong"' in toolbox_text
+    assert "p_benchmark.value = 0" in toolbox_text
+    assert "run_redraw_benchmark(paths, messages, benchmark_runs)" in toolbox_text
+
+
+def test_redraw_benchmark_keeps_only_plausible_contenders():
+    """Verify the benchmark harness is pruned to candidates worth timing live."""
+
+    dashboard_text = (Path(__file__).parents[1] / "toolbox" / "permit_office_arcgis" / "dashboard.py").read_text()
+
+    for option in (
+        '("default", "")',
+        '("predrawn-swap", "predrawn-swap")',
+        '("predrawn-swap-refresh", "predrawn-swap-refresh")',
+        '("predrawn-rehydrate", "predrawn-rehydrate")',
+        '("predrawn-rehydrate-smart-features", "predrawn-rehydrate-smart-features")',
+        '("predrawn-rehydrate-template-style", "predrawn-rehydrate-template-style")',
+        '("predrawn-rehydrate-refresh-hidden-first", "predrawn-rehydrate-refresh-hidden-first")',
+        '("hybrid-rehydrate-districts-swap-points", "hybrid-rehydrate-districts-swap-points")',
+    ):
+        assert option in dashboard_text
+    for loser in (
+        '("volatile-overlay", "volatile-overlay")',
+        '("alt-refresh", "alt-refresh")',
+        '("alt-definition-query", "alt-definition-query")',
+        '("alt-visibility", "alt-visibility")',
+        '("alt-cim", "alt-cim")',
+        '("alt-symbology", "alt-symbology")',
+        '("alt-make-feature-layer", "alt-make-feature-layer")',
+    ):
+        assert loser not in dashboard_text
 
 
 def test_active_permit_office_files_stay_under_line_budget():

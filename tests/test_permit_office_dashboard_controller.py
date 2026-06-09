@@ -472,6 +472,33 @@ def test_rebuild_inside_turn_session_does_not_emit_duplicate_perf_summary(monkey
     assert "rebuild=" in perf_lines[0]
 
 
+def test_run_redraw_benchmark_cycles_variants_and_restores_selection(monkeypatch):
+    """Verify the GP benchmark emits comparable runs without stealing the selected experiment."""
+
+    calls = []
+    logs = []
+    monkeypatch.setenv(dashboard.REDRAW_EXPERIMENT_ENV, "predrawn-swap")
+    monkeypatch.setattr(dashboard, "_log", lambda messages_arg, tag, text: logs.append((tag, text)))
+    monkeypatch.setattr(dashboard.time, "perf_counter", lambda: len(calls) + len(logs) / 1000)
+
+    def fake_rebuild(paths, messages, layer_names=None, dirty_scope=None):
+        calls.append((dashboard.os.environ.get(dashboard.REDRAW_EXPERIMENT_ENV, ""), layer_names, dirty_scope))
+
+    monkeypatch.setattr(dashboard, "rebuild_output_layers", fake_rebuild)
+
+    dashboard.run_redraw_benchmark({"districts": "districts"}, object(), runs=2)
+
+    assert dashboard.os.environ[dashboard.REDRAW_EXPERIMENT_ENV] == "predrawn-swap"
+    expected_per_run = len(dashboard.REDRAW_BENCHMARK_VARIANTS) * len(dashboard.REDRAW_BENCHMARK_SCOPES)
+    assert len(calls) == expected_per_run * 2
+    assert calls[0] == ("", {dashboard.DISTRICTS}, dashboard.DIRTY_DISTRICTS)
+    assert calls[1] == ("", {dashboard.DISTRICTS}, dashboard.DIRTY_DISTRICTS)
+    assert calls[2] == ("", {dashboard.DISTRICTS, dashboard.POINTS}, dashboard.DIRTY_DISTRICTS)
+    assert any(tag == "BENCH" and text.startswith("start runs=2") for tag, text in logs)
+    assert any(tag == "BENCH" and "variant=default scope=districts run=1" in text for tag, text in logs)
+    assert any(tag == "BENCH" and text == "done" for tag, text in logs)
+
+
 def test_final_audit_report_includes_grade_flavor():
     """Verify the inline final audit carries PASS/CONDITIONAL/FAIL ending flavor (#7)."""
 

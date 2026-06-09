@@ -92,8 +92,10 @@ lines (`[WORKSPACE]`, `[REBUILD]`, `[DASH]`, `[SYM]`).
 - [ ] Let the week advance to a configured checkpoint. Confirm the log includes
       `[REBUILD] targeted=['PermitDistricts'] mode=district-readd dirty=districts`.
 - [ ] Record timings for a normal decision and a checkpoint tick:
-      `experiment_predrawn-rehydrate` and total `rebuild`. If rehydrate reports a
-      warning and falls back, record `remove`, `add`, `refresh` too.
+      `experiment_predrawn-rehydrate` or
+      `experiment_predrawn-rehydrate-smart-features` and total `rebuild`. If
+      rehydrate reports a warning and falls back, record `remove`, `add`,
+      `refresh` too.
 
 ## 11. Redraw experiments
 - [ ] Default path: leave **Redraw Experiment = None** and confirm district-dirty
@@ -106,6 +108,12 @@ lines (`[WORKSPACE]`, `[REBUILD]`, `[DASH]`, `[SYM]`).
       Record whether each path reloads changed visual state correctly.
 - [ ] Pre-drawn visibility swap experiment: confirm it is still fast, but reject
       it as default if district symbology stays stale.
+- [ ] `predrawn-swap-refresh`: keep as a bug probe only. It was fast during play
+      on 2026-06-08, but the completed/closed map showed red/gray board-wide
+      corruption afterward.
+- [ ] `predrawn-rehydrate-smart-features`: current promotion candidate. Confirm
+      point features still appear/update after approvals while the district board
+      keeps correct type/identity/prosperity visuals.
 - [ ] Pre-drawn rehydrate path: record seed cost, hot-path cost, resume behavior,
       Contents clutter, and runtime swap timing. Current live evidence promoted
       it as default because it preserved district symbology with lower rebuild

@@ -35,11 +35,12 @@ for _module_name in (
         importlib.reload(_module)
 
 from permit_office_arcgis import _perf
-from permit_office_arcgis.dashboard import DashboardController, REDRAW_EXPERIMENT_ENV, has_saved_game, prepare_dashboard_session
+from permit_office_arcgis.dashboard import DashboardController, REDRAW_EXPERIMENT_ENV, has_saved_game, prepare_dashboard_session, run_redraw_benchmark
 from permit_office_arcgis.geometry import output_layers_present
 from permit_office_arcgis.schema import (
     P_OUTPUT,
     P_PERF,
+    P_REDRAW_BENCHMARK_RUNS,
     P_REDRAW_EXPERIMENT,
     P_WORKSPACE,
     DISTRICTS,
@@ -108,11 +109,14 @@ class PermitOfficePrototype(object):
             "None",
             "volatile-overlay",
             "predrawn-swap",
+            "predrawn-swap-refresh",
             "predrawn-rehydrate",
+            "predrawn-rehydrate-smart-features",
             "predrawn-rehydrate-style-cache",
             "predrawn-rehydrate-template-style",
             "predrawn-rehydrate-refresh-hidden-first",
             "predrawn-rehydrate-refresh-visible-first",
+            "hybrid-rehydrate-districts-swap-points",
             "alt-refresh",
             "alt-definition-query",
             "alt-visibility",
@@ -121,13 +125,22 @@ class PermitOfficePrototype(object):
             "alt-make-feature-layer",
         ]
         p_redraw.value = "None"
-        return [p_workspace, p_output, p_perf, p_redraw]
+        p_benchmark = arcpy.Parameter(
+            displayName="Redraw Benchmark Runs",
+            name="redraw_benchmark_runs",
+            datatype="GPLong",
+            parameterType="Optional",
+            direction="Input",
+        )
+        p_benchmark.value = 0
+        return [p_workspace, p_output, p_perf, p_redraw, p_benchmark]
 
     def execute(self, parameters, messages):
         """Open the dashboard against the resolved saved-game geodatabase."""
 
         _perf.set_enabled(bool(parameters[P_PERF].value))
         redraw_experiment = str(parameters[P_REDRAW_EXPERIMENT].value or "").strip()
+        benchmark_runs = int(parameters[P_REDRAW_BENCHMARK_RUNS].value or 0)
         if redraw_experiment and redraw_experiment != "None":
             os.environ[REDRAW_EXPERIMENT_ENV] = redraw_experiment
             messages.addMessage(f"[EXPERIMENT] selected {redraw_experiment}")
@@ -140,5 +153,6 @@ class PermitOfficePrototype(object):
         # instead of silently resuming the old board.
         offer_fresh_start = has_saved_game(paths) and not output_layers_present()
         seed = prepare_dashboard_session(paths, 2026, messages, resume=not offer_fresh_start)
+        run_redraw_benchmark(paths, messages, benchmark_runs)
         DashboardController(paths, DISTRICTS, seed, messages, offer_fresh_start=offer_fresh_start).open()
         arcpy.SetParameterAsText(P_OUTPUT, paths["districts"])

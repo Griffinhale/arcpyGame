@@ -69,6 +69,16 @@ WORK_DAY_SECONDS = WEEK_DEADLINE_SECONDS // len(WORK_WEEK_DAYS)
 MIDWEEK_MAP_REDRAW_DAYS = frozenset((2, 4))
 REDRAW_EXPERIMENT_ENV = "PERMIT_OFFICE_REDRAW_EXPERIMENT"
 DEFAULT_REDRAW_EXPERIMENT = "predrawn-rehydrate"
+REDRAW_BENCHMARK_VARIANTS = (
+    ("default", ""),
+    ("predrawn-swap", "predrawn-swap"),
+    ("predrawn-swap-refresh", "predrawn-swap-refresh"),
+    ("predrawn-rehydrate", "predrawn-rehydrate"),
+    ("predrawn-rehydrate-smart-features", "predrawn-rehydrate-smart-features"),
+    ("predrawn-rehydrate-template-style", "predrawn-rehydrate-template-style"),
+    ("predrawn-rehydrate-refresh-hidden-first", "predrawn-rehydrate-refresh-hidden-first"),
+    ("hybrid-rehydrate-districts-swap-points", "hybrid-rehydrate-districts-swap-points"),
+)
 
 
 def prepare_dashboard_session(paths, seed, messages, resume=True):
@@ -1071,6 +1081,11 @@ DIRTY_DESK_ONLY = "desk"
 DIRTY_SELECTION_ONLY = "selection"
 DIRTY_DISTRICTS = "districts"
 FEATURE_READD_LAYERS = frozenset((POINTS,))
+REDRAW_BENCHMARK_SCOPES = (
+    ("districts", frozenset((DISTRICTS,)), DIRTY_DISTRICTS),
+    ("districts+points", frozenset((DISTRICTS, POINTS)), DIRTY_DISTRICTS),
+    ("all", None, None),
+)
 
 
 @dataclass(frozen=True)
@@ -1202,6 +1217,46 @@ def rebuild_output_layers(paths, messages, layer_names=None, force_readd=False, 
         with perf_block("refresh"):
             refresh_all(paths, messages, layer_names=effective_layer_names)
     return plan
+
+
+def run_redraw_benchmark(paths, messages, runs=1):
+    """Run repeatable redraw variants from the GP pane and log a scorecard."""
+
+    try:
+        count = max(0, int(runs or 0))
+    except (TypeError, ValueError):
+        count = 0
+    if count <= 0:
+        return
+    previous = os.environ.get(REDRAW_EXPERIMENT_ENV)
+    _log(
+        messages,
+        "BENCH",
+        f"start runs={count} variants={len(REDRAW_BENCHMARK_VARIANTS)} scopes={len(REDRAW_BENCHMARK_SCOPES)}",
+    )
+    try:
+        for variant_label, experiment in REDRAW_BENCHMARK_VARIANTS:
+            if experiment:
+                os.environ[REDRAW_EXPERIMENT_ENV] = experiment
+            else:
+                os.environ.pop(REDRAW_EXPERIMENT_ENV, None)
+            for scope_label, layer_names, dirty_scope in REDRAW_BENCHMARK_SCOPES:
+                scoped_layers = None if layer_names is None else set(layer_names)
+                for run_index in range(1, count + 1):
+                    started = time.perf_counter()
+                    rebuild_output_layers(paths, messages, layer_names=scoped_layers, dirty_scope=dirty_scope)
+                    elapsed = time.perf_counter() - started
+                    _log(
+                        messages,
+                        "BENCH",
+                        f"variant={variant_label} scope={scope_label} run={run_index} elapsed={elapsed:.3f}",
+                    )
+    finally:
+        if previous is None:
+            os.environ.pop(REDRAW_EXPERIMENT_ENV, None)
+        else:
+            os.environ[REDRAW_EXPERIMENT_ENV] = previous
+        _log(messages, "BENCH", "done")
 
 
 def _filed_report_text(result, districts=None):

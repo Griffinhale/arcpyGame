@@ -716,6 +716,94 @@ def test_refresh_feature_scope_readds_only_features_in_remove_scope(monkeypatch)
     ]
 
 
+def test_redraw_experiment_hybrid_rehydrates_districts_and_point_snapshot(monkeypatch):
+    """Verify the hybrid probe avoids re-adding the live PermitPoints layer."""
+
+    calls = []
+    active = SimpleNamespace(name="Permit Office Predrawn Active", visible=True, definitionQuery="1=1", transparency=None)
+    idle = SimpleNamespace(name="Permit Office Predrawn Idle", visible=False, definitionQuery="1=1", transparency=None)
+    point_active = SimpleNamespace(name="Permit Office Predrawn Points Active", visible=True, definitionQuery="1=1", transparency=None)
+    point_idle = SimpleNamespace(name="Permit Office Predrawn Points Idle", visible=False, definitionQuery="1=1", transparency=None)
+    layers = [active, idle, point_active, point_idle]
+
+    def remove_layer(layer):
+        calls.append(("removeLayer", layer.name))
+        layers.remove(layer)
+
+    def add_data(source):
+        name = "raw-points" if source == "points" else "raw-districts"
+        layer = SimpleNamespace(name=name, visible=True, definitionQuery="", transparency=None)
+        layers.append(layer)
+        calls.append(("addData", source))
+        return layer
+
+    fake_map = SimpleNamespace(listLayers=lambda: list(layers), removeLayer=remove_layer, addDataFromPath=add_data)
+    fake = SimpleNamespace(
+        mp=SimpleNamespace(ArcGISProject=lambda current: SimpleNamespace(activeMap=fake_map)),
+        RefreshLayer=lambda name: calls.append(("refresh", name)),
+    )
+    monkeypatch.setattr(geometry, "arcpy", fake)
+    monkeypatch.setattr(geometry, "apply_simple_symbology", lambda target, key, messages: calls.append(("sym", target.name, key)))
+    monkeypatch.setattr(geometry, "remove_outputs_from_map", lambda messages, layer_names=None: calls.append(("remove_outputs", layer_names)))
+    monkeypatch.setattr(geometry, "add_outputs_to_map", lambda paths, messages, layer_names=None: calls.append(("add_outputs", layer_names)))
+    messages = CapturingMessages()
+
+    handled = geometry.run_redraw_experiment(
+        _paths(),
+        messages,
+        "hybrid-rehydrate-districts-swap-points",
+        layer_names={geometry.DISTRICTS, geometry.POINTS},
+        remove_scope={geometry.DISTRICTS, geometry.POINTS},
+    )
+
+    assert handled is True
+    assert ("addData", "districts") in calls
+    assert ("addData", "points") in calls
+    assert ("remove_outputs", {geometry.POINTS}) not in calls
+    assert any(call == ("refresh", "Permit Office Predrawn Points Idle") for call in calls)
+    assert any("path=hybrid-rehydrate-districts-swap-points status=ok" in line for line in messages.messages)
+
+
+def test_redraw_experiment_predrawn_swap_refresh_restylizes_target(monkeypatch):
+    """Verify the swap-refresh probe tests whether restyling fixes stale district snapshots."""
+
+    calls = []
+    active = SimpleNamespace(name="Permit Office Predrawn Active", visible=True, definitionQuery="1=1", transparency=None)
+    idle = SimpleNamespace(name="Permit Office Predrawn Idle", visible=False, definitionQuery="1=1", transparency=None)
+    fake_map = SimpleNamespace(listLayers=lambda: [active, idle])
+    fake = SimpleNamespace(
+        mp=SimpleNamespace(ArcGISProject=lambda current: SimpleNamespace(activeMap=fake_map)),
+        RefreshLayer=lambda name: calls.append(("refresh", name)),
+    )
+    monkeypatch.setattr(geometry, "arcpy", fake)
+    monkeypatch.setattr(geometry, "apply_simple_symbology", lambda target, key, messages: calls.append(("sym", target.name, key)))
+    messages = CapturingMessages()
+
+    handled = geometry.run_redraw_experiment(_paths(), messages, "predrawn-swap-refresh", layer_names={geometry.DISTRICTS})
+
+    assert handled is True
+    assert ("sym", "Permit Office Predrawn Active", "district_display") in calls
+    assert ("refresh", "Permit Office Predrawn Active") in calls
+
+
+def test_redraw_experiment_smart_features_refreshes_points_without_readd(monkeypatch):
+    """Verify the smart-features probe skips the expensive live point re-add."""
+
+    calls = []
+    monkeypatch.setattr(geometry, "_experiment_predrawn_rehydrate", lambda paths, messages, name, layer_names, remove_scope=None: calls.append((name, layer_names, remove_scope)))
+
+    handled = geometry.run_redraw_experiment(
+        _paths(),
+        CapturingMessages(),
+        "predrawn-rehydrate-smart-features",
+        layer_names={geometry.DISTRICTS, geometry.POINTS},
+        remove_scope={geometry.DISTRICTS, geometry.POINTS},
+    )
+
+    assert handled is True
+    assert calls == [("predrawn-rehydrate-smart-features", {geometry.DISTRICTS, geometry.POINTS}, {geometry.DISTRICTS, geometry.POINTS})]
+
+
 def test_redraw_experiment_alt_refresh_tries_non_readd_paths(monkeypatch):
     """Verify the alt-refresh probe tries query, visibility, CIM, and temp-layer paths."""
 

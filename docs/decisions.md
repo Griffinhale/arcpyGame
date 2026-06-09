@@ -52,6 +52,12 @@ remove→add of *all* layers every turn (slow, flicker-prone); pure refresh-only
 (correctness bug above); volatile overlay as the default (filters away baseline
 districts); pure predrawn visibility swap as the default (stale district
 symbology).
+**June 8 follow-up:** `predrawn-rehydrate-smart-features` is the next promotion
+candidate because it kept the district rehydrate model while cutting
+point-decision redraws to ~1.8s in live benchmark. `predrawn-swap-refresh` stayed
+very fast (~1.0-1.3s) but produced a red/gray close-state map corruption, so it
+remains a diagnostic experiment. Full measurements live in
+`docs/redraw-experiment-notes.md`.
 *(Supersedes the 2026-05-27 refresh spike, which mis-measured refresh-only as
 reliability-safe; the RefreshLayer-does-not-reload-data behavior was confirmed
 later. Supersedes the earlier district-family remove+add default with a measured
