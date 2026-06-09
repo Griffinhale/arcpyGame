@@ -1066,6 +1066,7 @@ _GEOM_TYPE_TO_LAYER = {"POINT": POINTS, "LINE": LINES, "POLYGON": ZONES}
 DIRTY_DESK_ONLY = "desk"
 DIRTY_SELECTION_ONLY = "selection"
 DIRTY_DISTRICTS = "districts"
+FEATURE_READD_LAYERS = frozenset((POINTS,))
 
 
 @dataclass(frozen=True)
@@ -1119,11 +1120,13 @@ def _redraw_plan(layer_names=None, force_readd=False, dirty_scope=None):
     if force_readd:
         return RedrawPlan("force-readd", frozenset() if names is None else names, None if names is None else names)
     district_in_scope = names is None or DISTRICTS in names or dirty_scope == DIRTY_DISTRICTS
+    explicit_names = names or frozenset()
     effective_names = names
     if district_in_scope and effective_names is None:
         effective_names = frozenset((DISTRICTS, POINTS, LINES, ZONES))
     if district_in_scope:
-        return RedrawPlan("district-readd", effective_names or frozenset((DISTRICTS,)), frozenset((DISTRICTS,)))
+        remove_scope = frozenset((DISTRICTS,)) | (explicit_names & FEATURE_READD_LAYERS)
+        return RedrawPlan("district-readd", effective_names or frozenset((DISTRICTS,)), remove_scope)
     return RedrawPlan("refresh-only", effective_names or frozenset())
 
 

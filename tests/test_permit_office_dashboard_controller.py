@@ -237,6 +237,27 @@ def test_rebuild_planner_keeps_default_district_readd_for_district_scope(monkeyp
     ]
 
 
+def test_rebuild_planner_readds_dirty_point_layer_when_in_scope(monkeypatch):
+    """Verify point decisions can re-add points instead of relying on refresh."""
+
+    calls = []
+    monkeypatch.setattr(dashboard, "clear_output_selections", lambda paths: calls.append(("clear", None)))
+    monkeypatch.setattr(dashboard, "remove_outputs_from_map", lambda messages, layer_names=None: calls.append(("remove", layer_names)))
+    monkeypatch.setattr(dashboard, "add_outputs_to_map", lambda paths, messages, layer_names=None: calls.append(("add", layer_names)))
+    monkeypatch.setattr(dashboard, "refresh_all", lambda paths, messages, layer_names=None: calls.append(("refresh", layer_names)))
+
+    plan = dashboard.rebuild_output_layers({}, object(), layer_names={dashboard.DISTRICTS, dashboard.POINTS}, dirty_scope=dashboard.DIRTY_DISTRICTS)
+
+    assert plan.mode == "district-readd"
+    assert plan.remove_scope == frozenset((dashboard.DISTRICTS, dashboard.POINTS))
+    assert calls == [
+        ("clear", None),
+        ("remove", {dashboard.DISTRICTS, dashboard.POINTS}),
+        ("add", {dashboard.DISTRICTS, dashboard.POINTS}),
+        ("refresh", {dashboard.DISTRICTS, dashboard.POINTS}),
+    ]
+
+
 def test_rebuild_planner_allows_desk_only_without_map_work(monkeypatch):
     """Verify desk-only dirty scopes do not touch ArcGIS map layers."""
 
