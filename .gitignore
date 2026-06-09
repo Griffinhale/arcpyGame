@@ -20,6 +20,7 @@ dist/
 .DS_Store
 .claude/
 .serena/
+.superpowers/
 
 # Internal superpowers planning/spec workspace (kept local, not in the public repo).
 docs/superpowers/
