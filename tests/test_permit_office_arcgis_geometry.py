@@ -486,6 +486,34 @@ def test_predrawn_rehydrate_logs_phase_timings(monkeypatch):
     assert "RefreshLayer=" in line
 
 
+def test_district_display_style_hash_is_stable():
+    """Verify the district display style cache key changes only with style inputs."""
+
+    first = geometry._district_display_style_hash("1=1")
+    second = geometry._district_display_style_hash("1=1")
+    changed_query = geometry._district_display_style_hash("display_state = 'daily_pressure'")
+
+    assert first == second
+    assert first != changed_query
+    assert "district_display" in first
+
+
+def test_prepare_district_display_layer_can_skip_style_when_hash_matches(monkeypatch):
+    """Verify style-cache probe can skip label/symbology transforms."""
+
+    calls = []
+    layer = SimpleNamespace(definitionQuery="", _permit_office_style_hash=geometry._district_display_style_hash("1=1"))
+    monkeypatch.setattr(geometry, "_configure_labels", lambda target, key: calls.append(("labels", key)))
+    monkeypatch.setattr(geometry, "apply_simple_symbology", lambda target, key, messages: calls.append(("sym", key)))
+    monkeypatch.setattr(geometry, "_tune_layer_visibility", lambda target, key: calls.append(("tune", key)))
+
+    skipped = geometry._prepare_district_display_layer(layer, CapturingMessages(), "1=1", skip_if_style_matches=True)
+
+    assert skipped is True
+    assert calls == []
+    assert layer.definitionQuery == "1=1"
+
+
 def test_redraw_experiment_reports_failure_to_caller(monkeypatch):
     """Verify callers can fall back when a live redraw probe fails."""
 

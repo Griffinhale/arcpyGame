@@ -927,13 +927,28 @@ def _set_definition_query(layer, definition_query):
         pass
 
 
-def _prepare_district_display_layer(layer, messages, definition_query=None):
+def _district_display_style_hash(definition_query):
+    """Return a stable key for district display style configuration."""
+
+    query = definition_query or ""
+    return f"district_display|labels=districts|query={query}|transparency=35"
+
+
+def _prepare_district_display_layer(layer, messages, definition_query=None, skip_if_style_matches=False):
     """Style a district-source layer by display_state for redraw experiments."""
 
     _set_definition_query(layer, definition_query)
+    style_hash = _district_display_style_hash(definition_query)
+    if skip_if_style_matches and getattr(layer, "_permit_office_style_hash", "") == style_hash:
+        return True
     _tune_layer_visibility(layer, "district_display")
     _configure_labels(layer, "districts")
     apply_simple_symbology(layer, "district_display", messages)
+    try:
+        layer._permit_office_style_hash = style_hash
+    except Exception:
+        pass
+    return False
 
 
 def _experiment_volatile_overlay(paths, messages, name, layer_names):
