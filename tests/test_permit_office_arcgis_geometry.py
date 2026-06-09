@@ -350,7 +350,7 @@ def test_redraw_experiment_volatile_overlay_reuses_existing_symbology(monkeypatc
 
 
 def test_redraw_experiment_predrawn_swap_toggles_snapshot_visibility(monkeypatch):
-    """Verify the pre-drawn swap probe toggles candidate snapshot layers."""
+    """Verify the hot pre-drawn swap only toggles candidate snapshot layers."""
 
     active = SimpleNamespace(name="Permit Office Predrawn Active", visible=True)
     idle = SimpleNamespace(name="Permit Office Predrawn Idle", visible=True)
@@ -369,7 +369,7 @@ def test_redraw_experiment_predrawn_swap_toggles_snapshot_visibility(monkeypatch
 
     assert active.visible is True
     assert idle.visible is False
-    assert ("refresh", "Permit Office Predrawn Active") in calls
+    assert ("refresh", "Permit Office Predrawn Active") not in calls
     assert any("path=predrawn-swap status=ok" in line for line in messages.messages)
 
 

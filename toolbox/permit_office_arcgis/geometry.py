@@ -966,7 +966,6 @@ def _experiment_predrawn_swap(paths, messages, name, layer_names):
     target = snapshots[0]
     for layer in snapshots:
         layer.visible = layer is target
-    arcpy.RefreshLayer(getattr(target, "name", PREDRAWN_ACTIVE_LAYER))
     _log_experiment(messages, name, "predrawn-swap", "ok", started, f"target={getattr(target, 'name', PREDRAWN_ACTIVE_LAYER)!r}")
 
 
