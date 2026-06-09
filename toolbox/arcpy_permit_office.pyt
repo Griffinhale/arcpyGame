@@ -108,6 +108,7 @@ class PermitOfficePrototype(object):
             "None",
             "volatile-overlay",
             "predrawn-swap",
+            "predrawn-rehydrate",
             "alt-refresh",
             "alt-definition-query",
             "alt-visibility",

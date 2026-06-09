@@ -2559,6 +2559,7 @@ def test_arcpy_toolbox_exposes_redraw_experiment_dropdown_parameter():
         "None",
         "volatile-overlay",
         "predrawn-swap",
+        "predrawn-rehydrate",
         "alt-refresh",
         "alt-definition-query",
         "alt-visibility",

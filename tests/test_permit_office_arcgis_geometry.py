@@ -405,6 +405,46 @@ def test_redraw_experiment_predrawn_swap_seeds_symbolized_snapshot_layers(monkey
     assert any("path=predrawn-swap status=seeded" in line for line in messages.messages)
 
 
+def test_redraw_experiment_predrawn_rehydrate_readds_hidden_snapshot_then_swaps(monkeypatch):
+    """Verify rehydrate refreshes one hidden snapshot from the GDB before swap."""
+
+    calls = []
+    active = SimpleNamespace(name="Permit Office Predrawn Active", visible=True, definitionQuery="1=1", transparency=None)
+    idle = SimpleNamespace(name="Permit Office Predrawn Idle", visible=False, definitionQuery="1=1", transparency=None)
+    layers = [active, idle]
+
+    def remove_layer(layer):
+        calls.append(("remove", layer.name))
+        layers.remove(layer)
+
+    def add_data(source):
+        layer = SimpleNamespace(name="raw", visible=True, definitionQuery="", transparency=None)
+        layers.append(layer)
+        calls.append(("add", source))
+        return layer
+
+    fake_map = SimpleNamespace(listLayers=lambda: list(layers), removeLayer=remove_layer, addDataFromPath=add_data)
+    fake = SimpleNamespace(
+        mp=SimpleNamespace(ArcGISProject=lambda current: SimpleNamespace(activeMap=fake_map)),
+        RefreshLayer=lambda name: calls.append(("refresh", name)),
+    )
+    monkeypatch.setattr(geometry, "arcpy", fake)
+    monkeypatch.setattr(geometry, "apply_simple_symbology", lambda target, key, messages: calls.append(("sym", target.name, key)))
+    messages = CapturingMessages()
+
+    geometry.run_redraw_experiment(_paths(), messages, "predrawn-rehydrate", layer_names={geometry.DISTRICTS}, dirty_scope="districts", mode="district-readd")
+
+    assert ("remove", "Permit Office Predrawn Idle") in calls
+    assert ("add", "districts") in calls
+    refreshed = next(layer for layer in layers if layer.name == "Permit Office Predrawn Idle")
+    assert active.visible is False
+    assert refreshed.visible is True
+    assert refreshed.definitionQuery == "1=1"
+    assert ("sym", "Permit Office Predrawn Idle", "district_display") in calls
+    assert ("refresh", "Permit Office Predrawn Idle") in calls
+    assert any("path=predrawn-rehydrate status=ok" in line for line in messages.messages)
+
+
 def test_redraw_experiment_alt_refresh_tries_non_readd_paths(monkeypatch):
     """Verify the alt-refresh probe tries query, visibility, CIM, and temp-layer paths."""
 

@@ -949,6 +949,12 @@ def _seed_predrawn_layers(paths, messages, active_map):
     return layers
 
 
+def _predrawn_snapshots(active_map):
+    """Return current predrawn snapshot layers."""
+
+    return [layer for layer in _layers_by_name(active_map).values() if getattr(layer, "name", "").startswith(PREDRAWN_LAYER_PREFIX)]
+
+
 def _experiment_predrawn_swap(paths, messages, name, layer_names):
     """Swap visibility among pre-drawn district snapshot layers."""
 
@@ -957,7 +963,7 @@ def _experiment_predrawn_swap(paths, messages, name, layer_names):
     if active_map is None:
         _log_experiment(messages, name, "predrawn-swap", "no-active-map", started)
         return
-    snapshots = [layer for layer in _layers_by_name(active_map).values() if getattr(layer, "name", "").startswith(PREDRAWN_LAYER_PREFIX)]
+    snapshots = _predrawn_snapshots(active_map)
     if not snapshots:
         snapshots = _seed_predrawn_layers(paths, messages, active_map)
         arcpy.RefreshLayer(PREDRAWN_ACTIVE_LAYER)
@@ -967,6 +973,34 @@ def _experiment_predrawn_swap(paths, messages, name, layer_names):
     for layer in snapshots:
         layer.visible = layer is target
     _log_experiment(messages, name, "predrawn-swap", "ok", started, f"target={getattr(target, 'name', PREDRAWN_ACTIVE_LAYER)!r}")
+
+
+def _experiment_predrawn_rehydrate(paths, messages, name, layer_names):
+    """Re-add one hidden predrawn snapshot from the GDB, then swap visibility."""
+
+    started = time.perf_counter()
+    active_map = _active_map()
+    if active_map is None:
+        _log_experiment(messages, name, "predrawn-rehydrate", "no-active-map", started)
+        return
+    snapshots = _predrawn_snapshots(active_map)
+    if len(snapshots) < 2:
+        _seed_predrawn_layers(paths, messages, active_map)
+        arcpy.RefreshLayer(PREDRAWN_ACTIVE_LAYER)
+        _log_experiment(messages, name, "predrawn-rehydrate", "seeded", started, f"target={PREDRAWN_ACTIVE_LAYER!r}")
+        return
+    hidden = next((layer for layer in snapshots if not bool(getattr(layer, "visible", True))), snapshots[-1])
+    hidden_name = getattr(hidden, "name", f"{PREDRAWN_LAYER_PREFIX} Idle")
+    try:
+        active_map.removeLayer(hidden)
+    except Exception:
+        pass
+    layer, _added = _get_or_add_layer(active_map, paths["districts"], hidden_name)
+    _prepare_district_display_layer(layer, messages, "1=1")
+    for snapshot in _predrawn_snapshots(active_map):
+        snapshot.visible = snapshot is layer
+    arcpy.RefreshLayer(hidden_name)
+    _log_experiment(messages, name, "predrawn-rehydrate", "ok", started, f"target={hidden_name!r}")
 
 
 def _experiment_definition_query(layer):
@@ -1042,6 +1076,8 @@ def run_redraw_experiment(paths, messages, experiment, layer_names=None, remove_
             _experiment_volatile_overlay(paths, messages, name, layer_names)
         elif name == "predrawn-swap":
             _experiment_predrawn_swap(paths, messages, name, layer_names)
+        elif name == "predrawn-rehydrate":
+            _experiment_predrawn_rehydrate(paths, messages, name, layer_names)
         elif name == "alt-refresh":
             _experiment_alt_refresh(paths, messages, name, layer_names)
         elif name.startswith("alt-"):
