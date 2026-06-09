@@ -1259,7 +1259,7 @@ def test_generate_docket_rows_carries_existing_mandatory_context(monkeypatch):
 
 
 def test_deadline_timer_formats_equal_office_days(monkeypatch):
-    """Verify the five-minute timer divides into equal office days."""
+    """Verify the faster filing timer divides into equal office days."""
 
     controller = dashboard.DashboardController({"districts": "districts", "state": "state"}, "district_layer", 2026, object())
     state = rules.CityState(turn=2)
@@ -1269,16 +1269,16 @@ def test_deadline_timer_formats_equal_office_days(monkeypatch):
 
     controller._sync_deadline_timer(state)
     assert controller._deadline_week == 2
-    assert controller._deadline_presentation() == ("MON INTAKE 1:00", 0, True)
+    assert controller._deadline_presentation() == ("MON INTAKE 0:30", 0, True)
 
     expected = (
-        (159.0, "MON INTAKE 0:01"),
-        (160.0, "TUE INSPECTION 1:00"),
-        (219.0, "TUE INSPECTION 0:01"),
-        (220.0, "WED COMMENT 1:00"),
-        (280.0, "THU ESCALATION 1:00"),
-        (340.0, "FRI CLOSE 1:00"),
-        (399.0, "FRI CLOSE 0:01"),
+        (129.0, "MON INTAKE 0:01"),
+        (130.0, "TUE INSPECTION 0:30"),
+        (159.0, "TUE INSPECTION 0:01"),
+        (160.0, "WED COMMENT 0:30"),
+        (190.0, "THU ESCALATION 0:30"),
+        (220.0, "FRI CLOSE 0:30"),
+        (249.0, "FRI CLOSE 0:01"),
     )
     for now, label in expected:
         monkeypatch.setattr(dashboard.time, "monotonic", lambda now=now: now)
@@ -1299,7 +1299,7 @@ def test_deadline_ambient_status_uses_current_office_day(monkeypatch):
 
     assert controller._display_status_text() == "New applications logged. Triage high-risk packets."
 
-    monkeypatch.setattr(dashboard.time, "monotonic", lambda: 130.0)
+    monkeypatch.setattr(dashboard.time, "monotonic", lambda: 70.0)
 
     assert controller._display_status_text() == "Public comment window is open. Unresolved cases may draw attention."
 
@@ -1393,8 +1393,8 @@ def test_daily_pressure_overlay_writer_updates_only_display_fields(monkeypatch):
     assert rows[0][0] == "D0000"
 
 
-def test_deadline_tick_advances_daily_pressure_and_refreshes_districts_only(monkeypatch):
-    """Verify day ticks persist pressure and refresh only districts."""
+def test_deadline_tick_advances_daily_pressure_without_map_rebuild_before_checkpoint(monkeypatch):
+    """Verify day ticks persist pressure and update the desk before map checkpoint days."""
 
     controller = dashboard.DashboardController({"districts": "districts"}, "district_layer", 2026, object())
     controller._deadline_running = True
@@ -1426,20 +1426,70 @@ def test_deadline_tick_advances_daily_pressure_and_refreshes_districts_only(monk
 
     controller.root = FakeRoot()
     controller.view = FakeView()
-    monkeypatch.setattr(dashboard.time, "monotonic", lambda: 221.0)
+    monkeypatch.setattr(dashboard.time, "monotonic", lambda: 131.0)
     monkeypatch.setattr(dashboard, "read_state", lambda paths: state)
     monkeypatch.setattr(dashboard, "read_docket", lambda paths: [item])
     monkeypatch.setattr(dashboard, "read_districts", lambda paths: {"D0000": profile})
     monkeypatch.setattr(dashboard, "read_active_features", lambda paths: [])
     monkeypatch.setattr(dashboard, "write_state", lambda paths, state_arg: calls.append(("state", state_arg.week_day, dict(state_arg.daily_pressure))))
     monkeypatch.setattr(dashboard, "write_daily_pressure_overlays", lambda paths, districts, pressure: calls.append(("overlay", dict(pressure))))
-    monkeypatch.setattr(dashboard, "refresh_all", lambda paths, messages, layer_names=None: calls.append(("refresh", layer_names)))
+    monkeypatch.setattr(dashboard, "rebuild_output_layers", lambda paths, messages, **kwargs: calls.append(("rebuild", kwargs)))
 
     controller._deadline_tick()
 
-    assert ("state", 2, {"D0000": 2}) in calls
-    assert ("overlay", {"D0000": 2}) in calls
-    assert ("refresh", {dashboard.DISTRICTS}) in calls
+    assert ("state", 1, {"D0000": 1}) in calls
+    assert ("overlay", {"D0000": 1}) in calls
+    assert not any(kind == "rebuild" for kind, *_rest in calls)
+    view_calls = [call for call in calls if call[0] == "view"]
+    assert any("1 district pressure" in str(call[4]) for call in view_calls)
+
+
+def test_deadline_tick_rebuilds_districts_on_midweek_checkpoint(monkeypatch):
+    """Verify checkpoint days can pay the district re-add cost deliberately."""
+
+    controller = dashboard.DashboardController({"districts": "districts"}, "district_layer", 2026, object())
+    controller._deadline_running = True
+    controller._deadline_started = 100.0
+    controller.status_text = ""
+    controller.status_var = dashboard._StatusProxy(controller)
+    state = rules.CityState(week_day=1)
+    item = rules.DocketItem("open", "street_vendor_compact", rules.TEMPLATES["street_vendor_compact"].title, "POINT", 1, target_cell_ids=["D0000"])
+    profile = rules.DistrictProfile("D0000", "D0000", 1000, 50, 20, 35, 25, 90, "civic", housing_capacity=1500, affordability=80)
+    rules.normalize_profile(profile)
+    calls = []
+
+    class FakeRoot:
+        """Minimal Tk root stand-in that records scheduled callbacks."""
+
+        def after(self, delay, callback):
+            """Record the next scheduled timer tick."""
+
+            calls.append(("after", delay))
+            return "after-1"
+
+    class FakeView:
+        """Minimal desk view stand-in that records deadline updates."""
+
+        def update_deadline(self, text, meter, running, status_text=None):
+            """Record a live deadline presentation update."""
+
+            calls.append(("view", text, meter, running, status_text))
+
+    controller.root = FakeRoot()
+    controller.view = FakeView()
+    monkeypatch.setattr(dashboard.time, "monotonic", lambda: 161.0)
+    monkeypatch.setattr(dashboard, "read_state", lambda paths: state)
+    monkeypatch.setattr(dashboard, "read_docket", lambda paths: [item])
+    monkeypatch.setattr(dashboard, "read_districts", lambda paths: {"D0000": profile})
+    monkeypatch.setattr(dashboard, "read_active_features", lambda paths: [])
+    monkeypatch.setattr(dashboard, "write_state", lambda paths, state_arg: calls.append(("state", state_arg.week_day, dict(state_arg.daily_pressure))))
+    monkeypatch.setattr(dashboard, "write_daily_pressure_overlays", lambda paths, districts, pressure: calls.append(("overlay", dict(pressure))))
+    monkeypatch.setattr(dashboard, "rebuild_output_layers", lambda paths, messages, **kwargs: calls.append(("rebuild", kwargs)))
+
+    controller._deadline_tick()
+
+    assert ("state", 2, {"D0000": 1}) in calls
+    assert ("rebuild", {"layer_names": {dashboard.DISTRICTS}, "dirty_scope": dashboard.DIRTY_DISTRICTS}) in calls
 
 
 def test_filed_report_local_changes_names_districts():

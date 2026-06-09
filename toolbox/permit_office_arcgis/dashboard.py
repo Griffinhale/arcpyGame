@@ -64,6 +64,7 @@ WORK_WEEK_DAYS = (
     ("FRI CLOSE", "Filing close approaching. Open cases advance unresolved."),
 )
 WORK_DAY_SECONDS = WEEK_DEADLINE_SECONDS // len(WORK_WEEK_DAYS)
+MIDWEEK_MAP_REDRAW_DAYS = frozenset((2, 4))
 
 
 def prepare_dashboard_session(paths, seed, messages, resume=True):
@@ -586,10 +587,10 @@ class DashboardController:
         self._deadline_after_id = None
         try:
             if self._deadline_running and not self._command_busy:
-                self._advance_daily_pressure_if_due()
+                pressure_status = self._advance_daily_pressure_if_due()
                 text, meter, running = self._deadline_presentation()
                 if getattr(self, "view", None):
-                    self.view.update_deadline(text, meter, running, self._display_status_text())
+                    self.view.update_deadline(text, meter, running, pressure_status or self._display_status_text())
                 if self._deadline_remaining_seconds() <= 0:
                     self.status_var.set("Friday filing deadline reached. Closing the week.")
                     self.advance_turn(auto=True)
@@ -605,7 +606,7 @@ class DashboardController:
         try:
             state = read_state(self.paths)
             if target_day <= int(getattr(state, "week_day", 0) or 0):
-                return
+                return ""
             items = read_docket(self.paths)
             districts = read_districts(self.paths)
             active_features = read_active_features(self.paths)
@@ -613,9 +614,12 @@ class DashboardController:
             self._grade_dirty = True
             write_state(self.paths, state)
             write_daily_pressure_overlays(self.paths, districts, pressure)
-            refresh_all(self.paths, self.messages, layer_names={DISTRICTS})
+            if target_day in MIDWEEK_MAP_REDRAW_DAYS:
+                rebuild_output_layers(self.paths, self.messages, layer_names={DISTRICTS}, dirty_scope=DIRTY_DISTRICTS)
+            return _pressure_status_text(target_day, pressure)
         except Exception as exc:
             _warn(self.messages, "DASH", f"daily pressure update failed: {exc}")
+            return ""
 
     def new_game(self):
         """Open an inline seed-entry overlay (no native dialog, single screen)."""
@@ -1072,6 +1076,18 @@ class RedrawPlan:
     layer_names: frozenset[str]
     remove_scope: frozenset[str] | None = None
     clear_selections: bool = True
+
+
+def _pressure_status_text(target_day, pressure):
+    """Return a compact desk status for daily pressure changes."""
+
+    active_count = sum(1 for value in (pressure or {}).values() if int(value or 0) > 0)
+    if active_count <= 0:
+        return ""
+    day_index = min(len(WORK_WEEK_DAYS) - 1, max(0, int(target_day or 0)))
+    day_label = WORK_WEEK_DAYS[day_index][0].split()[0].title()
+    noun = "district" if active_count == 1 else "districts"
+    return f"{day_label}: {active_count} {noun} pressure rising."
 
 
 def _decision_layer_names(item):
