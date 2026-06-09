@@ -5,6 +5,7 @@ from __future__ import annotations
 import time
 import traceback
 from copy import deepcopy
+from dataclasses import dataclass
 
 import arcpy
 
@@ -1058,6 +1059,19 @@ def clear_output_selections(paths):
 
 
 _GEOM_TYPE_TO_LAYER = {"POINT": POINTS, "LINE": LINES, "POLYGON": ZONES}
+DIRTY_DESK_ONLY = "desk"
+DIRTY_SELECTION_ONLY = "selection"
+DIRTY_DISTRICTS = "districts"
+
+
+@dataclass(frozen=True)
+class RedrawPlan:
+    """Concrete map work chosen for a dirty scope."""
+
+    mode: str
+    layer_names: frozenset[str]
+    remove_scope: frozenset[str] | None = None
+    clear_selections: bool = True
 
 
 def _decision_layer_names(item):
@@ -1072,7 +1086,32 @@ def _decision_layer_names(item):
     return {DISTRICTS, feature_layer}
 
 
-def rebuild_output_layers(paths, messages, layer_names=None, force_readd=False):
+def _normalize_layer_names(layer_names):
+    """Return an immutable layer-name scope, preserving None as all layers."""
+
+    if layer_names is None:
+        return None
+    return frozenset(layer_names)
+
+
+def _redraw_plan(layer_names=None, force_readd=False, dirty_scope=None):
+    """Return concrete map work for a dirty scope."""
+
+    if dirty_scope in (DIRTY_DESK_ONLY, DIRTY_SELECTION_ONLY):
+        return RedrawPlan("desk-only", frozenset(), clear_selections=False)
+    names = _normalize_layer_names(layer_names)
+    if force_readd:
+        return RedrawPlan("force-readd", frozenset() if names is None else names, None if names is None else names)
+    district_in_scope = names is None or DISTRICTS in names or dirty_scope == DIRTY_DISTRICTS
+    effective_names = names
+    if district_in_scope and effective_names is None:
+        effective_names = frozenset((DISTRICTS, POINTS, LINES, ZONES))
+    if district_in_scope:
+        return RedrawPlan("district-readd", effective_names or frozenset((DISTRICTS,)), frozenset((DISTRICTS,)))
+    return RedrawPlan("refresh-only", effective_names or frozenset())
+
+
+def rebuild_output_layers(paths, messages, layer_names=None, force_readd=False, dirty_scope=None):
     """Refresh (or, when forced, recreate) map layers after GDB edits.
 
     layer_names: optional iterable restricting the work to those names. None
@@ -1090,27 +1129,26 @@ def rebuild_output_layers(paths, messages, layer_names=None, force_readd=False):
     ``addDataFromPath`` savings.
     """
 
+    plan = _redraw_plan(layer_names=layer_names, force_readd=force_readd, dirty_scope=dirty_scope)
+    if plan.mode == "desk-only":
+        _log(messages, "REBUILD", f"desk-only ({dirty_scope})")
+        return plan
+    effective_layer_names = None if layer_names is None and plan.mode in ("force-readd", "district-readd") else set(plan.layer_names)
     with perf_block("rebuild"):
-        clear_output_selections(paths)
-        district_in_scope = layer_names is None or DISTRICTS in layer_names
-        if force_readd:
-            remove_scope, do_remove = layer_names, True
-        elif district_in_scope:
-            # RefreshLayer cannot reload the districts' changed attributes, so
-            # re-add the district family (overlays cascade inside the helpers).
-            remove_scope, do_remove = {DISTRICTS}, True
-        else:
-            remove_scope, do_remove = None, False
-        mode = "force-readd" if force_readd else ("district-readd" if do_remove else "refresh-only")
-        scope = "all" if layer_names is None else f"targeted={sorted(layer_names)}"
+        if plan.clear_selections:
+            clear_output_selections(paths)
+        mode = plan.mode
+        scope = "all" if effective_layer_names is None else f"targeted={sorted(effective_layer_names)}"
         _log(messages, "REBUILD", f"{scope} ({mode})")
-        if do_remove:
+        if plan.remove_scope is not None or plan.mode == "force-readd":
+            remove_scope = None if plan.remove_scope is None else set(plan.remove_scope)
             with perf_block("remove"):
                 remove_outputs_from_map(messages, layer_names=remove_scope)
         with perf_block("add"):
-            add_outputs_to_map(paths, messages, layer_names=layer_names)
+            add_outputs_to_map(paths, messages, layer_names=effective_layer_names)
         with perf_block("refresh"):
-            refresh_all(paths, messages, layer_names=layer_names)
+            refresh_all(paths, messages, layer_names=effective_layer_names)
+    return plan
 
 
 def _filed_report_text(result, districts=None):

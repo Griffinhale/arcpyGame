@@ -215,6 +215,62 @@ def test_rebuild_force_readd_removes_every_layer(monkeypatch):
     assert ("remove", None) in calls
 
 
+def test_rebuild_planner_keeps_default_district_readd_for_district_scope(monkeypatch):
+    """Verify district dirty scope still re-adds the district family."""
+
+    calls = []
+    monkeypatch.setattr(dashboard, "clear_output_selections", lambda paths: calls.append(("clear", None)))
+    monkeypatch.setattr(dashboard, "remove_outputs_from_map", lambda messages, layer_names=None: calls.append(("remove", layer_names)))
+    monkeypatch.setattr(dashboard, "add_outputs_to_map", lambda paths, messages, layer_names=None: calls.append(("add", layer_names)))
+    monkeypatch.setattr(dashboard, "refresh_all", lambda paths, messages, layer_names=None: calls.append(("refresh", layer_names)))
+
+    plan = dashboard.rebuild_output_layers({}, object(), layer_names={dashboard.DISTRICTS})
+
+    assert plan.mode == "district-readd"
+    assert plan.remove_scope == frozenset((dashboard.DISTRICTS,))
+    assert calls == [
+        ("clear", None),
+        ("remove", {dashboard.DISTRICTS}),
+        ("add", {dashboard.DISTRICTS}),
+        ("refresh", {dashboard.DISTRICTS}),
+    ]
+
+
+def test_rebuild_planner_allows_desk_only_without_map_work(monkeypatch):
+    """Verify desk-only dirty scopes do not touch ArcGIS map layers."""
+
+    calls = []
+    monkeypatch.setattr(dashboard, "clear_output_selections", lambda paths: calls.append(("clear", None)))
+    monkeypatch.setattr(dashboard, "remove_outputs_from_map", lambda messages, layer_names=None: calls.append(("remove", layer_names)))
+    monkeypatch.setattr(dashboard, "add_outputs_to_map", lambda paths, messages, layer_names=None: calls.append(("add", layer_names)))
+    monkeypatch.setattr(dashboard, "refresh_all", lambda paths, messages, layer_names=None: calls.append(("refresh", layer_names)))
+
+    plan = dashboard.rebuild_output_layers({}, object(), dirty_scope=dashboard.DIRTY_DESK_ONLY)
+
+    assert plan.mode == "desk-only"
+    assert plan.layer_names == frozenset()
+    assert calls == []
+
+
+def test_rebuild_planner_refreshes_feature_only_scope(monkeypatch):
+    """Verify feature-only dirty scopes avoid district re-adds."""
+
+    calls = []
+    monkeypatch.setattr(dashboard, "clear_output_selections", lambda paths: calls.append(("clear", None)))
+    monkeypatch.setattr(dashboard, "remove_outputs_from_map", lambda messages, layer_names=None: calls.append(("remove", layer_names)))
+    monkeypatch.setattr(dashboard, "add_outputs_to_map", lambda paths, messages, layer_names=None: calls.append(("add", layer_names)))
+    monkeypatch.setattr(dashboard, "refresh_all", lambda paths, messages, layer_names=None: calls.append(("refresh", layer_names)))
+
+    plan = dashboard.rebuild_output_layers({}, object(), layer_names={dashboard.POINTS})
+
+    assert plan.mode == "refresh-only"
+    assert calls == [
+        ("clear", None),
+        ("add", {dashboard.POINTS}),
+        ("refresh", {dashboard.POINTS}),
+    ]
+
+
 def test_final_audit_report_includes_grade_flavor():
     """Verify the inline final audit carries PASS/CONDITIONAL/FAIL ending flavor (#7)."""
 
