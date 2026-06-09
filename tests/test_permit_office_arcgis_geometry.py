@@ -526,6 +526,19 @@ def test_redraw_experiment_reports_failure_to_caller(monkeypatch):
     assert any("name=predrawn-rehydrate failed: map unavailable" in line for line in messages.warnings)
 
 
+def test_redraw_experiment_rehydrate_variants_dispatch_to_rehydrate(monkeypatch):
+    """Verify corrected rehydrate variants start from the known-correct path."""
+
+    calls = []
+    monkeypatch.setattr(geometry, "_experiment_predrawn_rehydrate", lambda paths, messages, name, layer_names: calls.append((name, layer_names)))
+    messages = CapturingMessages()
+
+    handled = geometry.run_redraw_experiment(_paths(), messages, "predrawn-rehydrate-style-cache", layer_names={geometry.DISTRICTS})
+
+    assert handled is True
+    assert calls == [("predrawn-rehydrate-style-cache", {geometry.DISTRICTS})]
+
+
 def test_redraw_experiment_alt_refresh_tries_non_readd_paths(monkeypatch):
     """Verify the alt-refresh probe tries query, visibility, CIM, and temp-layer paths."""
 

@@ -1122,6 +1122,8 @@ def run_redraw_experiment(paths, messages, experiment, layer_names=None, remove_
             _experiment_predrawn_swap(paths, messages, name, layer_names)
         elif name == "predrawn-rehydrate":
             _experiment_predrawn_rehydrate(paths, messages, name, layer_names)
+        elif name.startswith("predrawn-rehydrate-"):
+            _experiment_predrawn_rehydrate(paths, messages, name, layer_names)
         elif name == "alt-refresh":
             _experiment_alt_refresh(paths, messages, name, layer_names)
         elif name.startswith("alt-"):
