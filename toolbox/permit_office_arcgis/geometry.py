@@ -888,6 +888,22 @@ def _log_experiment(messages, name, path, status, started, detail=""):
     _log(messages, "EXPERIMENT", f"name={name} path={path} status={status} elapsed={elapsed:.3f}{suffix}")
 
 
+class _PhaseTimer:
+    """Collect small phase timings for live ArcGIS redraw diagnostics."""
+
+    def __init__(self):
+        self._last = time.perf_counter()
+        self.parts = []
+
+    def mark(self, name):
+        now = time.perf_counter()
+        self.parts.append((name, now - self._last))
+        self._last = now
+
+    def summary(self):
+        return " ".join(f"{name}={elapsed:.3f}" for name, elapsed in self.parts)
+
+
 def _get_or_add_layer(active_map, source, name):
     """Return a named map layer, adding it from source when absent."""
 
@@ -979,15 +995,19 @@ def _experiment_predrawn_rehydrate(paths, messages, name, layer_names):
     """Re-add one hidden predrawn snapshot from the GDB, then swap visibility."""
 
     started = time.perf_counter()
+    phases = _PhaseTimer()
     active_map = _active_map()
     if active_map is None:
         _log_experiment(messages, name, "predrawn-rehydrate", "no-active-map", started)
         return
     snapshots = _predrawn_snapshots(active_map)
+    phases.mark("find_snapshots")
     if len(snapshots) < 2:
         _seed_predrawn_layers(paths, messages, active_map)
+        phases.mark("seed_snapshots")
         arcpy.RefreshLayer(PREDRAWN_ACTIVE_LAYER)
-        _log_experiment(messages, name, "predrawn-rehydrate", "seeded", started, f"target={PREDRAWN_ACTIVE_LAYER!r}")
+        phases.mark("RefreshLayer")
+        _log_experiment(messages, name, "predrawn-rehydrate", "seeded", started, f"target={PREDRAWN_ACTIVE_LAYER!r} {phases.summary()}")
         return
     hidden = next((layer for layer in snapshots if not bool(getattr(layer, "visible", True))), snapshots[-1])
     hidden_name = getattr(hidden, "name", f"{PREDRAWN_LAYER_PREFIX} Idle")
@@ -995,12 +1015,17 @@ def _experiment_predrawn_rehydrate(paths, messages, name, layer_names):
         active_map.removeLayer(hidden)
     except Exception:
         pass
+    phases.mark("remove_hidden")
     layer, _added = _get_or_add_layer(active_map, paths["districts"], hidden_name)
+    phases.mark("addDataFromPath")
     _prepare_district_display_layer(layer, messages, "1=1")
+    phases.mark("labels_symbology")
     for snapshot in _predrawn_snapshots(active_map):
         snapshot.visible = snapshot is layer
+    phases.mark("visibility_swap")
     arcpy.RefreshLayer(hidden_name)
-    _log_experiment(messages, name, "predrawn-rehydrate", "ok", started, f"target={hidden_name!r}")
+    phases.mark("RefreshLayer")
+    _log_experiment(messages, name, "predrawn-rehydrate", "ok", started, f"target={hidden_name!r} {phases.summary()}")
 
 
 def _experiment_definition_query(layer):

@@ -447,6 +447,45 @@ def test_redraw_experiment_predrawn_rehydrate_readds_hidden_snapshot_then_swaps(
     assert any("path=predrawn-rehydrate status=ok" in line for line in messages.messages)
 
 
+def test_predrawn_rehydrate_logs_phase_timings(monkeypatch):
+    """Verify rehydrate reports the expensive ArcGIS phases separately."""
+
+    calls = []
+    active = SimpleNamespace(name="Permit Office Predrawn Active", visible=True, definitionQuery="1=1", transparency=None)
+    idle = SimpleNamespace(name="Permit Office Predrawn Idle", visible=False, definitionQuery="1=1", transparency=None)
+    layers = [active, idle]
+
+    def remove_layer(layer):
+        calls.append(("remove", layer.name))
+        layers.remove(layer)
+
+    def add_data(source):
+        layer = SimpleNamespace(name="raw", visible=True, definitionQuery="", transparency=None)
+        layers.append(layer)
+        calls.append(("add", source))
+        return layer
+
+    fake_map = SimpleNamespace(listLayers=lambda: list(layers), removeLayer=remove_layer, addDataFromPath=add_data)
+    fake = SimpleNamespace(
+        mp=SimpleNamespace(ArcGISProject=lambda current: SimpleNamespace(activeMap=fake_map)),
+        RefreshLayer=lambda name: calls.append(("refresh", name)),
+    )
+    monkeypatch.setattr(geometry, "arcpy", fake)
+    monkeypatch.setattr(geometry, "apply_simple_symbology", lambda target, key, messages: calls.append(("sym", target.name, key)))
+    messages = CapturingMessages()
+
+    handled = geometry.run_redraw_experiment(_paths(), messages, "predrawn-rehydrate", layer_names={geometry.DISTRICTS}, dirty_scope="districts", mode="district-readd")
+
+    assert handled is True
+    line = next(line for line in messages.messages if "path=predrawn-rehydrate status=ok" in line)
+    assert "find_snapshots=" in line
+    assert "remove_hidden=" in line
+    assert "addDataFromPath=" in line
+    assert "labels_symbology=" in line
+    assert "visibility_swap=" in line
+    assert "RefreshLayer=" in line
+
+
 def test_redraw_experiment_reports_failure_to_caller(monkeypatch):
     """Verify callers can fall back when a live redraw probe fails."""
 
