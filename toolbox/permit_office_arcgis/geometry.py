@@ -24,6 +24,7 @@ VOLATILE_OVERLAY_LAYER = "Permit Office Volatile Overlay"
 PREDRAWN_LAYER_PREFIX = "Permit Office Predrawn"
 PREDRAWN_ACTIVE_LAYER = "Permit Office Predrawn Active"
 ALT_REFRESH_VIEW_LAYER = "Permit Office Alt Refresh View"
+VOLATILE_OVERLAY_QUERY = "display_state = 'daily_pressure'"
 
 # District geometry is fixed for the life of a game (only attributes change), so
 # the SHAPE@ pull — the most expensive field on the districts table — is memoized
@@ -887,14 +888,55 @@ def _log_experiment(messages, name, path, status, started, detail=""):
     _log(messages, "EXPERIMENT", f"name={name} path={path} status={status} elapsed={elapsed:.3f}{suffix}")
 
 
+def _get_or_add_layer(active_map, source, name):
+    """Return a named map layer, adding it from source when absent."""
+
+    layers = _layers_by_name(active_map)
+    layer = layers.get(name)
+    if layer is not None:
+        return layer, False
+    layer = active_map.addDataFromPath(source)
+    layer.name = name
+    return layer, True
+
+
+def _prepare_district_display_layer(layer, messages, definition_query=None):
+    """Style a district-source layer by display_state for redraw experiments."""
+
+    if definition_query is not None:
+        try:
+            layer.definitionQuery = definition_query
+        except Exception:
+            pass
+    _tune_layer_visibility(layer, "district_display")
+    _configure_labels(layer, "districts")
+    apply_simple_symbology(layer, "district_display", messages)
+
+
 def _experiment_volatile_overlay(paths, messages, name, layer_names):
     """Create or refresh a small volatile pressure overlay layer."""
 
     started = time.perf_counter()
-    where = "daily_pressure > 0 OR display_state <> 'normal'"
-    arcpy.management.MakeFeatureLayer(paths["districts"], VOLATILE_OVERLAY_LAYER, where)
+    active_map = _active_map()
+    if active_map is None:
+        _log_experiment(messages, name, "volatile-overlay", "no-active-map", started)
+        return
+    layer, added = _get_or_add_layer(active_map, paths["districts"], VOLATILE_OVERLAY_LAYER)
+    _prepare_district_display_layer(layer, messages, VOLATILE_OVERLAY_QUERY)
     arcpy.RefreshLayer(VOLATILE_OVERLAY_LAYER)
-    _log_experiment(messages, name, "volatile-overlay", "ok", started, f"target={VOLATILE_OVERLAY_LAYER!r}")
+    _log_experiment(messages, name, "volatile-overlay", "ok", started, f"target={VOLATILE_OVERLAY_LAYER!r} added={added}")
+
+
+def _seed_predrawn_layers(paths, messages, active_map):
+    """Create durable pre-drawn snapshot layers in the active map."""
+
+    layers = []
+    for layer_name, visible in ((PREDRAWN_ACTIVE_LAYER, True), (f"{PREDRAWN_LAYER_PREFIX} Idle", False)):
+        layer, _added = _get_or_add_layer(active_map, paths["districts"], layer_name)
+        layer.visible = visible
+        _prepare_district_display_layer(layer, messages, "1=1")
+        layers.append(layer)
+    return layers
 
 
 def _experiment_predrawn_swap(paths, messages, name, layer_names):
@@ -902,9 +944,12 @@ def _experiment_predrawn_swap(paths, messages, name, layer_names):
 
     started = time.perf_counter()
     active_map = _active_map()
+    if active_map is None:
+        _log_experiment(messages, name, "predrawn-swap", "no-active-map", started)
+        return
     snapshots = [layer for layer in _layers_by_name(active_map).values() if getattr(layer, "name", "").startswith(PREDRAWN_LAYER_PREFIX)]
     if not snapshots:
-        arcpy.management.MakeFeatureLayer(paths["districts"], PREDRAWN_ACTIVE_LAYER, "1=1")
+        snapshots = _seed_predrawn_layers(paths, messages, active_map)
         arcpy.RefreshLayer(PREDRAWN_ACTIVE_LAYER)
         _log_experiment(messages, name, "predrawn-swap", "seeded", started, f"target={PREDRAWN_ACTIVE_LAYER!r}")
         return

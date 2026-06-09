@@ -87,6 +87,7 @@ RENDER_FIELD_BY_LAYER_KEY = {
     "points": "display_state",
     "lines": "display_state",
     "zones": "display_state",
+    "district_display": "display_state",
     # Overlay layers reuse the PermitDistricts feature class with a different
     # render field so type, prosperity, and identity each get a visual channel.
     "district_prosperity": "prosperity_band",
@@ -98,6 +99,7 @@ LAYER_TRANSPARENCY = {
     "points": 0,
     "lines": 0,
     "zones": 35,
+    "district_display": 35,
     "district_prosperity": 0,
     "district_identity": 25,
 }
@@ -109,6 +111,10 @@ SYMBOL_STYLE_BY_LAYER = {
     "districts": {
         "outline_color": DISTRICT_OUTLINE_COLOR,
         "outline_width": 3.0,
+    },
+    "district_display": {
+        "outline_color": [93, 48, 48, 100],
+        "outline_width": 3.2,
     },
     "zones": {
         "outline_color": FEATURE_OUTLINE_COLOR,

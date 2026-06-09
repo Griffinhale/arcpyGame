@@ -304,21 +304,25 @@ def test_output_layers_present_true_when_probe_unavailable(monkeypatch):
     assert geometry.output_layers_present() is True
 
 
-def test_redraw_experiment_volatile_overlay_creates_temp_layer(monkeypatch):
-    """Verify the volatile overlay probe uses a dedicated MakeFeatureLayer path."""
+def test_redraw_experiment_volatile_overlay_adds_symbolized_map_layer(monkeypatch):
+    """Verify the volatile overlay probe uses a valid display-state map layer."""
 
     calls = []
+    layer = SimpleNamespace(name=geometry.VOLATILE_OVERLAY_LAYER, visible=True, definitionQuery="", transparency=None)
+    fake_map = SimpleNamespace(listLayers=lambda: [], addDataFromPath=lambda source: calls.append(("add", source)) or layer)
     fake = SimpleNamespace(
-        management=SimpleNamespace(MakeFeatureLayer=lambda source, name, where: calls.append(("make", source, name, where))),
-        mp=SimpleNamespace(ArcGISProject=lambda current: SimpleNamespace(activeMap=SimpleNamespace(listLayers=lambda: []))),
+        mp=SimpleNamespace(ArcGISProject=lambda current: SimpleNamespace(activeMap=fake_map)),
         RefreshLayer=lambda name: calls.append(("refresh", name)),
     )
     monkeypatch.setattr(geometry, "arcpy", fake)
+    monkeypatch.setattr(geometry, "apply_simple_symbology", lambda target, key, messages: calls.append(("sym", target.name, key)))
     messages = CapturingMessages()
 
     geometry.run_redraw_experiment(_paths(), messages, "volatile-overlay", layer_names={geometry.DISTRICTS}, dirty_scope="districts", mode="district-readd")
 
-    assert ("make", "districts", "Permit Office Volatile Overlay", "daily_pressure > 0 OR display_state <> 'normal'") in calls
+    assert ("add", "districts") in calls
+    assert layer.definitionQuery == "display_state = 'daily_pressure'"
+    assert ("sym", "Permit Office Volatile Overlay", "district_display") in calls
     assert ("refresh", "Permit Office Volatile Overlay") in calls
     assert any("name=volatile-overlay path=volatile-overlay status=ok" in line for line in messages.messages)
 
@@ -345,6 +349,38 @@ def test_redraw_experiment_predrawn_swap_toggles_snapshot_visibility(monkeypatch
     assert idle.visible is False
     assert ("refresh", "Permit Office Predrawn Active") in calls
     assert any("path=predrawn-swap status=ok" in line for line in messages.messages)
+
+
+def test_redraw_experiment_predrawn_swap_seeds_symbolized_snapshot_layers(monkeypatch):
+    """Verify pre-drawn seed creates durable map layers with display-state symbology."""
+
+    calls = []
+    layers = []
+
+    def add_data(source):
+        layer = SimpleNamespace(name=f"raw-{len(layers)}", visible=True, definitionQuery="", transparency=None)
+        layers.append(layer)
+        calls.append(("add", source))
+        return layer
+
+    fake_map = SimpleNamespace(listLayers=lambda: [], addDataFromPath=add_data)
+    fake = SimpleNamespace(
+        mp=SimpleNamespace(ArcGISProject=lambda current: SimpleNamespace(activeMap=fake_map)),
+        RefreshLayer=lambda name: calls.append(("refresh", name)),
+    )
+    monkeypatch.setattr(geometry, "arcpy", fake)
+    monkeypatch.setattr(geometry, "apply_simple_symbology", lambda target, key, messages: calls.append(("sym", target.name, key)))
+    messages = CapturingMessages()
+
+    geometry.run_redraw_experiment(_paths(), messages, "predrawn-swap", layer_names={geometry.DISTRICTS}, dirty_scope="districts", mode="district-readd")
+
+    assert [layer.name for layer in layers] == ["Permit Office Predrawn Active", "Permit Office Predrawn Idle"]
+    assert [layer.visible for layer in layers] == [True, False]
+    assert all(layer.definitionQuery == "1=1" for layer in layers)
+    assert ("sym", "Permit Office Predrawn Active", "district_display") in calls
+    assert ("sym", "Permit Office Predrawn Idle", "district_display") in calls
+    assert ("refresh", "Permit Office Predrawn Active") in calls
+    assert any("path=predrawn-swap status=seeded" in line for line in messages.messages)
 
 
 def test_redraw_experiment_alt_refresh_tries_non_readd_paths(monkeypatch):
