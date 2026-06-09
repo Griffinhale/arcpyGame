@@ -37,12 +37,13 @@ lines (`[WORKSPACE]`, `[REBUILD]`, `[DASH]`, `[SYM]`).
 ## 3. District + feature repaint *
 - [ ] Approve a case. The affected district family repaints (base
       `district_type`, prosperity overlay, identity overlay) and any new/updated
-      feature shows. Log shows `[REBUILD] ... (district-readd)`.
+      feature shows. Log shows `[REBUILD] ... mode=district-readd ...` and, with
+      perf enabled, `experiment_predrawn-rehydrate=...`.
 - [ ] Advance a week (or let the deadline fire). Districts whose state changed
       repaint; converted/contested districts show their new fill + name.
 - [ ] Confirm the board never goes blank / lines-only after an action (the
-      Phase-2 dirty-readd experiment was reverted precisely because it left the
-      board stale -- districts must re-add every action).
+      Phase-2 dirty-readd and volatile-overlay experiments could leave the board
+      stale/incomplete -- rehydrate must keep a complete district board visible).
 
 ## 4. Symbology (#9) *
 - [ ] On launch the log emits the six `[SYM] set ... unique-value symbology on ...`
@@ -90,19 +91,25 @@ lines (`[WORKSPACE]`, `[REBUILD]`, `[DASH]`, `[SYM]`).
       configured checkpoint is reached.
 - [ ] Let the week advance to a configured checkpoint. Confirm the log includes
       `[REBUILD] targeted=['PermitDistricts'] mode=district-readd dirty=districts`.
-- [ ] Record baseline timings for a normal decision and a checkpoint tick:
-      `remove`, `add`, `refresh`, and total `rebuild`.
+- [ ] Record timings for a normal decision and a checkpoint tick:
+      `experiment_predrawn-rehydrate` and total `rebuild`. If rehydrate reports a
+      warning and falls back, record `remove`, `add`, `refresh` too.
 
 ## 11. Redraw experiments
-- [ ] Volatile overlay experiment: create a small pressure/odds overlay layer and
-      compare refresh/recreate timing against district-family re-add.
+- [ ] Default path: leave **Redraw Experiment = None** and confirm district-dirty
+      redraws still use `predrawn-rehydrate` in the perf log.
+- [ ] Volatile overlay experiment: keep as a probe only. Confirm whether it still
+      drops non-overlay districts; do not promote unless the full board remains
+      visible.
 - [ ] ArcGIS alternative-path experiment: test definition query swap, layer-file
       apply, CIM renderer edit, in-memory layer, and apply-symbology-from-layer.
       Record whether each path reloads changed visual state correctly.
-- [ ] Pre-drawn state experiment: generate mid-week band snapshots before the
-      week starts, then test visibility/source/definition swaps at runtime.
-      Record startup cost, resume behavior, Contents clutter, and runtime swap
-      timing.
+- [ ] Pre-drawn visibility swap experiment: confirm it is still fast, but reject
+      it as default if district symbology stays stale.
+- [ ] Pre-drawn rehydrate path: record seed cost, hot-path cost, resume behavior,
+      Contents clutter, and runtime swap timing. Current live evidence promoted
+      it as default because it preserved district symbology with lower rebuild
+      cost than district-family remove+add.
 - [ ] Promote no experiment unless it preserves visual correctness after GDB
       writes and reduces live redraw time versus the baseline.
 

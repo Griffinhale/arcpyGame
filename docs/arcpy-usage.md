@@ -73,15 +73,17 @@ the dashboard must tolerate no open map).
 
 **Refresh/redraw strategy.** `arcpy.RefreshLayer` only redraws a layer's cached
 renderer — it does **not** reload attribute values written to the GDB. So
-`rebuild_output_layers()` defaults to **district-readd**: it removes + re-adds the
-district family (`PermitDistricts` + prosperity/identity overlays), whose
-rendering keys on attributes that change every decision/turn, and leaves the
-feature layers (points/lines/zones) refresh-only (re-add-any-missing +
-`RefreshLayer`). `force_readd=True` does the full remove→add→refresh of every
-in-scope layer, used when the layer set or symbology changes (New Game). This
-keeps the bulk of the per-turn `addDataFromPath` savings on the feature layers
-while ensuring district state actually renders. Timings are visible under
-`PERMIT_OFFICE_PERF=1`.
+`rebuild_output_layers()` uses a **predrawn rehydrate** default for district-dirty
+work: it keeps two durable `Permit Office Predrawn ...` district snapshots in the
+map, re-adds the hidden snapshot from the GDB, applies `district_display`
+symbology, refreshes that one layer, then swaps visibility. This keeps the
+district re-add correctness requirement while avoiding the old full
+district-family remove+add on every decision. Feature layers (points/lines/zones)
+remain refresh-only unless explicitly dirty; point decisions can still re-add
+`PermitPoints` when needed. `force_readd=True` does the full remove→add→refresh
+of every in-scope layer, used when the layer set or symbology changes (New Game)
+or when the rehydrate path reports failure. Timings are visible under
+`PERMIT_OFFICE_PERF=1` as `experiment_predrawn-rehydrate`.
 
 **Symbology** (`symbology_config.py` + `geometry.py`): a `UniqueValueRenderer` set
 via `sym.updateRenderer("UniqueValueRenderer")`, with the render field assigned

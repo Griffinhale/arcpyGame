@@ -30,22 +30,32 @@ simple and correct, and the timer can't interleave with a command.
 responsiveness win but real concurrency risk; revisit as a spike only if live
 runs show UI-freeze pain.
 
-### ADR-4 — District-readd layer rebuild by default
-**Decision:** `rebuild_output_layers()` removes + re-adds the **district family**
-(`PermitDistricts` base + prosperity/identity overlays) every rebuild, and keeps
-the **feature layers** (points/lines/zones) refresh-only; `force_readd=True` does
-a full remove→add of every in-scope layer (New Game / schema / symbology change).
+### ADR-4 — Predrawn rehydrate for district redraws
+**Decision:** `rebuild_output_layers()` defaults district-dirty redraws to a
+**predrawn rehydrate** path: one hidden pre-drawn district snapshot layer is
+re-added from the GDB, symbolized, refreshed, and swapped visible. Feature layers
+stay refresh-only except when explicitly in the dirty scope; `force_readd=True`
+keeps the full remove→add of every in-scope layer (New Game / schema / symbology
+change). The previous district-family remove+add path remains the fallback if
+rehydrate fails.
 **Why:** `arcpy.RefreshLayer` only redraws the cached renderer — it does **not**
 reload GDB attribute writes. The district layers render on attribute values
 (`district_type`, `prosperity_band`, `identity_state`) that change every decision
 and turn, so refresh-only left them frozen on the new-game snapshot (districts
-"not rendering"). Removing + re-adding only the district family restores correct
-rendering while still skipping the bulk of the per-turn `addDataFromPath` churn
-on the feature layers. **Rejected:** unconditional remove→add of *all* layers
-every turn (slow, flicker-prone); pure refresh-only (correctness bug above).
+"not rendering"). Live June 2026 redraw experiments showed district-family
+remove+add was correct but expensive (`rebuild` commonly ~4-5s), volatile overlay
+was cheaper but visually incomplete (districts could disappear), pure predrawn
+visibility swap was extremely fast (~0.004-0.008s) but could keep stale district
+symbology, and predrawn rehydrate preserved visual correctness with lower live
+rebuild cost (~1.1-2.3s in the recorded runs). **Rejected:** unconditional
+remove→add of *all* layers every turn (slow, flicker-prone); pure refresh-only
+(correctness bug above); volatile overlay as the default (filters away baseline
+districts); pure predrawn visibility swap as the default (stale district
+symbology).
 *(Supersedes the 2026-05-27 refresh spike, which mis-measured refresh-only as
 reliability-safe; the RefreshLayer-does-not-reload-data behavior was confirmed
-later.)*
+later. Supersedes the earlier district-family remove+add default with a measured
+rehydrate default.)*
 
 ### ADR-5 — Cursor efficiency: hint + guard, memoize, read-once
 **Decision:** single-row cursors carry a `where_clause` **and** keep the in-Python

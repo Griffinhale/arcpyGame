@@ -181,31 +181,47 @@ def test_successful_decision_reapplies_map_presentation_before_refresh(monkeypat
     assert order[-5:] == ["clear", "remove", "map", "refresh", "receipt"]
 
 
-def test_rebuild_readds_district_family_on_refresh_only_path(monkeypatch):
-    """Verify district layers are removed+re-added even on the default fast path.
+def test_rebuild_defaults_to_predrawn_rehydrate_for_district_scope(monkeypatch):
+    """Verify district redraws use the promoted pre-drawn rehydrate path.
 
-    ``RefreshLayer`` only redraws the cached renderer; it does not reload GDB
-    attribute writes. District base/prosperity/identity render on values that
-    change every decision and turn, so they must be removed + re-added (full
-    ``addDataFromPath``) to show new state. Feature layers stay refresh-only.
+    Live ArcGIS testing showed full district-family remove+add is correct but
+    expensive, pure visibility swap is fast but stale, and predrawn rehydrate
+    preserves changed district symbology with less live redraw work.
     """
 
     calls = []
+    monkeypatch.delenv(dashboard.REDRAW_EXPERIMENT_ENV, raising=False)
     monkeypatch.setattr(dashboard, "clear_output_selections", lambda paths: None)
     monkeypatch.setattr(dashboard, "remove_outputs_from_map", lambda messages, layer_names=None: calls.append(("remove", layer_names)))
     monkeypatch.setattr(dashboard, "add_outputs_to_map", lambda paths, messages, layer_names=None: calls.append(("add", layer_names)))
     monkeypatch.setattr(dashboard, "refresh_all", lambda paths, messages, layer_names=None: calls.append(("refresh", layer_names)))
+    monkeypatch.setattr(
+        dashboard,
+        "run_redraw_experiment",
+        lambda paths, messages, experiment, **kwargs: calls.append(("experiment", experiment, kwargs)) or True,
+    )
 
     dashboard.rebuild_output_layers({}, object())
 
-    assert ("remove", {dashboard.DISTRICTS}) in calls
-    assert [kind for kind, _scope in calls] == ["remove", "add", "refresh"]
+    assert calls == [
+        (
+            "experiment",
+            dashboard.DEFAULT_REDRAW_EXPERIMENT,
+            {
+                "layer_names": None,
+                "remove_scope": {dashboard.DISTRICTS},
+                "dirty_scope": None,
+                "mode": "district-readd",
+            },
+        ),
+    ]
 
 
 def test_rebuild_force_readd_removes_every_layer(monkeypatch):
     """Verify an explicit force_readd still clears the full output set."""
 
     calls = []
+    monkeypatch.delenv(dashboard.REDRAW_EXPERIMENT_ENV, raising=False)
     monkeypatch.setattr(dashboard, "clear_output_selections", lambda paths: None)
     monkeypatch.setattr(dashboard, "remove_outputs_from_map", lambda messages, layer_names=None: calls.append(("remove", layer_names)))
     monkeypatch.setattr(dashboard, "add_outputs_to_map", lambda paths, messages, layer_names=None: calls.append(("add", layer_names)))
@@ -216,14 +232,20 @@ def test_rebuild_force_readd_removes_every_layer(monkeypatch):
     assert ("remove", None) in calls
 
 
-def test_rebuild_planner_keeps_default_district_readd_for_district_scope(monkeypatch):
-    """Verify district dirty scope still re-adds the district family."""
+def test_rebuild_planner_uses_default_experiment_for_district_scope(monkeypatch):
+    """Verify district dirty scope routes through predrawn rehydrate by default."""
 
     calls = []
+    monkeypatch.delenv(dashboard.REDRAW_EXPERIMENT_ENV, raising=False)
     monkeypatch.setattr(dashboard, "clear_output_selections", lambda paths: calls.append(("clear", None)))
     monkeypatch.setattr(dashboard, "remove_outputs_from_map", lambda messages, layer_names=None: calls.append(("remove", layer_names)))
     monkeypatch.setattr(dashboard, "add_outputs_to_map", lambda paths, messages, layer_names=None: calls.append(("add", layer_names)))
     monkeypatch.setattr(dashboard, "refresh_all", lambda paths, messages, layer_names=None: calls.append(("refresh", layer_names)))
+    monkeypatch.setattr(
+        dashboard,
+        "run_redraw_experiment",
+        lambda paths, messages, experiment, **kwargs: calls.append(("experiment", experiment, kwargs)) or True,
+    )
 
     plan = dashboard.rebuild_output_layers({}, object(), layer_names={dashboard.DISTRICTS})
 
@@ -231,9 +253,16 @@ def test_rebuild_planner_keeps_default_district_readd_for_district_scope(monkeyp
     assert plan.remove_scope == frozenset((dashboard.DISTRICTS,))
     assert calls == [
         ("clear", None),
-        ("remove", {dashboard.DISTRICTS}),
-        ("add", {dashboard.DISTRICTS}),
-        ("refresh", {dashboard.DISTRICTS}),
+        (
+            "experiment",
+            dashboard.DEFAULT_REDRAW_EXPERIMENT,
+            {
+                "layer_names": {dashboard.DISTRICTS},
+                "remove_scope": {dashboard.DISTRICTS},
+                "dirty_scope": None,
+                "mode": "district-readd",
+            },
+        ),
     ]
 
 
@@ -241,10 +270,16 @@ def test_rebuild_planner_readds_dirty_point_layer_when_in_scope(monkeypatch):
     """Verify point decisions can re-add points instead of relying on refresh."""
 
     calls = []
+    monkeypatch.delenv(dashboard.REDRAW_EXPERIMENT_ENV, raising=False)
     monkeypatch.setattr(dashboard, "clear_output_selections", lambda paths: calls.append(("clear", None)))
     monkeypatch.setattr(dashboard, "remove_outputs_from_map", lambda messages, layer_names=None: calls.append(("remove", layer_names)))
     monkeypatch.setattr(dashboard, "add_outputs_to_map", lambda paths, messages, layer_names=None: calls.append(("add", layer_names)))
     monkeypatch.setattr(dashboard, "refresh_all", lambda paths, messages, layer_names=None: calls.append(("refresh", layer_names)))
+    monkeypatch.setattr(
+        dashboard,
+        "run_redraw_experiment",
+        lambda paths, messages, experiment, **kwargs: calls.append(("experiment", experiment, kwargs)) or True,
+    )
 
     plan = dashboard.rebuild_output_layers({}, object(), layer_names={dashboard.DISTRICTS, dashboard.POINTS}, dirty_scope=dashboard.DIRTY_DISTRICTS)
 
@@ -252,9 +287,16 @@ def test_rebuild_planner_readds_dirty_point_layer_when_in_scope(monkeypatch):
     assert plan.remove_scope == frozenset((dashboard.DISTRICTS, dashboard.POINTS))
     assert calls == [
         ("clear", None),
-        ("remove", {dashboard.DISTRICTS, dashboard.POINTS}),
-        ("add", {dashboard.DISTRICTS, dashboard.POINTS}),
-        ("refresh", {dashboard.DISTRICTS, dashboard.POINTS}),
+        (
+            "experiment",
+            dashboard.DEFAULT_REDRAW_EXPERIMENT,
+            {
+                "layer_names": {dashboard.DISTRICTS, dashboard.POINTS},
+                "remove_scope": {dashboard.DISTRICTS, dashboard.POINTS},
+                "dirty_scope": dashboard.DIRTY_DISTRICTS,
+                "mode": "district-readd",
+            },
+        ),
     ]
 
 
@@ -298,10 +340,12 @@ def test_rebuild_logs_dirty_scope_and_mode(monkeypatch):
 
     messages = object()
     logs = []
+    monkeypatch.delenv(dashboard.REDRAW_EXPERIMENT_ENV, raising=False)
     monkeypatch.setattr(dashboard, "clear_output_selections", lambda paths: None)
     monkeypatch.setattr(dashboard, "remove_outputs_from_map", lambda messages, layer_names=None: None)
     monkeypatch.setattr(dashboard, "add_outputs_to_map", lambda paths, messages, layer_names=None: None)
     monkeypatch.setattr(dashboard, "refresh_all", lambda paths, messages, layer_names=None: None)
+    monkeypatch.setattr(dashboard, "run_redraw_experiment", lambda *args, **kwargs: True)
     monkeypatch.setattr(dashboard, "_log", lambda messages_arg, tag, text: logs.append((tag, text)))
 
     dashboard.rebuild_output_layers({}, messages, layer_names={dashboard.DISTRICTS}, dirty_scope=dashboard.DIRTY_DISTRICTS)
@@ -321,7 +365,7 @@ def test_rebuild_uses_experiment_when_env_is_set(monkeypatch):
     monkeypatch.setattr(
         dashboard,
         "run_redraw_experiment",
-        lambda paths, messages, experiment, **kwargs: calls.append(("experiment", experiment, kwargs)),
+        lambda paths, messages, experiment, **kwargs: calls.append(("experiment", experiment, kwargs)) or True,
     )
 
     plan = dashboard.rebuild_output_layers({}, object(), layer_names={dashboard.DISTRICTS}, dirty_scope=dashboard.DIRTY_DISTRICTS)
@@ -342,15 +386,56 @@ def test_rebuild_uses_experiment_when_env_is_set(monkeypatch):
     ]
 
 
+def test_rebuild_falls_back_when_default_rehydrate_fails(monkeypatch):
+    """Verify promoted redraw path failure falls back to the old remove/add path."""
+
+    calls = []
+    logs = []
+    monkeypatch.delenv(dashboard.REDRAW_EXPERIMENT_ENV, raising=False)
+    monkeypatch.setattr(dashboard, "clear_output_selections", lambda paths: calls.append(("clear", None)))
+    monkeypatch.setattr(dashboard, "remove_outputs_from_map", lambda messages, layer_names=None: calls.append(("remove", layer_names)))
+    monkeypatch.setattr(dashboard, "add_outputs_to_map", lambda paths, messages, layer_names=None: calls.append(("add", layer_names)))
+    monkeypatch.setattr(dashboard, "refresh_all", lambda paths, messages, layer_names=None: calls.append(("refresh", layer_names)))
+    monkeypatch.setattr(
+        dashboard,
+        "run_redraw_experiment",
+        lambda paths, messages, experiment, **kwargs: calls.append(("experiment", experiment, kwargs)) or False,
+    )
+    monkeypatch.setattr(dashboard, "_warn", lambda messages_arg, tag, text: logs.append((tag, text)))
+
+    plan = dashboard.rebuild_output_layers({}, object(), layer_names={dashboard.DISTRICTS}, dirty_scope=dashboard.DIRTY_DISTRICTS)
+
+    assert plan.mode == "district-readd"
+    assert calls == [
+        ("clear", None),
+        (
+            "experiment",
+            dashboard.DEFAULT_REDRAW_EXPERIMENT,
+            {
+                "layer_names": {dashboard.DISTRICTS},
+                "remove_scope": {dashboard.DISTRICTS},
+                "dirty_scope": dashboard.DIRTY_DISTRICTS,
+                "mode": "district-readd",
+            },
+        ),
+        ("remove", {dashboard.DISTRICTS}),
+        ("add", {dashboard.DISTRICTS}),
+        ("refresh", {dashboard.DISTRICTS}),
+    ]
+    assert logs == [("REBUILD", "predrawn-rehydrate failed; falling back to district-readd")]
+
+
 def test_standalone_rebuild_emits_perf_summary(monkeypatch):
     """Verify timer/checkpoint rebuilds log perf outside turn sessions."""
 
     messages = object()
     logs = []
+    monkeypatch.delenv(dashboard.REDRAW_EXPERIMENT_ENV, raising=False)
     monkeypatch.setattr(dashboard, "clear_output_selections", lambda paths: None)
     monkeypatch.setattr(dashboard, "remove_outputs_from_map", lambda messages, layer_names=None: None)
     monkeypatch.setattr(dashboard, "add_outputs_to_map", lambda paths, messages, layer_names=None: None)
     monkeypatch.setattr(dashboard, "refresh_all", lambda paths, messages, layer_names=None: None)
+    monkeypatch.setattr(dashboard, "run_redraw_experiment", lambda *args, **kwargs: True)
     monkeypatch.setattr(_perf, "_log", lambda messages_arg, tag, text: logs.append((tag, text)))
     _perf.set_enabled(True)
     try:
@@ -361,9 +446,7 @@ def test_standalone_rebuild_emits_perf_summary(monkeypatch):
     perf_lines = [text for tag, text in logs if tag == "PERF"]
     assert len(perf_lines) == 1
     assert perf_lines[0].startswith("rebuild=")
-    assert "remove=" in perf_lines[0]
-    assert "add=" in perf_lines[0]
-    assert "refresh=" in perf_lines[0]
+    assert "experiment_predrawn-rehydrate=" in perf_lines[0]
 
 
 def test_rebuild_inside_turn_session_does_not_emit_duplicate_perf_summary(monkeypatch):

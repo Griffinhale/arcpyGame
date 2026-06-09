@@ -68,6 +68,7 @@ WORK_WEEK_DAYS = (
 WORK_DAY_SECONDS = WEEK_DEADLINE_SECONDS // len(WORK_WEEK_DAYS)
 MIDWEEK_MAP_REDRAW_DAYS = frozenset((2, 4))
 REDRAW_EXPERIMENT_ENV = "PERMIT_OFFICE_REDRAW_EXPERIMENT"
+DEFAULT_REDRAW_EXPERIMENT = "predrawn-rehydrate"
 
 
 def prepare_dashboard_session(paths, seed, messages, resume=True):
@@ -1120,6 +1121,14 @@ def _configured_redraw_experiment():
     return os.environ.get(REDRAW_EXPERIMENT_ENV, "").strip()
 
 
+def _default_redraw_experiment(plan, force_readd=False):
+    """Return the promoted redraw path for production district refreshes."""
+
+    if force_readd or plan.mode != "district-readd":
+        return ""
+    return DEFAULT_REDRAW_EXPERIMENT
+
+
 def _redraw_plan(layer_names=None, force_readd=False, dirty_scope=None):
     """Return concrete map work for a dirty scope."""
 
@@ -1148,13 +1157,11 @@ def rebuild_output_layers(paths, messages, layer_names=None, force_readd=False, 
     force_readd: remove and re-add *every* in-scope layer from scratch. Needed
     when the layer set or symbology changes (e.g. a new game).
 
-    The default path is district-readd: the district base + prosperity/identity
-    overlays render on attribute values (district_type, prosperity_band,
-    identity_state) that change every decision and turn. ``arcpy.RefreshLayer``
-    only redraws the cached renderer and does NOT reload GDB attribute writes, so
-    those layers must be removed + re-added to show new state. The feature layers
-    (points/lines/zones) stay refresh-only, which keeps most of the per-turn
-    ``addDataFromPath`` savings.
+    The default district path is predrawn-rehydrate: a hidden district snapshot is
+    re-added from the GDB, symbolized, then made visible. This preserves the
+    district re-add correctness requirement while avoiding the full district
+    family remove/add cycle on every decision. ``force_readd=True`` still uses the
+    full legacy path when the layer set or symbology changes.
     """
 
     plan = _redraw_plan(layer_names=layer_names, force_readd=force_readd, dirty_scope=dirty_scope)
@@ -1170,11 +1177,11 @@ def rebuild_output_layers(paths, messages, layer_names=None, force_readd=False, 
         scope = "all" if effective_layer_names is None else f"targeted={sorted(effective_layer_names)}"
         dirty = dirty_scope or "layers"
         _log(messages, "REBUILD", f"{scope} mode={mode} dirty={dirty}")
-        experiment = _configured_redraw_experiment()
+        experiment = _configured_redraw_experiment() or _default_redraw_experiment(plan, force_readd=force_readd)
         if experiment:
             remove_scope = None if plan.remove_scope is None else set(plan.remove_scope)
             with perf_block(f"experiment_{experiment}"):
-                run_redraw_experiment(
+                handled = run_redraw_experiment(
                     paths,
                     messages,
                     experiment,
@@ -1183,7 +1190,9 @@ def rebuild_output_layers(paths, messages, layer_names=None, force_readd=False, 
                     dirty_scope=dirty_scope,
                     mode=mode,
                 )
-            return plan
+            if handled:
+                return plan
+            _warn(messages, "REBUILD", f"{experiment} failed; falling back to {mode}")
         if plan.remove_scope is not None or plan.mode == "force-readd":
             remove_scope = None if plan.remove_scope is None else set(plan.remove_scope)
             with perf_block("remove"):

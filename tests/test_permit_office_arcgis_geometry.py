@@ -318,8 +318,9 @@ def test_redraw_experiment_volatile_overlay_adds_symbolized_map_layer(monkeypatc
     monkeypatch.setattr(geometry, "apply_simple_symbology", lambda target, key, messages: calls.append(("sym", target.name, key)))
     messages = CapturingMessages()
 
-    geometry.run_redraw_experiment(_paths(), messages, "volatile-overlay", layer_names={geometry.DISTRICTS}, dirty_scope="districts", mode="district-readd")
+    handled = geometry.run_redraw_experiment(_paths(), messages, "volatile-overlay", layer_names={geometry.DISTRICTS}, dirty_scope="districts", mode="district-readd")
 
+    assert handled is True
     assert ("add", "districts") in calls
     assert layer.definitionQuery == "display_state = 'daily_pressure'"
     assert ("sym", "Permit Office Volatile Overlay", "district_display") in calls
@@ -432,8 +433,9 @@ def test_redraw_experiment_predrawn_rehydrate_readds_hidden_snapshot_then_swaps(
     monkeypatch.setattr(geometry, "apply_simple_symbology", lambda target, key, messages: calls.append(("sym", target.name, key)))
     messages = CapturingMessages()
 
-    geometry.run_redraw_experiment(_paths(), messages, "predrawn-rehydrate", layer_names={geometry.DISTRICTS}, dirty_scope="districts", mode="district-readd")
+    handled = geometry.run_redraw_experiment(_paths(), messages, "predrawn-rehydrate", layer_names={geometry.DISTRICTS}, dirty_scope="districts", mode="district-readd")
 
+    assert handled is True
     assert ("remove", "Permit Office Predrawn Idle") in calls
     assert ("add", "districts") in calls
     refreshed = next(layer for layer in layers if layer.name == "Permit Office Predrawn Idle")
@@ -443,6 +445,18 @@ def test_redraw_experiment_predrawn_rehydrate_readds_hidden_snapshot_then_swaps(
     assert ("sym", "Permit Office Predrawn Idle", "district_display") in calls
     assert ("refresh", "Permit Office Predrawn Idle") in calls
     assert any("path=predrawn-rehydrate status=ok" in line for line in messages.messages)
+
+
+def test_redraw_experiment_reports_failure_to_caller(monkeypatch):
+    """Verify callers can fall back when a live redraw probe fails."""
+
+    messages = CapturingMessages()
+    monkeypatch.setattr(geometry, "_active_map", lambda: (_ for _ in ()).throw(RuntimeError("map unavailable")))
+
+    handled = geometry.run_redraw_experiment(_paths(), messages, "predrawn-rehydrate", layer_names={geometry.DISTRICTS}, dirty_scope="districts", mode="district-readd")
+
+    assert handled is False
+    assert any("name=predrawn-rehydrate failed: map unavailable" in line for line in messages.warnings)
 
 
 def test_redraw_experiment_alt_refresh_tries_non_readd_paths(monkeypatch):

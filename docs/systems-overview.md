@@ -156,10 +156,11 @@ maintenance follow-ups, recurring economy, projects, audits, symbology, district
 identity/buyout pressure, start/help flow, exhibit controls, and an inline final
 audit receipt.
 
-Verified live (2026-06-04, ArcGIS Pro): district layers render on launch and
-**repaint their evolving state across an End Week** — type/identity/prosperity
-fills update after the district-readd rebuild (see ADR-4). A manual **End Week**
-control is available from the desk utility menu regardless of AP.
+Verified live (2026-06-04 and 2026-06-08, ArcGIS Pro): district layers render on
+launch and **repaint their evolving state across decisions and End Week**;
+type/identity/prosperity fills update after the predrawn rehydrate redraw path
+(see ADR-4). A manual **End Week** control is available from the desk utility
+menu regardless of AP.
 
 Outstanding evidence (not code): a fuller recorded **live ArcGIS Pro smoke test**
 on the target machine — feature-layer (`points/lines/zones`) `display_state`

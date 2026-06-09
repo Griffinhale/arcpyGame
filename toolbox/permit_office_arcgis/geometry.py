@@ -1068,7 +1068,11 @@ def _experiment_alt_refresh(paths, messages, name, layer_names, variant="all"):
 
 
 def run_redraw_experiment(paths, messages, experiment, layer_names=None, remove_scope=None, dirty_scope=None, mode=None):
-    """Run an opt-in live redraw experiment without raising into gameplay."""
+    """Run a live redraw path without raising into gameplay.
+
+    Returns True when the path handled the redraw request, or False when callers
+    should fall back to the legacy remove/add/refresh path.
+    """
 
     name = str(experiment or "").strip()
     try:
@@ -1086,8 +1090,10 @@ def run_redraw_experiment(paths, messages, experiment, layer_names=None, remove_
             started = time.perf_counter()
             refresh_all(paths, messages, layer_names=layer_names)
             _log_experiment(messages, name, "fallback-refresh", "unknown", started)
+        return True
     except Exception as exc:
         _warn(messages, "EXPERIMENT", f"name={name} failed: {exc}")
+        return False
 
 
 def apply_simple_symbology(layer, key, messages):
