@@ -9,7 +9,7 @@ from dataclasses import dataclass
 
 import arcpy
 
-from ._perf import perf_block, perf_session
+from ._perf import perf_active, perf_block, perf_session
 from .geometry import (
     add_outputs_to_map,
     activate_proposal,
@@ -1150,7 +1150,8 @@ def rebuild_output_layers(paths, messages, layer_names=None, force_readd=False, 
         _log(messages, "REBUILD", f"desk-only mode=desk-only dirty={dirty_scope}")
         return plan
     effective_layer_names = None if layer_names is None and plan.mode in ("force-readd", "district-readd") else set(plan.layer_names)
-    with perf_block("rebuild"):
+    perf_messages = None if perf_active() else messages
+    with perf_block("rebuild", perf_messages):
         if plan.clear_selections:
             clear_output_selections(paths)
         mode = plan.mode

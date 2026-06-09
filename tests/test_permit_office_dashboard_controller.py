@@ -18,6 +18,7 @@ sys.modules.setdefault(
 from toolbox import arcpy_permit_office_rules as rules
 from toolbox.permit_office_arcgis import dashboard
 from toolbox.permit_office_arcgis import desk_model
+from toolbox.permit_office_arcgis import _perf
 from toolbox.permit_office_arcgis.desk_model import build_desk_model
 from toolbox.permit_office_arcgis import schema
 from toolbox.permit_office_arcgis import store
@@ -285,6 +286,53 @@ def test_rebuild_logs_dirty_scope_and_mode(monkeypatch):
     dashboard.rebuild_output_layers({}, messages, layer_names={dashboard.DISTRICTS}, dirty_scope=dashboard.DIRTY_DISTRICTS)
 
     assert ("REBUILD", "targeted=['PermitDistricts'] mode=district-readd dirty=districts") in logs
+
+
+def test_standalone_rebuild_emits_perf_summary(monkeypatch):
+    """Verify timer/checkpoint rebuilds log perf outside turn sessions."""
+
+    messages = object()
+    logs = []
+    monkeypatch.setattr(dashboard, "clear_output_selections", lambda paths: None)
+    monkeypatch.setattr(dashboard, "remove_outputs_from_map", lambda messages, layer_names=None: None)
+    monkeypatch.setattr(dashboard, "add_outputs_to_map", lambda paths, messages, layer_names=None: None)
+    monkeypatch.setattr(dashboard, "refresh_all", lambda paths, messages, layer_names=None: None)
+    monkeypatch.setattr(_perf, "_log", lambda messages_arg, tag, text: logs.append((tag, text)))
+    _perf.set_enabled(True)
+    try:
+        dashboard.rebuild_output_layers({}, messages, layer_names={dashboard.DISTRICTS}, dirty_scope=dashboard.DIRTY_DISTRICTS)
+    finally:
+        _perf.set_enabled(None)
+
+    perf_lines = [text for tag, text in logs if tag == "PERF"]
+    assert len(perf_lines) == 1
+    assert perf_lines[0].startswith("rebuild=")
+    assert "remove=" in perf_lines[0]
+    assert "add=" in perf_lines[0]
+    assert "refresh=" in perf_lines[0]
+
+
+def test_rebuild_inside_turn_session_does_not_emit_duplicate_perf_summary(monkeypatch):
+    """Verify action rebuilds stay nested under the surrounding turn perf session."""
+
+    messages = object()
+    logs = []
+    monkeypatch.setattr(dashboard, "clear_output_selections", lambda paths: None)
+    monkeypatch.setattr(dashboard, "remove_outputs_from_map", lambda messages, layer_names=None: None)
+    monkeypatch.setattr(dashboard, "add_outputs_to_map", lambda paths, messages, layer_names=None: None)
+    monkeypatch.setattr(dashboard, "refresh_all", lambda paths, messages, layer_names=None: None)
+    monkeypatch.setattr(_perf, "_log", lambda messages_arg, tag, text: logs.append((tag, text)))
+    _perf.set_enabled(True)
+    try:
+        with _perf.perf_session("turn=test", messages):
+            dashboard.rebuild_output_layers({}, messages, layer_names={dashboard.DISTRICTS}, dirty_scope=dashboard.DIRTY_DISTRICTS)
+    finally:
+        _perf.set_enabled(None)
+
+    perf_lines = [text for tag, text in logs if tag == "PERF"]
+    assert len(perf_lines) == 1
+    assert perf_lines[0].startswith("turn=test=")
+    assert "rebuild=" in perf_lines[0]
 
 
 def test_final_audit_report_includes_grade_flavor():

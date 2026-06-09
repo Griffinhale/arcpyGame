@@ -82,6 +82,12 @@ def _stack():
     return stack
 
 
+def perf_active():
+    """Return True when the current thread is already inside a perf block."""
+
+    return bool(_stack())
+
+
 @contextlib.contextmanager
 def perf_block(name, messages=None):
     """Record elapsed time for a named code block.
