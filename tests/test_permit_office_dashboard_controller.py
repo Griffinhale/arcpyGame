@@ -271,6 +271,22 @@ def test_rebuild_planner_refreshes_feature_only_scope(monkeypatch):
     ]
 
 
+def test_rebuild_logs_dirty_scope_and_mode(monkeypatch):
+    """Verify rebuild logs enough context for live perf comparisons."""
+
+    messages = object()
+    logs = []
+    monkeypatch.setattr(dashboard, "clear_output_selections", lambda paths: None)
+    monkeypatch.setattr(dashboard, "remove_outputs_from_map", lambda messages, layer_names=None: None)
+    monkeypatch.setattr(dashboard, "add_outputs_to_map", lambda paths, messages, layer_names=None: None)
+    monkeypatch.setattr(dashboard, "refresh_all", lambda paths, messages, layer_names=None: None)
+    monkeypatch.setattr(dashboard, "_log", lambda messages_arg, tag, text: logs.append((tag, text)))
+
+    dashboard.rebuild_output_layers({}, messages, layer_names={dashboard.DISTRICTS}, dirty_scope=dashboard.DIRTY_DISTRICTS)
+
+    assert ("REBUILD", "targeted=['PermitDistricts'] mode=district-readd dirty=districts") in logs
+
+
 def test_final_audit_report_includes_grade_flavor():
     """Verify the inline final audit carries PASS/CONDITIONAL/FAIL ending flavor (#7)."""
 

@@ -1147,7 +1147,7 @@ def rebuild_output_layers(paths, messages, layer_names=None, force_readd=False, 
 
     plan = _redraw_plan(layer_names=layer_names, force_readd=force_readd, dirty_scope=dirty_scope)
     if plan.mode == "desk-only":
-        _log(messages, "REBUILD", f"desk-only ({dirty_scope})")
+        _log(messages, "REBUILD", f"desk-only mode=desk-only dirty={dirty_scope}")
         return plan
     effective_layer_names = None if layer_names is None and plan.mode in ("force-readd", "district-readd") else set(plan.layer_names)
     with perf_block("rebuild"):
@@ -1155,7 +1155,8 @@ def rebuild_output_layers(paths, messages, layer_names=None, force_readd=False, 
             clear_output_selections(paths)
         mode = plan.mode
         scope = "all" if effective_layer_names is None else f"targeted={sorted(effective_layer_names)}"
-        _log(messages, "REBUILD", f"{scope} ({mode})")
+        dirty = dirty_scope or "layers"
+        _log(messages, "REBUILD", f"{scope} mode={mode} dirty={dirty}")
         if plan.remove_scope is not None or plan.mode == "force-readd":
             remove_scope = None if plan.remove_scope is None else set(plan.remove_scope)
             with perf_block("remove"):
