@@ -35,11 +35,12 @@ for _module_name in (
         importlib.reload(_module)
 
 from permit_office_arcgis import _perf
-from permit_office_arcgis.dashboard import DashboardController, has_saved_game, prepare_dashboard_session
+from permit_office_arcgis.dashboard import DashboardController, REDRAW_EXPERIMENT_ENV, has_saved_game, prepare_dashboard_session
 from permit_office_arcgis.geometry import output_layers_present
 from permit_office_arcgis.schema import (
     P_OUTPUT,
     P_PERF,
+    P_REDRAW_EXPERIMENT,
     P_WORKSPACE,
     DISTRICTS,
     TOOLBOX_ALIAS,
@@ -95,12 +96,38 @@ class PermitOfficePrototype(object):
             direction="Input",
         )
         p_perf.value = False
-        return [p_workspace, p_output, p_perf]
+        p_redraw = arcpy.Parameter(
+            displayName="Redraw Experiment",
+            name="redraw_experiment",
+            datatype="GPString",
+            parameterType="Optional",
+            direction="Input",
+        )
+        p_redraw.filter.type = "ValueList"
+        p_redraw.filter.list = [
+            "None",
+            "volatile-overlay",
+            "predrawn-swap",
+            "alt-refresh",
+            "alt-definition-query",
+            "alt-visibility",
+            "alt-cim",
+            "alt-symbology",
+            "alt-make-feature-layer",
+        ]
+        p_redraw.value = "None"
+        return [p_workspace, p_output, p_perf, p_redraw]
 
     def execute(self, parameters, messages):
         """Open the dashboard against the resolved saved-game geodatabase."""
 
         _perf.set_enabled(bool(parameters[P_PERF].value))
+        redraw_experiment = str(parameters[P_REDRAW_EXPERIMENT].value or "").strip()
+        if redraw_experiment and redraw_experiment != "None":
+            os.environ[REDRAW_EXPERIMENT_ENV] = redraw_experiment
+            messages.addMessage(f"[EXPERIMENT] selected {redraw_experiment}")
+        else:
+            os.environ.pop(REDRAW_EXPERIMENT_ENV, None)
         gdb_path = resolve_workspace(parameters[P_WORKSPACE].value, messages)
         paths = ensure_schema(gdb_path, messages)
         # Detect an empty map BEFORE adding any layers: a save in this workspace

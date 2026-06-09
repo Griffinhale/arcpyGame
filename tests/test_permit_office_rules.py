@@ -2544,6 +2544,32 @@ def test_arcpy_toolbox_schema_declares_governance_fields_without_new_feature_cla
     assert '"PermitZones"' in combined_text
 
 
+def test_arcpy_toolbox_exposes_redraw_experiment_dropdown_parameter():
+    """Verify redraw experiments are selectable from the Geoprocessing pane."""
+
+    toolbox_dir = Path(__file__).parents[1] / "toolbox"
+    toolbox_text = (toolbox_dir / "arcpy_permit_office.pyt").read_text()
+    schema_text = (toolbox_dir / "permit_office_arcgis" / "schema.py").read_text()
+
+    assert "P_REDRAW_EXPERIMENT = 3" in schema_text
+    assert 'displayName="Redraw Experiment"' in toolbox_text
+    assert 'datatype="GPString"' in toolbox_text
+    assert "p_redraw.filter.type = \"ValueList\"" in toolbox_text
+    for option in (
+        "None",
+        "volatile-overlay",
+        "predrawn-swap",
+        "alt-refresh",
+        "alt-definition-query",
+        "alt-visibility",
+        "alt-cim",
+        "alt-symbology",
+        "alt-make-feature-layer",
+    ):
+        assert f'"{option}"' in toolbox_text
+    assert "os.environ[REDRAW_EXPERIMENT_ENV] = redraw_experiment" in toolbox_text
+
+
 def test_active_permit_office_files_stay_under_line_budget():
     """Verify active source files remain below the reviewable line budget."""
     toolbox_dir = Path(__file__).parents[1] / "toolbox"

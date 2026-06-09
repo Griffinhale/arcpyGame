@@ -25,6 +25,7 @@ ACTION_LOG = "PermitActionLog"
 P_WORKSPACE = 0
 P_OUTPUT = 1
 P_PERF = 2
+P_REDRAW_EXPERIMENT = 3
 
 DISTRICT_FIELDS = [
     ("cell_id", "TEXT", "District ID", 32),
