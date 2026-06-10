@@ -72,18 +72,25 @@ the dashboard must tolerate no open map).
 - **Refresh:** `arcpy.RefreshLayer(name)` per layer.
 
 **Refresh/redraw strategy.** `arcpy.RefreshLayer` only redraws a layer's cached
-renderer — it does **not** reload attribute values written to the GDB. So
-`rebuild_output_layers()` uses a **predrawn rehydrate** default for district-dirty
-work: it keeps two durable `Permit Office Predrawn ...` district snapshots in the
-map, re-adds the hidden snapshot from the GDB, applies `district_display`
-symbology, refreshes that one layer, then swaps visibility. This keeps the
-district re-add correctness requirement while avoiding the old full
-district-family remove+add on every decision. Feature layers (points/lines/zones)
-remain refresh-only unless explicitly dirty; point decisions can still re-add
-`PermitPoints` when needed. `force_readd=True` does the full remove→add→refresh
-of every in-scope layer, used when the layer set or symbology changes (New Game)
-or when the rehydrate path reports failure. Timings are visible under
-`PERMIT_OFFICE_PERF=1` as `experiment_predrawn-rehydrate`.
+renderer - it does **not** reliably reload changed GDB attributes by itself. So
+`rebuild_output_layers()` now defaults to a **district display ring** for
+district-dirty work: it keeps numeric `Permit Office Predrawn 0/1/2` district
+slots in the map, prepares one hidden slot from the authoritative
+`PermitDistricts` feature class, applies district symbology, swaps visibility
+after successful preparation, and leaves the old visible slot intact on failure.
+This keeps the district re-add correctness requirement without rebuilding the
+whole district family every decision.
+
+Support features use the same reusable-ring idea with
+`Permit Office Predrawn Points/Lines/Zones 0/1/2`. If a visible support ring slot
+already exists, the adapter first tries a cheap `RefreshLayer` on that slot; if
+ArcGIS does not repaint correctly or raises, it falls back to rehydrating a ring
+slot from the GDB, then to the legacy remove/add path. `force_readd=True` still
+does the full remove -> add -> refresh of every in-scope layer, used when the
+layer set or symbology changes (New Game) or when a ring path reports failure.
+Timings are visible under `PERMIT_OFFICE_PERF=1` as `experiment_district-ring`,
+with phase labels such as `feature_PermitPoints_ring_refresh` and
+`feature_PermitPoints_ring_rehydrate`.
 
 **Symbology** (`symbology_config.py` + `geometry.py`): a `UniqueValueRenderer` set
 via `sym.updateRenderer("UniqueValueRenderer")`, with the render field assigned

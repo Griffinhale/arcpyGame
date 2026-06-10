@@ -4,6 +4,47 @@ All notable changes to Permit Office are recorded here. This project uses
 [semantic versioning](https://semver.org/); pre-1.0 releases may change
 behavior between minor versions.
 
+## v0.95.0 - 2026-06-10
+
+Performance/refactor spike release. The gameplay rules and save format remain
+GDB-authoritative, but the redraw and decision-preview architecture has been
+reshaped around explicit cache primitives and reusable display layers.
+
+### Added
+- Pure cache primitives under `toolbox/permit_office/`: stable cache/state
+  hashing, generation tokens, dirty district/layer bitsets, one-ply decision
+  future nodes, and materialized-view cache structures.
+- Hydrated redraw planning in the ArcGIS adapter. Actual `DecisionResult` data is
+  combined with cache hints to pick precise district/support layer dirty scopes.
+- A three-slot district display ring (`Permit Office Predrawn 0/1/2`) and support
+  rings for points, lines, and zones. The visible slot stays on screen while a
+  prepare slot is refreshed or rehydrated.
+- More detailed performance instrumentation for cache lookup, resolve/write,
+  redraw hydration, district-ring phases, support-ring refresh/rehydrate, and
+  reload/materialized reuse.
+
+### Changed
+- `district-ring` is now the promoted redraw path. The older
+  `predrawn-rehydrate` path remains available as a diagnostic fallback.
+- Dashboard command flow now consults the one-ply future cache before approval
+  when useful, but authoritative decisions still resolve against current state
+  and write the GDB once before map redraw work.
+- Startup/new-game handling creates and opens a map when the project has none,
+  then uses the active map spatial reference or Web Mercator fallback.
+- Reload/materialized views are reused only when dependency hashes match.
+
+### Fixed
+- District and support redraws avoid one layer stack per speculative branch; the
+  map now uses a small reusable display ring.
+- Support feature layers can refresh an existing visible ring slot before falling
+  back to rehydrate/remove-add work.
+- Speculative future-cache branch failures are contained as invalid cache nodes;
+  they no longer abort the authoritative command path.
+
+### Validation
+- Merged-main verification for this release: `313 passed, 1 skipped` with
+  `pytest -q`.
+
 ## v0.9.0 — 2026-06-04
 
 First tagged public release. Permit Office is playable end to end as a 12-week

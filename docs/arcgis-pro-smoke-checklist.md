@@ -38,12 +38,12 @@ lines (`[WORKSPACE]`, `[REBUILD]`, `[DASH]`, `[SYM]`).
 - [ ] Approve a case. The affected district family repaints (base
       `district_type`, prosperity overlay, identity overlay) and any new/updated
       feature shows. Log shows `[REBUILD] ... mode=district-readd ...` and, with
-      perf enabled, `experiment_predrawn-rehydrate=...`.
+      perf enabled, `experiment_district-ring=...`.
 - [ ] Advance a week (or let the deadline fire). Districts whose state changed
       repaint; converted/contested districts show their new fill + name.
-- [ ] Confirm the board never goes blank / lines-only after an action (the
-      Phase-2 dirty-readd and volatile-overlay experiments could leave the board
-      stale/incomplete -- rehydrate must keep a complete district board visible).
+- [ ] Confirm the board never goes blank / lines-only after an action. The visible
+      district ring slot should stay intact while the prepare slot updates; on
+      failure the old visible slot should remain visible.
 
 ## 4. Symbology (#9) *
 - [ ] On launch the log emits the six `[SYM] set ... unique-value symbology on ...`
@@ -92,14 +92,14 @@ lines (`[WORKSPACE]`, `[REBUILD]`, `[DASH]`, `[SYM]`).
 - [ ] Let the week advance to a configured checkpoint. Confirm the log includes
       `[REBUILD] targeted=['PermitDistricts'] mode=district-readd dirty=districts`.
 - [ ] Record timings for a normal decision and a checkpoint tick:
-      `experiment_predrawn-rehydrate` or
-      `experiment_predrawn-rehydrate-smart-features` and total `rebuild`. If
-      rehydrate reports a warning and falls back, record `remove`, `add`,
-      `refresh` too.
+      `experiment_district-ring`, `feature_PermitPoints_ring_refresh` /
+      `feature_PermitPoints_ring_rehydrate`, and total `rebuild`. If the ring
+      path reports a warning and falls back, record `remove`, `add`, `refresh`
+      too.
 
 ## 11. Redraw experiments
 - [ ] Default path: leave **Redraw Experiment = None** and confirm district-dirty
-      redraws still use `predrawn-rehydrate` in the perf log.
+      redraws use `district-ring` in the perf log.
 - [ ] Volatile overlay experiment: keep as a probe only. Confirm whether it still
       drops non-overlay districts; do not promote unless the full board remains
       visible.
@@ -111,13 +111,13 @@ lines (`[WORKSPACE]`, `[REBUILD]`, `[DASH]`, `[SYM]`).
 - [ ] `predrawn-swap-refresh`: keep as a bug probe only. It was fast during play
       on 2026-06-08, but the completed/closed map showed red/gray board-wide
       corruption afterward.
-- [ ] `predrawn-rehydrate-smart-features`: current promotion candidate. Confirm
-      point features still appear/update after approvals while the district board
-      keeps correct type/identity/prosperity visuals.
+- [ ] `district-ring`: current promoted path. Confirm point features still
+      appear/update after approvals while the district board keeps correct
+      type/identity/prosperity visuals.
 - [ ] Pre-drawn rehydrate path: record seed cost, hot-path cost, resume behavior,
-      Contents clutter, and runtime swap timing. Current live evidence promoted
-      it as default because it preserved district symbology with lower rebuild
-      cost than district-family remove+add.
+      Contents clutter, and runtime swap timing. It remains a diagnostic fallback
+      because district-ring preserved correctness with a smaller reusable display
+      surface.
 - [ ] Promote no experiment unless it preserves visual correctness after GDB
       writes and reduces live redraw time versus the baseline.
 

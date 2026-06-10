@@ -9,8 +9,8 @@ The joke is bureaucratic, but the game loop is real: every permit is tied to
 map geometry, district state, stakeholder pressure, recurring costs, and visible
 city consequences.
 
-> **Status: public beta — v0.9.0.** Playable end to end; balance and live
-> ArcGIS Pro polish are still in progress. Expect rough edges. Requires ArcGIS
+> **Status: public beta - v0.95.0.** Playable end to end; the current work is
+> focused on ArcGIS Pro redraw polish, packaging, and balance. Requires ArcGIS
 > Pro 3.3+ with ArcPy to run (tested on 3.6); the pure-Python rules run and test
 > without it.
 
@@ -92,19 +92,27 @@ filing, approving, delaying, and explaining official decisions.
 
 ### Run In ArcGIS Pro
 
+For a downloaded release, unzip the folder first. In ArcGIS Pro, add the
+unzipped folder to the project by dragging it into the **Contents** pane or by
+adding it as a folder connection from the Catalog pane. Then open the Python
+toolbox inside that folder.
+
 1. Open an ArcGIS Pro project.
-2. Add `toolbox/arcpy_permit_office.pyt` as a Python toolbox.
+2. Add or open `toolbox/arcpy_permit_office.pyt` from the unzipped/repo folder.
 3. Run `Permit Office Prototype`.
-4. If no saved game exists, click `New Game` in the dashboard.
-5. Use the dashboard and map together: select docket rows, update targets from
+4. Leave **Game Workspace** empty to create/resume the project-default save, or
+   choose a folder/`.gdb` for a separate save.
+5. If no saved game exists, click `New Game` in the dashboard.
+6. Use the dashboard and map together: select docket rows, update targets from
    map selections, inspect files, issue or deny permits, and end the week.
 
 By default (no **Game Workspace** chosen) the tool creates or resumes
 `permit_office.gdb` under the ArcGIS project's `data/` folder; set the optional
 **Game Workspace** parameter to use a specific geodatabase or folder instead. The
-geodatabase *is* the save file, so opening a project whose map has no Permit
-Office layers offers a fresh `New Game` rather than silently resuming the stored
-board. The geodatabase is local generated state and should not be committed.
+geodatabase *is* the save file and remains authoritative. Speculative decision
+futures and materialized views are cache data only; they are rebuilt from the
+GDB and never replace it as persistence. The generated `.gdb` is local state and
+should not be committed.
 
 ### Run Pure Python Tests
 
@@ -118,10 +126,12 @@ do not replace a live ArcGIS Pro smoke test.
 ## Repository Map
 
 - `toolbox/arcpy_permit_office.pyt` - ArcGIS Pro toolbox entrypoint.
-- `toolbox/permit_office/` - pure gameplay rules, catalogs, decisions, turn
-  advancement, audits, and city systems.
-- `toolbox/permit_office_arcgis/` - schema, geodatabase store helpers, geometry
-  operations, symbology, and the Tkinter dashboard.
+- `toolbox/permit_office/` - ArcPy-free gameplay rules, catalogs, decisions,
+  turn advancement, audits, city systems, cache keys, dirty scopes, speculative
+  future nodes, and materialized-view cache primitives.
+- `toolbox/permit_office_arcgis/` - ArcPy/Tkinter adapter: schema, geodatabase
+  store helpers, geometry operations, symbology, dashboard command flow,
+  hydrated redraw planning, and district/support display rings.
 - `tests/` - regression tests for the rules and ArcGIS adapter shims.
 - `docs/` - the core reference set (see below).
 
@@ -145,13 +155,16 @@ human-readable district identity with multi-bidder buyout pressure, start/help
 flow, selected-case exhibit controls, an inline final audit receipt, and a
 Tkinter dashboard.
 
-Live ArcGIS Pro verification (2026-06-04) confirmed district layers render and
-repaint their state across an End Week, and a manual End Week control is now
-always available from the desk utility menu.
+The current ArcGIS redraw path uses a small **district display ring** plus
+support-feature rings for points/lines/zones. Real decisions still resolve
+against current GDB-backed state and write the GDB once; redraw planning then
+uses dirty scopes and cache hints to refresh only the relevant display layers.
+The older `predrawn-rehydrate` path remains a diagnostic fallback, not the
+default.
 
 The next public-readiness work is focused on evidence and balance: running the
 live ArcGIS Pro smoke test (`docs/arcgis-pro-smoke-checklist.md`: workspace
-routing, feature-layer repaint, cold-start resume, legacy `.gdb` migration,
+routing, feature-ring repaint, cold-start resume, legacy `.gdb` migration,
 symbology), tuning a fair 12-week route, and deepening map symbology only where
 the live map proves it is still hard to read.
 

@@ -21,28 +21,35 @@ and watching the city react.
 
 The codebase is split so the game is testable without ArcGIS Pro.
 
-**Pure rules — `toolbox/permit_office/`** (ArcPy-free, importable in plain Python)
-- `models.py` — dataclasses (`CityState`, `DistrictProfile`, `DocketItem`,
+**Pure rules - `toolbox/permit_office/`** (ArcPy-free, importable in plain Python)
+- `models.py` - dataclasses (`CityState`, `DistrictProfile`, `DocketItem`,
   `FeatureInstance`, `ProjectRecord`, `DecisionResult`) and shared constants.
-- `catalogs/` — typed catalogs: `templates.py` (docket templates, scenarios,
+- `catalogs/` - typed catalogs: `templates.py` (docket templates, scenarios,
   governance) and `features.py` (feature archetypes / operating rules).
-- `profiles.py` — district generation, docket generation, inspection cases.
-- `decisions.py` — inspect / approve / mitigate / deny resolution.
-- `turns.py` — turn advancement, scorecards, audit results, deadlines.
-- `systems.py` — projects, feature lifecycle, economy, networks, hazards, housing.
-- `helpers.py` — district math, population, stakeholder heat, effect math.
-- `expiration.py`, `type_pressure.py`, `buyouts.py`, `city_detail.py` — unattended
+- `profiles.py` - district generation, docket generation, inspection cases.
+- `decisions.py` - inspect / approve / mitigate / deny resolution.
+- `turns.py` - turn advancement, scorecards, audit results, deadlines.
+- `systems.py` - projects, feature lifecycle, economy, networks, hazards, housing.
+- `helpers.py` - district math, population, stakeholder heat, effect math.
+- `cache_keys.py`, `dirty.py`, `futures.py`, `materialized.py` - stable cache
+  hashing, generation tokens, dirty scopes, speculative one-ply decision
+  futures, and materialized-view cache records. These are ArcPy-free cache data;
+  they never replace the GDB as persistence.
+- `expiration.py`, `type_pressure.py`, `buyouts.py`, `city_detail.py` - unattended
   item policy, hidden district-type ledger, buyout transitions, civic texture.
 
-**ArcGIS adapter — `toolbox/permit_office_arcgis/`** (ArcPy + Tkinter)
-- `schema.py` — geodatabase/table/field declarations; idempotent schema creation.
-- `store.py` — read/write game rows ⇄ pure-rule dataclasses (the only cursor I/O
-  for game state).
-- `geometry.py` — map selection, proposed geometry, spillover buffers, feature
-  activation, map refresh, symbology.
-- `dashboard.py` — the Tkinter `DashboardController` and the per-action command flow.
-- `desk_view.py` / `desk_model.py` — canvas rendering and its pure data model.
-- `symbology_config.py`, `messages.py`, `rules_loader.py`, `_perf.py` — support.
+**ArcGIS adapter - `toolbox/permit_office_arcgis/`** (ArcPy + Tkinter)
+- `schema.py` - geodatabase/table/field declarations; idempotent schema creation.
+- `store.py` - read/write game rows to/from pure-rule dataclasses (the only
+  cursor I/O for game state).
+- `geometry.py` - map selection, proposed geometry, spillover buffers, feature
+  activation, map refresh, symbology, and district/support display rings.
+- `redraw_plan.py`, `layer_ring.py` - hydrated redraw intent and reusable ArcGIS
+  layer-ring helpers.
+- `dashboard.py` - the Tkinter `DashboardController`, per-action command flow,
+  one-ply future-cache lookup, authoritative resolve/write, and redraw planning.
+- `desk_view.py` / `desk_model.py` - canvas rendering and its pure data model.
+- `symbology_config.py`, `messages.py`, `rules_loader.py`, `_perf.py` - support.
 
 **Entry point — `toolbox/arcpy_permit_office.pyt`**: the GP tool. Stays thin —
 parameter definitions, schema setup, and launching the dashboard only.
@@ -108,10 +115,13 @@ Each "turn" is one office week (the persisted field is still `turn`). Target
 season is **12 weeks**, **2 AP/week**, ordinary permit denials cost 0 AP, week 6
 files the mid-season audit, week 12 files the final audit.
 
-The shared command flow for every action (`dashboard.py`): insert a command row →
-read game rows (`store.py`) → resolve via `rules` → write results → rebuild/
-refresh the affected map layers (`geometry.py`) → file a report → reload the desk.
-All synchronous, on the Tk thread (see `decisions.md`).
+The shared command flow for every action (`dashboard.py`): insert a command row ->
+read game rows (`store.py`) -> optionally build/consult one-ply cache futures ->
+resolve via `rules` against current state -> write authoritative results to the
+GDB once -> hydrate a redraw plan from the actual `DecisionResult` plus cache
+hints -> refresh/rehydrate affected display-ring layers (`geometry.py`) -> file a
+report -> reload the desk. All synchronous, on the Tk thread (see
+`decisions.md`).
 
 **Launch / resume / new game.** The `.pyt` resolves the workspace, runs
 `ensure_schema`, adds output layers, and opens the controller. Saved districts+
@@ -156,16 +166,17 @@ maintenance follow-ups, recurring economy, projects, audits, symbology, district
 identity/buyout pressure, start/help flow, exhibit controls, and an inline final
 audit receipt.
 
-Verified live (2026-06-04 and 2026-06-08, ArcGIS Pro): district layers render on
-launch and **repaint their evolving state across decisions and End Week**;
-type/identity/prosperity fills update after the predrawn rehydrate redraw path
-(see ADR-4). A manual **End Week** control is available from the desk utility
-menu regardless of AP.
+Verified live during the v0.95 spike (ArcGIS Pro): district layers render on
+launch and **repaint their evolving state across decisions and End Week** through
+the promoted district-ring redraw path. Support feature rings now share the same
+display-ring strategy, with cheap visible-slot refresh before rehydrate fallback.
+A manual **End Week** control is available from the desk utility menu regardless
+of AP.
 
 Outstanding evidence (not code): a fuller recorded **live ArcGIS Pro smoke test**
-on the target machine — feature-layer (`points/lines/zones`) `display_state`
-repaint on the refresh-only path, cold-start resume, legacy field migration on an
-existing `.gdb`, and 12-week balance tuning toward a fair PASS.
+on the target machine - support-ring repaint across points/lines/zones,
+cold-start resume, legacy field migration on an existing `.gdb`, and 12-week
+balance tuning toward a fair PASS.
 
 ## Validation
 
