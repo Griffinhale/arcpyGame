@@ -73,7 +73,6 @@ filing, approving, delaying, and explaining official decisions.
   Pro 3.6**; **3.3+** is the practical floor. The only version-gated arcpy call is
   `arcpy.RefreshLayer` (added at Pro 3.3, and already wrapped in a guard, so older
   builds degrade gracefully rather than crash); everything else is Pro 2.x-era.
-  Spatial-reference handling is *not* version-gated.
 - **Python 3** for the pure-rules test suite (this runs without ArcGIS). Install
   the test dependency (`pytest`) with **either** pip or
   [uv](https://docs.astral.sh/uv/):
