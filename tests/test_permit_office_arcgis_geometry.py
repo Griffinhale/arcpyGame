@@ -594,13 +594,14 @@ def test_refresh_feature_scope_refreshes_without_readd_when_not_in_remove_scope(
     assert calls == [("refresh", {geometry.POINTS, geometry.LINES, geometry.ZONES})]
 
 
-def test_refresh_feature_scope_readds_only_features_in_remove_scope(monkeypatch):
-    """Verify point decisions can still re-add dirty point layers."""
+def test_refresh_feature_scope_uses_feature_ring_for_features_in_remove_scope(monkeypatch):
+    """Verify point decisions use reusable feature display slots."""
 
     calls = []
     monkeypatch.setattr(geometry, "remove_outputs_from_map", lambda messages, layer_names=None: calls.append(("remove", layer_names)))
     monkeypatch.setattr(geometry, "add_outputs_to_map", lambda paths, messages, layer_names=None: calls.append(("add", layer_names)))
     monkeypatch.setattr(geometry, "refresh_all", lambda paths, messages, layer_names=None: calls.append(("refresh", layer_names)))
+    monkeypatch.setattr(geometry, "_rehydrate_feature_display_ring", lambda paths, messages, layer_name: calls.append(("ring", layer_name)) or True)
 
     geometry._refresh_feature_scope(
         _paths(),
@@ -610,10 +611,69 @@ def test_refresh_feature_scope_readds_only_features_in_remove_scope(monkeypatch)
     )
 
     assert calls == [
+        ("ring", geometry.POINTS),
+    ]
+
+
+def test_refresh_feature_scope_falls_back_to_readd_when_feature_ring_fails(monkeypatch):
+    """Verify feature ring failures keep the old safe remove/add path."""
+
+    calls = []
+    monkeypatch.setattr(geometry, "remove_outputs_from_map", lambda messages, layer_names=None: calls.append(("remove", layer_names)))
+    monkeypatch.setattr(geometry, "add_outputs_to_map", lambda paths, messages, layer_names=None: calls.append(("add", layer_names)))
+    monkeypatch.setattr(geometry, "refresh_all", lambda paths, messages, layer_names=None: calls.append(("refresh", layer_names)))
+    monkeypatch.setattr(geometry, "_rehydrate_feature_display_ring", lambda paths, messages, layer_name: calls.append(("ring", layer_name)) or False)
+
+    geometry._refresh_feature_scope(
+        _paths(),
+        CapturingMessages(),
+        layer_names={geometry.DISTRICTS, geometry.POINTS},
+        remove_scope={geometry.DISTRICTS, geometry.POINTS},
+    )
+
+    assert calls == [
+        ("ring", geometry.POINTS),
         ("remove", {geometry.POINTS}),
         ("add", {geometry.POINTS}),
         ("refresh", {geometry.POINTS}),
     ]
+
+
+def test_feature_display_ring_rehydrates_points_and_hides_base_layer(monkeypatch):
+    """Verify support feature redraw uses a visible refreshed ring slot."""
+
+    calls = []
+    base_points = SimpleNamespace(name=geometry.POINTS, visible=True, definitionQuery="", transparency=None)
+    visible = SimpleNamespace(name="Permit Office Predrawn Points 0", visible=True, definitionQuery="1=1", transparency=None)
+    hidden = SimpleNamespace(name="Permit Office Predrawn Points 1", visible=False, definitionQuery="1=1", transparency=None)
+    layers = [base_points, visible, hidden]
+
+    def remove_layer(layer):
+        calls.append(("remove", layer.name))
+        layers.remove(layer)
+
+    def add_data(source):
+        layer = SimpleNamespace(name="raw", visible=True, definitionQuery="", transparency=None)
+        layers.append(layer)
+        calls.append(("add", source))
+        return layer
+
+    fake_map = SimpleNamespace(listLayers=lambda: list(layers), removeLayer=remove_layer, addDataFromPath=add_data)
+    fake = SimpleNamespace(
+        mp=SimpleNamespace(ArcGISProject=lambda current: SimpleNamespace(activeMap=fake_map)),
+        RefreshLayer=lambda name: calls.append(("refresh", name, next(layer.visible for layer in layers if layer.name == name))),
+    )
+    monkeypatch.setattr(geometry, "arcpy", fake)
+    monkeypatch.setattr(geometry, "apply_simple_symbology", lambda target, key, messages: calls.append(("sym", target.name, key)))
+
+    handled = geometry._rehydrate_feature_display_ring(_paths(), CapturingMessages(), geometry.POINTS)
+
+    assert handled is True
+    assert ("remove", "Permit Office Predrawn Points 1") in calls
+    assert ("add", "points") in calls
+    assert ("sym", "Permit Office Predrawn Points 1", "points") in calls
+    assert ("refresh", "Permit Office Predrawn Points 1", True) in calls
+    assert base_points.visible is False
 
 
 def test_redraw_experiment_district_ring_dispatches_to_ring(monkeypatch):
@@ -857,6 +917,30 @@ def test_maintenance_selection_includes_referenced_active_feature(monkeypatch):
 
     support_wheres = [where for layer, _mode, where in fake.management.selections if layer == "PermitPoints"]
     assert support_wheres == ["item_id = 'CASE-2' OR feature_id = 'FEATURE-77'"]
+
+
+def test_support_selection_prefers_visible_feature_ring_layer(monkeypatch):
+    """Verify hidden base support layers do not swallow visible selection highlights."""
+
+    rows = _rows()
+    rows["points"].append({"item_id": "CASE-ring-point", "status": "proposed", "target_cell_ids": "D0000", "feature_id": "P-ring"})
+    fake = FakeArcpy(rows)
+    base = SimpleNamespace(name=geometry.POINTS, visible=False)
+    ring = SimpleNamespace(name="Permit Office Predrawn Points 1", visible=True)
+    monkeypatch.setattr(geometry, "arcpy", fake)
+    monkeypatch.setattr(geometry, "_active_map", lambda: SimpleNamespace(listLayers=lambda: [base, ring]))
+    item = rules.DocketItem(
+        "CASE-ring-point",
+        "street_vendor_compact",
+        "Street Vendor Compact",
+        "POINT",
+        1,
+        target_cell_ids=["D0000"],
+    )
+
+    geometry.select_case_context(_paths(), "district_layer", item, 2026, FakeMessages())
+
+    assert ("Permit Office Predrawn Points 1", "NEW_SELECTION", "item_id = 'CASE-ring-point'") in fake.management.selections
 
 
 def test_hide_show_affects_only_selected_proposed_feature(monkeypatch):

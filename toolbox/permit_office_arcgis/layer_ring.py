@@ -18,18 +18,20 @@ class RingSlot:
     layer: object
 
 
-class DistrictLayerRing:
-    """Manage a small reusable ring of predrawn district layers."""
+class DisplayLayerRing:
+    """Manage a small reusable ring of predrawn display layers."""
 
     def __init__(
         self,
         active_map,
         *,
+        prefix: str = RING_PREFIX,
         arcpy_module,
         style_copier: Callable[[object], None] | None = None,
         phase_marker: Callable[[str], None] | None = None,
     ):
         self.active_map = active_map
+        self.prefix = prefix
         self.arcpy = arcpy_module
         self.style_copier = style_copier or (lambda _layer: None)
         self.phase_marker = phase_marker or (lambda _name: None)
@@ -38,10 +40,10 @@ class DistrictLayerRing:
         """Return discovered slots, adding only the first visible slot if needed."""
 
         by_name = {getattr(layer, "name", ""): layer for layer in self.active_map.listLayers()}
-        existing_slot_names = {name for name in by_name if _is_slot(name)}
+        existing_slot_names = {name for name in by_name if self._is_slot(name)}
         slots: list[RingSlot] = []
         for index in range(RING_SIZE):
-            name = _slot_name(index)
+            name = self._slot_name(index)
             layer = by_name.get(name)
             if layer is None:
                 if not slots and not existing_slot_names:
@@ -62,17 +64,17 @@ class DistrictLayerRing:
     def prepare_and_swap(self, district_path: str):
         """Rehydrate one hidden slot from the GDB and make it visible after success."""
 
-        had_slots = any(_is_slot(getattr(layer, "name", "")) for layer in self.active_map.listLayers())
+        had_slots = any(self._is_slot(getattr(layer, "name", "")) for layer in self.active_map.listLayers())
         slots = self.discover_or_seed(district_path)
         if not had_slots and len(slots) == 1:
             only = slots[0].layer
-            if bool(getattr(only, "visible", False)) and getattr(only, "name", "") == _slot_name(0):
-                self.arcpy.RefreshLayer(getattr(only, "name", _slot_name(0)))
+            if bool(getattr(only, "visible", False)) and getattr(only, "name", "") == self._slot_name(0):
+                self.arcpy.RefreshLayer(getattr(only, "name", self._slot_name(0)))
                 self.phase_marker("RefreshLayer")
                 return only
         visible = next((slot.layer for slot in slots if bool(getattr(slot.layer, "visible", False))), slots[0].layer)
         prepare_slot = _prepare_slot(slots, visible)
-        prepare_name = _slot_name(_next_prepare_index(slots, visible))
+        prepare_name = self._slot_name(_next_prepare_index(slots, visible))
         old_visibility = [(slot.layer, bool(getattr(slot.layer, "visible", False))) for slot in slots]
         try:
             if prepare_slot is None:
@@ -105,10 +107,30 @@ class DistrictLayerRing:
         slots = []
         by_name = {getattr(layer, "name", ""): layer for layer in self.active_map.listLayers()}
         for index in range(RING_SIZE):
-            layer = by_name.get(_slot_name(index))
+            layer = by_name.get(self._slot_name(index))
             if layer is not None:
                 slots.append(RingSlot(index, layer))
         return slots
+
+    def _slot_name(self, index: int) -> str:
+        return f"{self.prefix} {index}"
+
+    def _is_slot(self, name: str) -> bool:
+        suffix = name.removeprefix(self.prefix).strip()
+        return suffix.isdigit()
+
+
+class DistrictLayerRing(DisplayLayerRing):
+    """Manage a small reusable ring of predrawn district layers."""
+
+    def __init__(self, active_map, *, arcpy_module, style_copier=None, phase_marker=None):
+        super().__init__(
+            active_map,
+            prefix=RING_PREFIX,
+            arcpy_module=arcpy_module,
+            style_copier=style_copier,
+            phase_marker=phase_marker,
+        )
 
 
 def _slot_name(index: int) -> str:

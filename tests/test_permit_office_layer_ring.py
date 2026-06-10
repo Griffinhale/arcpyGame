@@ -116,6 +116,32 @@ def test_layer_ring_refreshes_prepare_slot_after_visibility_swap():
     assert refresh_visibility == [("Permit Office Predrawn 1", True, False)]
 
 
+def test_layer_ring_supports_custom_prefixes_for_feature_layers():
+    """Verify the ring primitive can be reused for support feature layers."""
+
+    visible = FakeLayer("Permit Office Predrawn Points 0", True)
+    hidden = FakeLayer("Permit Office Predrawn Points 1", False)
+    fake_map = FakeMap([visible, hidden])
+    arcpy = FakeArcpy()
+    styled = []
+    ring = layer_ring.DisplayLayerRing(
+        fake_map,
+        prefix="Permit Office Predrawn Points",
+        arcpy_module=arcpy,
+        style_copier=lambda layer: styled.append(layer.name),
+    )
+
+    prepared = ring.prepare_and_swap("PermitPoints")
+
+    assert fake_map.removed == ["Permit Office Predrawn Points 1"]
+    assert fake_map.added_paths == ["PermitPoints"]
+    assert prepared.name == "Permit Office Predrawn Points 1"
+    assert visible.visible is False
+    assert prepared.visible is True
+    assert styled == ["Permit Office Predrawn Points 1"]
+    assert arcpy.refreshed == ["Permit Office Predrawn Points 1"]
+
+
 def test_layer_ring_preserves_visible_slot_when_prepare_fails():
     visible = FakeLayer("Permit Office Predrawn 0", True)
     hidden = FakeLayer("Permit Office Predrawn 1", False)

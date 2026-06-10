@@ -10,7 +10,7 @@ import uuid
 import arcpy
 
 from .messages import _log, _warn
-from .layer_ring import DistrictLayerRing
+from .layer_ring import DisplayLayerRing, DistrictLayerRing
 from .rules_loader import rules
 from .schema import DISTRICTS, LINES, POINTS, SUPPORT_FIELDS, ZONES
 from .store import decode_json, encode_json, read_districts, write_docket_item
@@ -25,6 +25,8 @@ PREDRAWN_LAYER_PREFIX = "Permit Office Predrawn"
 PREDRAWN_ACTIVE_LAYER = "Permit Office Predrawn Active"
 PREDRAWN_IDLE_LAYER = "Permit Office Predrawn Idle"
 PREDRAWN_POINTS_PREFIX = "Permit Office Predrawn Points"
+PREDRAWN_LINES_PREFIX = "Permit Office Predrawn Lines"
+PREDRAWN_ZONES_PREFIX = "Permit Office Predrawn Zones"
 _PREDRAWN_REHYDRATE_LAST_TARGET = ""
 
 # District geometry is fixed for the life of a game (only attributes change), so
@@ -236,8 +238,32 @@ def _select_support_context(paths, item, messages):
         parts.append(_where_equals("feature_id", item.subject_feature_id))
     where = " OR ".join(parts) if parts else None
     for layer_name, path in ((POINTS, paths["points"]), (LINES, paths["lines"]), (ZONES, paths["zones"])):
-        if not _select_layer(layer_name, "NEW_SELECTION", where, messages, layer_name, warn=False):
+        selected = False
+        for candidate in _support_selection_candidates(layer_name):
+            if _select_layer(candidate, "NEW_SELECTION", where, messages, layer_name, warn=False):
+                selected = True
+                break
+        if not selected:
             _select_layer(path, "NEW_SELECTION", where, messages, path)
+
+
+def _support_selection_candidates(layer_name):
+    """Return visible support display layers before the hidden/base layer."""
+
+    candidates = []
+    prefix = _feature_ring_prefixes().get(layer_name, "")
+    try:
+        active_map = _active_map()
+        layers = active_map.listLayers() if active_map is not None else []
+    except Exception:
+        layers = []
+    for layer in layers:
+        name = getattr(layer, "name", "")
+        if prefix and name.startswith(prefix) and bool(getattr(layer, "visible", True)):
+            candidates.append(name)
+    if layer_name not in candidates:
+        candidates.append(layer_name)
+    return candidates
 
 
 def _select_layer(layer, selection_type, where, messages, label, warn=True) -> bool:
@@ -928,7 +954,8 @@ def remove_outputs_from_map(messages, layer_names=None):
         for layer in list(active_map.listLayers()):
             layer_name = getattr(layer, "name", None)
             remove_predrawn = (layer_names is None or DISTRICTS in set(layer_names or ())) and _is_predrawn_district_layer_name(layer_name or "")
-            if layer_name in output_names or remove_predrawn:
+            remove_feature_ring = _should_remove_predrawn_feature_layer(layer_name or "", layer_names)
+            if layer_name in output_names or remove_predrawn or remove_feature_ring:
                 active_map.removeLayer(layer)
                 removed += 1
         if removed:
@@ -1041,7 +1068,20 @@ def _is_district_snapshot(layer):
 
 
 def _is_predrawn_district_layer_name(name):
-    return name.startswith(PREDRAWN_LAYER_PREFIX) and not name.startswith(PREDRAWN_POINTS_PREFIX)
+    return name.startswith(PREDRAWN_LAYER_PREFIX) and not _is_predrawn_feature_layer_name(name)
+
+
+def _is_predrawn_feature_layer_name(name):
+    return any(name.startswith(prefix) for prefix in _feature_ring_prefixes().values())
+
+
+def _should_remove_predrawn_feature_layer(name, layer_names):
+    if not name:
+        return False
+    if layer_names is None:
+        return _is_predrawn_feature_layer_name(name)
+    scoped = set(layer_names or ())
+    return any(layer in scoped and name.startswith(prefix) for layer, prefix in _feature_ring_prefixes().items())
 
 
 def _is_ring_slot_name(name):
@@ -1061,10 +1101,72 @@ def _refresh_feature_scope(paths, messages, layer_names, remove_scope=None):
     if not feature_scope:
         return
     readd_scope = feature_scope & set(remove_scope or ())
-    if readd_scope:
-        remove_outputs_from_map(messages, layer_names=readd_scope)
-        add_outputs_to_map(paths, messages, layer_names=readd_scope)
-    refresh_all(paths, messages, layer_names=feature_scope)
+    fallback_readd = set()
+    for layer_name in sorted(readd_scope):
+        if not _rehydrate_feature_display_ring(paths, messages, layer_name):
+            fallback_readd.add(layer_name)
+    if fallback_readd:
+        remove_outputs_from_map(messages, layer_names=fallback_readd)
+        add_outputs_to_map(paths, messages, layer_names=fallback_readd)
+    refresh_scope = (feature_scope - readd_scope) | fallback_readd
+    if refresh_scope:
+        refresh_all(paths, messages, layer_names=refresh_scope)
+
+
+def _rehydrate_feature_display_ring(paths, messages, layer_name):
+    prefix = _feature_ring_prefixes().get(layer_name)
+    path_key = _feature_path_keys().get(layer_name)
+    layer_key = _feature_layer_keys().get(layer_name)
+    if not prefix or not path_key or not layer_key:
+        return False
+    active_map = ensure_active_map(messages)
+    if active_map is None:
+        return False
+
+    def _copy_style(layer):
+        _prepare_feature_display_layer(layer, messages, layer_key, "1=1")
+
+    try:
+        ring = DisplayLayerRing(active_map, prefix=prefix, arcpy_module=arcpy, style_copier=_copy_style)
+        ring.prepare_and_swap(paths[path_key])
+        _hide_base_feature_layer(active_map, layer_name)
+        return True
+    except Exception as exc:
+        _warn(messages, "EXPERIMENT", f"feature-ring {layer_name} failed: {exc}")
+        return False
+
+
+def _feature_ring_prefixes():
+    return {
+        POINTS: PREDRAWN_POINTS_PREFIX,
+        LINES: PREDRAWN_LINES_PREFIX,
+        ZONES: PREDRAWN_ZONES_PREFIX,
+    }
+
+
+def _feature_path_keys():
+    return {
+        POINTS: "points",
+        LINES: "lines",
+        ZONES: "zones",
+    }
+
+
+def _feature_layer_keys():
+    return {
+        POINTS: "points",
+        LINES: "lines",
+        ZONES: "zones",
+    }
+
+
+def _hide_base_feature_layer(active_map, layer_name):
+    for layer in active_map.listLayers():
+        if getattr(layer, "name", "") == layer_name:
+            try:
+                layer.visible = False
+            except Exception:
+                pass
 
 
 def _predrawn_prepare_layer_name(snapshots):
