@@ -1104,9 +1104,12 @@ def _refresh_feature_scope(paths, messages, layer_names, remove_scope=None, phas
     readd_scope = feature_scope & set(remove_scope or ())
     fallback_readd = set()
     for layer_name in sorted(readd_scope):
+        if _refresh_visible_feature_display_ring(paths, messages, layer_name):
+            phase_marker(f"feature_{layer_name}_ring_refresh")
+            continue
         if not _rehydrate_feature_display_ring(paths, messages, layer_name):
             fallback_readd.add(layer_name)
-        phase_marker(f"feature_{layer_name}_ring")
+        phase_marker(f"feature_{layer_name}_ring_rehydrate")
     if fallback_readd:
         remove_outputs_from_map(messages, layer_names=fallback_readd)
         add_outputs_to_map(paths, messages, layer_names=fallback_readd)
@@ -1138,6 +1141,30 @@ def _rehydrate_feature_display_ring(paths, messages, layer_name):
         return True
     except Exception as exc:
         _warn(messages, "EXPERIMENT", f"feature-ring {layer_name} failed: {exc}")
+        return False
+
+
+def _refresh_visible_feature_display_ring(paths, messages, layer_name):
+    prefix = _feature_ring_prefixes().get(layer_name)
+    if not prefix:
+        return False
+    active_map = ensure_active_map(messages)
+    if active_map is None:
+        return False
+    visible = None
+    for layer in active_map.listLayers():
+        name = getattr(layer, "name", "")
+        if name.startswith(prefix) and bool(getattr(layer, "visible", False)):
+            visible = layer
+            break
+    if visible is None:
+        return False
+    _hide_base_feature_layer(active_map, layer_name)
+    try:
+        arcpy.RefreshLayer(getattr(visible, "name", prefix))
+        return True
+    except Exception as exc:
+        _warn(messages, "EXPERIMENT", f"feature-ring refresh {layer_name} failed: {exc}")
         return False
 
 

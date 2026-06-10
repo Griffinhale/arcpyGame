@@ -158,3 +158,23 @@ def test_one_ply_cache_skips_malformed_unhashable_spillover_values():
     approve = next(node for node in nodes if node.action_key == "approve")
     assert approve.legal is True
     assert approve.spillover_cell_ids == ("D0001",)
+
+
+def test_one_ply_cache_keeps_node_when_speculative_resolve_raises(monkeypatch):
+    """Verify one bad speculative branch stays cache data, not dashboard failure."""
+
+    state = rules.CityState(ap=2, money=60)
+    districts = {"D0000": _district("D0000")}
+    item = rules.DocketItem("CASE-1", "street_vendor_compact", "Street Vendor Compact", "POINT", 1, target_cell_ids=["D0000"])
+    cache = futures.DecisionFutureCache(cache_keys.GenerationToken("game-1", 1, 0, 1))
+
+    def fail_once(*args, **kwargs):
+        raise TypeError("unhashable type: 'FeatureInstance'")
+
+    monkeypatch.setattr(futures.decisions, "resolve_decision", fail_once)
+
+    nodes = cache.build_one_ply(state, districts, [item])
+
+    assert len(nodes) == 3
+    assert all(not node.legal for node in nodes)
+    assert all("unhashable type: 'FeatureInstance'" in node.validation_notes[0] for node in nodes)

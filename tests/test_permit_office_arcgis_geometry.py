@@ -630,7 +630,7 @@ def test_refresh_feature_scope_marks_each_feature_layer_phase(monkeypatch):
         phase_marker=marks.append,
     )
 
-    assert marks == ["feature_PermitPoints_ring", "feature_PermitLines_refresh"]
+    assert marks == ["feature_PermitPoints_ring_rehydrate", "feature_PermitLines_refresh"]
 
 
 def test_refresh_feature_scope_falls_back_to_readd_when_feature_ring_fails(monkeypatch):
@@ -692,6 +692,58 @@ def test_feature_display_ring_rehydrates_points_and_hides_base_layer(monkeypatch
     assert ("sym", "Permit Office Predrawn Points 1", "points") in calls
     assert ("refresh", "Permit Office Predrawn Points 1", True) in calls
     assert base_points.visible is False
+
+
+def test_feature_display_ring_refreshes_visible_slot_without_rehydrate(monkeypatch):
+    """Verify existing support rings can avoid expensive remove/add/style."""
+
+    calls = []
+    base_points = SimpleNamespace(name=geometry.POINTS, visible=True)
+    visible = SimpleNamespace(name="Permit Office Predrawn Points 0", visible=True)
+    hidden = SimpleNamespace(name="Permit Office Predrawn Points 1", visible=False)
+    layers = [base_points, visible, hidden]
+    fake_map = SimpleNamespace(
+        listLayers=lambda: list(layers),
+        removeLayer=lambda layer: calls.append(("remove", layer.name)),
+        addDataFromPath=lambda source: calls.append(("add", source)),
+    )
+    fake = SimpleNamespace(
+        mp=SimpleNamespace(ArcGISProject=lambda current: SimpleNamespace(activeMap=fake_map)),
+        RefreshLayer=lambda name: calls.append(("refresh", name)),
+    )
+    monkeypatch.setattr(geometry, "arcpy", fake)
+    monkeypatch.setattr(geometry, "apply_simple_symbology", lambda target, key, messages: calls.append(("sym", target.name, key)))
+
+    handled = geometry._refresh_visible_feature_display_ring(_paths(), CapturingMessages(), geometry.POINTS)
+
+    assert handled is True
+    assert calls == [("refresh", "Permit Office Predrawn Points 0")]
+    assert base_points.visible is False
+
+
+def test_feature_display_ring_refresh_failure_falls_back_to_rehydrate(monkeypatch):
+    """Verify failed cheap refresh does not abort the feature ring fallback."""
+
+    calls = []
+    base_points = SimpleNamespace(name=geometry.POINTS, visible=True)
+    visible = SimpleNamespace(name="Permit Office Predrawn Points 0", visible=True)
+    layers = [base_points, visible]
+    fake_map = SimpleNamespace(listLayers=lambda: list(layers))
+    fake = SimpleNamespace(
+        mp=SimpleNamespace(ArcGISProject=lambda current: SimpleNamespace(activeMap=fake_map)),
+        RefreshLayer=lambda name: (_ for _ in ()).throw(RuntimeError("refresh failed")),
+    )
+    monkeypatch.setattr(geometry, "arcpy", fake)
+    monkeypatch.setattr(geometry, "_rehydrate_feature_display_ring", lambda paths, messages, layer_name: calls.append(("rehydrate", layer_name)) or True)
+
+    geometry._refresh_feature_scope(
+        _paths(),
+        CapturingMessages(),
+        layer_names={geometry.POINTS},
+        remove_scope={geometry.POINTS},
+    )
+
+    assert calls == [("rehydrate", geometry.POINTS)]
 
 
 def test_redraw_experiment_district_ring_dispatches_to_ring(monkeypatch):

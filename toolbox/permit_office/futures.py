@@ -123,19 +123,22 @@ class DecisionFutureCache:
             target_ids = _known_ids(getattr(item, "target_cell_ids", ()) or (), districts)
             spillover_ids = _known_ids(spillover_provider(item) if spillover_provider is not None else (), districts)
             for action in self.ACTIONS:
-                node = self._build_node(
-                    parent_hash,
-                    state,
-                    districts,
-                    items,
-                    item,
-                    action,
-                    target_ids,
-                    spillover_ids,
-                    features,
-                    project_map,
-                    bit_index,
-                )
+                try:
+                    node = self._build_node(
+                        parent_hash,
+                        state,
+                        districts,
+                        items,
+                        item,
+                        action,
+                        target_ids,
+                        spillover_ids,
+                        features,
+                        project_map,
+                        bit_index,
+                    )
+                except Exception as exc:
+                    node = self._failed_node(parent_hash, item, action, target_ids, spillover_ids, bit_index, exc)
                 self.nodes[(parent_hash, item.item_id, action)] = node
                 evaluated.outgoing_future_nodes[(item.item_id, action)] = node
                 generated.append(node)
@@ -226,6 +229,33 @@ class DecisionFutureCache:
                 "requires_district_rehydrate": bool(affected),
             },
             validation_notes=() if legal else (getattr(result, "report", "") or "not legal",),
+        )
+
+    def _failed_node(self, parent_hash, item, action, target_ids, spillover_ids, bit_index, exc) -> DecisionFutureNode:
+        affected = tuple(target_ids or ())
+        dirty_bits = DISTRICTS | _feature_layer_bit(getattr(item, "geometry_type", ""))
+        return DecisionFutureNode(
+            parent_hash=parent_hash,
+            action_key=action,
+            item_id=getattr(item, "item_id", ""),
+            resulting_state_hash=parent_hash,
+            generation=self.generation,
+            legal=False,
+            delta=DecisionDelta(
+                parent_hash=parent_hash,
+                resulting_state_hash=parent_hash,
+                affected_cell_ids=affected,
+            ),
+            affected_district_bits=bit_index.to_bits(affected),
+            dirty_layer_bits=dirty_bits,
+            target_cell_ids=tuple(target_ids),
+            spillover_cell_ids=tuple(spillover_ids),
+            redraw_plan={
+                "feature_layer_key": _feature_layer_key(getattr(item, "geometry_type", "")),
+                "affected_cell_ids": affected,
+                "requires_district_rehydrate": bool(affected),
+            },
+            validation_notes=(f"speculative resolve failed: {type(exc).__name__}: {exc}",),
         )
 
 
