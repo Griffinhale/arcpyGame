@@ -153,6 +153,69 @@ def test_decision_exception_status_uses_neutral_action_copy(monkeypatch):
     assert controller.status_text == "Decision failed: proposal locked"
 
 
+def test_approval_continues_when_future_cache_lookup_fails(monkeypatch):
+    """Verify speculative cache failures never block authoritative decisions."""
+
+    item = rules.DocketItem(
+        "CASE-cache",
+        "street_vendor_compact",
+        "Street Vendor Compact",
+        "POINT",
+        1,
+        target_cell_ids=["D0000"],
+    )
+    state = rules.CityState()
+    districts = {"D0000": _profile("D0000")}
+    controller = dashboard.DashboardController({}, "district_layer", 2026, object())
+    controller.selected_item_id = item.item_id
+    controller.status_text = ""
+    controller.status_var = dashboard._StatusProxy(controller)
+    controller.reload = lambda **kwargs: None
+    calls = []
+    warnings = []
+
+    class BrokenFutureCache:
+        current_state_hash = "parent"
+
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def build_one_ply(self, *args, **kwargs):
+            raise TypeError("unhashable type: 'FeatureInstance'")
+
+        def lookup(self, *args, **kwargs):
+            return None
+
+    monkeypatch.setattr(dashboard.futures, "DecisionFutureCache", BrokenFutureCache)
+    monkeypatch.setattr(dashboard, "_warn", lambda messages, tag, text: warnings.append((tag, text)))
+    monkeypatch.setattr(dashboard, "read_docket", lambda paths: [item])
+    monkeypatch.setattr(dashboard, "selected_cell_ids", lambda layer: [])
+    monkeypatch.setattr(dashboard, "ensure_case_proposal", lambda paths, docket_item, seed, messages, target_ids=None: ["D0000"])
+    monkeypatch.setattr(dashboard, "command_insert", lambda paths, action, item_id, target_ids: "CMD-1")
+    monkeypatch.setattr(dashboard, "command_finish", lambda *args, **kwargs: calls.append(("command", args, kwargs)))
+    monkeypatch.setattr(dashboard, "proposal_spillover", lambda paths, docket_item: [])
+    monkeypatch.setattr(dashboard, "read_state", lambda paths: state)
+    monkeypatch.setattr(dashboard, "read_districts", lambda paths: districts)
+    monkeypatch.setattr(dashboard, "read_active_features", lambda paths: [])
+    monkeypatch.setattr(dashboard, "read_projects", lambda paths: {})
+    monkeypatch.setattr(dashboard, "write_active_features", lambda paths, active_features: None)
+    monkeypatch.setattr(dashboard, "activate_proposal", lambda paths, docket_item, report: 1)
+    monkeypatch.setattr(controller, "_finish_decision", lambda *args: calls.append(("finish", args)))
+
+    def resolve(state_arg, docket_item, district_arg, action, targets, spillovers, **kwargs):
+        calls.append(("resolve", action, tuple(targets), tuple(spillovers)))
+        docket_item.status = "active"
+        return rules.DecisionResult(True, action, docket_item.item_id, "approved", affected_cell_ids=targets)
+
+    monkeypatch.setattr(dashboard.rules, "resolve_decision", resolve)
+
+    controller.apply_decision("approve", False)
+
+    assert ("resolve", "approve", ("D0000",), ()) in calls
+    assert any(call[0] == "finish" for call in calls)
+    assert any("future cache lookup skipped" in text for _tag, text in warnings)
+
+
 def test_successful_decision_reapplies_map_presentation_before_refresh(monkeypatch):
     """Verify successful decisions rebuild map layers before showing receipt."""
 
@@ -181,12 +244,12 @@ def test_successful_decision_reapplies_map_presentation_before_refresh(monkeypat
     assert order[-5:] == ["clear", "remove", "map", "refresh", "receipt"]
 
 
-def test_rebuild_defaults_to_predrawn_rehydrate_for_district_scope(monkeypatch):
-    """Verify district redraws use the promoted pre-drawn rehydrate path.
+def test_rebuild_defaults_to_district_ring_for_district_scope(monkeypatch):
+    """Verify district redraws use the promoted district ring path.
 
-    Live ArcGIS testing showed full district-family remove+add is correct but
-    expensive, pure visibility swap is fast but stale, and predrawn rehydrate
-    preserves changed district symbology with less live redraw work.
+    Live ArcGIS testing showed predrawn rehydrate can stale out and miss
+    district conversions, while the numeric district ring preserves changed
+    district symbology once RefreshLayer runs after visibility swap.
     """
 
     calls = []
@@ -233,7 +296,7 @@ def test_rebuild_force_readd_removes_every_layer(monkeypatch):
 
 
 def test_rebuild_planner_uses_default_experiment_for_district_scope(monkeypatch):
-    """Verify district dirty scope routes through predrawn rehydrate by default."""
+    """Verify district dirty scope routes through district ring by default."""
 
     calls = []
     monkeypatch.delenv(dashboard.REDRAW_EXPERIMENT_ENV, raising=False)
@@ -300,6 +363,74 @@ def test_rebuild_planner_readds_dirty_point_layer_when_in_scope(monkeypatch):
     ]
 
 
+def test_rebuild_hydrated_plan_can_override_remove_scope_and_experiment(monkeypatch):
+    """Verify hydrated redraw plans can ring-swap districts while refreshing features."""
+
+    calls = []
+    monkeypatch.setattr(dashboard, "clear_output_selections", lambda paths: calls.append(("clear", None)))
+    monkeypatch.setattr(dashboard, "remove_outputs_from_map", lambda messages, layer_names=None: calls.append(("remove", layer_names)))
+    monkeypatch.setattr(dashboard, "add_outputs_to_map", lambda paths, messages, layer_names=None: calls.append(("add", layer_names)))
+    monkeypatch.setattr(dashboard, "refresh_all", lambda paths, messages, layer_names=None: calls.append(("refresh", layer_names)))
+    monkeypatch.setattr(
+        dashboard,
+        "run_redraw_experiment",
+        lambda paths, messages, experiment, **kwargs: calls.append(("experiment", experiment, kwargs)) or True,
+    )
+
+    plan = dashboard.rebuild_output_layers(
+        {},
+        object(),
+        layer_names={dashboard.DISTRICTS, dashboard.POINTS},
+        dirty_scope=dashboard.DIRTY_DISTRICTS,
+        remove_scope_override={dashboard.DISTRICTS},
+        redraw_experiment="district-ring",
+    )
+
+    assert plan.mode == "district-readd"
+    assert calls == [
+        ("clear", None),
+        (
+            "experiment",
+            "district-ring",
+            {
+                "layer_names": {dashboard.DISTRICTS, dashboard.POINTS},
+                "remove_scope": {dashboard.DISTRICTS},
+                "dirty_scope": dashboard.DIRTY_DISTRICTS,
+                "mode": "district-readd",
+            },
+        ),
+    ]
+
+
+def test_rebuild_prefers_explicit_toolbox_experiment_over_hydrated_override(monkeypatch):
+    """Verify GP-selected experiments are not hidden by controller redraw hints."""
+
+    calls = []
+    monkeypatch.setenv(dashboard.REDRAW_EXPERIMENT_ENV, "predrawn-rehydrate")
+    monkeypatch.setattr(dashboard, "clear_output_selections", lambda paths: calls.append(("clear", None)))
+    monkeypatch.setattr(dashboard, "remove_outputs_from_map", lambda messages, layer_names=None: calls.append(("remove", layer_names)))
+    monkeypatch.setattr(dashboard, "add_outputs_to_map", lambda paths, messages, layer_names=None: calls.append(("add", layer_names)))
+    monkeypatch.setattr(dashboard, "refresh_all", lambda paths, messages, layer_names=None: calls.append(("refresh", layer_names)))
+    monkeypatch.setattr(
+        dashboard,
+        "run_redraw_experiment",
+        lambda paths, messages, experiment, **kwargs: calls.append(("experiment", experiment, kwargs)) or True,
+    )
+
+    dashboard.rebuild_output_layers(
+        {},
+        object(),
+        layer_names={dashboard.DISTRICTS, dashboard.POINTS},
+        dirty_scope=dashboard.DIRTY_DISTRICTS,
+        remove_scope_override={dashboard.DISTRICTS, dashboard.POINTS},
+        redraw_experiment="district-ring",
+    )
+
+    assert calls[1][0] == "experiment"
+    assert calls[1][1] == "predrawn-rehydrate"
+    assert calls[1][2]["remove_scope"] == {dashboard.DISTRICTS, dashboard.POINTS}
+
+
 def test_rebuild_planner_allows_desk_only_without_map_work(monkeypatch):
     """Verify desk-only dirty scopes do not touch ArcGIS map layers."""
 
@@ -357,7 +488,7 @@ def test_rebuild_uses_experiment_when_env_is_set(monkeypatch):
     """Verify redraw experiments replace normal remove/add work only when opted in."""
 
     calls = []
-    monkeypatch.setenv(dashboard.REDRAW_EXPERIMENT_ENV, "volatile-overlay")
+    monkeypatch.setenv(dashboard.REDRAW_EXPERIMENT_ENV, "district-ring")
     monkeypatch.setattr(dashboard, "clear_output_selections", lambda paths: calls.append(("clear", None)))
     monkeypatch.setattr(dashboard, "remove_outputs_from_map", lambda messages, layer_names=None: calls.append(("remove", layer_names)))
     monkeypatch.setattr(dashboard, "add_outputs_to_map", lambda paths, messages, layer_names=None: calls.append(("add", layer_names)))
@@ -375,7 +506,7 @@ def test_rebuild_uses_experiment_when_env_is_set(monkeypatch):
         ("clear", None),
         (
             "experiment",
-            "volatile-overlay",
+            "district-ring",
             {
                 "layer_names": {dashboard.DISTRICTS},
                 "remove_scope": {dashboard.DISTRICTS},
@@ -422,7 +553,7 @@ def test_rebuild_falls_back_when_default_rehydrate_fails(monkeypatch):
         ("add", {dashboard.DISTRICTS}),
         ("refresh", {dashboard.DISTRICTS}),
     ]
-    assert logs == [("REBUILD", "predrawn-rehydrate failed; falling back to district-readd")]
+    assert logs == [("REBUILD", "district-ring failed; falling back to district-readd")]
 
 
 def test_standalone_rebuild_emits_perf_summary(monkeypatch):
@@ -446,7 +577,7 @@ def test_standalone_rebuild_emits_perf_summary(monkeypatch):
     perf_lines = [text for tag, text in logs if tag == "PERF"]
     assert len(perf_lines) == 1
     assert perf_lines[0].startswith("rebuild=")
-    assert "experiment_predrawn-rehydrate=" in perf_lines[0]
+    assert "experiment_district-ring=" in perf_lines[0]
 
 
 def test_rebuild_inside_turn_session_does_not_emit_duplicate_perf_summary(monkeypatch):
@@ -477,7 +608,7 @@ def test_run_redraw_benchmark_cycles_variants_and_restores_selection(monkeypatch
 
     calls = []
     logs = []
-    monkeypatch.setenv(dashboard.REDRAW_EXPERIMENT_ENV, "predrawn-swap")
+    monkeypatch.setenv(dashboard.REDRAW_EXPERIMENT_ENV, "predrawn-rehydrate")
     monkeypatch.setattr(dashboard, "_log", lambda messages_arg, tag, text: logs.append((tag, text)))
     monkeypatch.setattr(dashboard.time, "perf_counter", lambda: len(calls) + len(logs) / 1000)
 
@@ -488,7 +619,7 @@ def test_run_redraw_benchmark_cycles_variants_and_restores_selection(monkeypatch
 
     dashboard.run_redraw_benchmark({"districts": "districts"}, object(), runs=2)
 
-    assert dashboard.os.environ[dashboard.REDRAW_EXPERIMENT_ENV] == "predrawn-swap"
+    assert dashboard.os.environ[dashboard.REDRAW_EXPERIMENT_ENV] == "predrawn-rehydrate"
     expected_per_run = len(dashboard.REDRAW_BENCHMARK_VARIANTS) * len(dashboard.REDRAW_BENCHMARK_SCOPES)
     assert len(calls) == expected_per_run * 2
     assert calls[0] == ("", {dashboard.DISTRICTS}, dashboard.DIRTY_DISTRICTS)
@@ -966,6 +1097,55 @@ def test_deadline_final_week_records_same_inline_final_audit_receipt(monkeypatch
     assert controller.selected_desk_tab == "reports"
     assert controller.report_tabs[-1].kind == "scorecard"
     assert controller.last_receipt.title.startswith("Final Audit:")
+
+
+def test_advance_turn_readds_only_generated_support_layers_after_generating_new_proposals(monkeypatch):
+    """Verify week close redraws only support layers that received proposals."""
+
+    controller = dashboard.DashboardController({"districts": "districts"}, "district_layer", 2026, object())
+    controller.status_text = ""
+    controller.status_var = dashboard._StatusProxy(controller)
+    controller.reload = lambda **kwargs: None
+    state = rules.CityState(turn=2)
+    calls = []
+
+    monkeypatch.setattr(dashboard, "command_insert", lambda paths, action, item_id, target_ids: "CMD-1")
+    monkeypatch.setattr(dashboard, "command_finish", lambda *args, **kwargs: None)
+    monkeypatch.setattr(dashboard, "read_state", lambda paths: state)
+    monkeypatch.setattr(dashboard, "read_docket", lambda paths: [])
+    monkeypatch.setattr(dashboard, "read_districts", lambda paths: {})
+    monkeypatch.setattr(dashboard, "read_active_features", lambda paths: [])
+    monkeypatch.setattr(dashboard, "read_projects", lambda paths: {})
+    monkeypatch.setattr(dashboard.rules, "advance_turn_result", lambda *args, **kwargs: SimpleNamespace(report="Week closed."))
+    monkeypatch.setattr(dashboard, "write_state", lambda *args, **kwargs: None)
+    monkeypatch.setattr(dashboard, "write_projects", lambda *args, **kwargs: None)
+    monkeypatch.setattr(dashboard, "write_district_updates", lambda *args, **kwargs: None)
+    monkeypatch.setattr(dashboard, "write_active_features", lambda *args, **kwargs: None)
+    monkeypatch.setattr(dashboard, "write_docket_item", lambda *args, **kwargs: None)
+    generated = [
+        rules.DocketItem("CASE-point", "street_vendor_compact", "Street Vendor Compact", "POINT", 2),
+        rules.DocketItem("CASE-line", "connector_corridor", "Connector Corridor", "LINE", 2),
+    ]
+    monkeypatch.setattr(dashboard, "generate_docket_rows", lambda *args, **kwargs: generated)
+    monkeypatch.setattr(dashboard, "rebuild_output_layers", lambda paths, messages, **kwargs: calls.append(kwargs))
+
+    controller.advance_turn()
+
+    assert calls == [
+        {
+            "remove_scope_override": {
+                dashboard.DISTRICTS,
+                dashboard.POINTS,
+                dashboard.LINES,
+            },
+            "layer_names": {
+                dashboard.DISTRICTS,
+                dashboard.POINTS,
+                dashboard.LINES,
+            },
+            "redraw_experiment": "district-ring",
+        }
+    ]
 
 
 def test_prepare_dashboard_session_regenerates_missing_docket_for_saved_game(monkeypatch):

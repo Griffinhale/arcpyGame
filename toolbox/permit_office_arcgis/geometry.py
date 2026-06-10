@@ -10,6 +10,7 @@ import uuid
 import arcpy
 
 from .messages import _log, _warn
+from .layer_ring import DistrictLayerRing
 from .rules_loader import rules
 from .schema import DISTRICTS, LINES, POINTS, SUPPORT_FIELDS, ZONES
 from .store import decode_json, encode_json, read_districts, write_docket_item
@@ -20,13 +21,11 @@ from .symbology_config import LAYER_TRANSPARENCY, RENDER_FIELD_BY_LAYER_KEY, SYM
 # own visual channel without one fill having to encode all three.
 DISTRICT_PROSPERITY = "District Prosperity"
 DISTRICT_IDENTITY = "District Identity"
-VOLATILE_OVERLAY_LAYER = "Permit Office Volatile Overlay"
 PREDRAWN_LAYER_PREFIX = "Permit Office Predrawn"
 PREDRAWN_ACTIVE_LAYER = "Permit Office Predrawn Active"
+PREDRAWN_IDLE_LAYER = "Permit Office Predrawn Idle"
 PREDRAWN_POINTS_PREFIX = "Permit Office Predrawn Points"
-PREDRAWN_POINTS_ACTIVE_LAYER = "Permit Office Predrawn Points Active"
-ALT_REFRESH_VIEW_LAYER = "Permit Office Alt Refresh View"
-VOLATILE_OVERLAY_QUERY = "display_state = 'daily_pressure'"
+_PREDRAWN_REHYDRATE_LAST_TARGET = ""
 
 # District geometry is fixed for the life of a game (only attributes change), so
 # the SHAPE@ pull — the most expensive field on the districts table — is memoized
@@ -193,7 +192,38 @@ def _select_district_targets(district_layer, target_ids, messages):
     """Select target districts in ArcGIS using their cell IDs."""
 
     where = _where_in("cell_id", target_ids)
-    _select_layer(district_layer, "NEW_SELECTION", where, messages, "district targets")
+    candidates = _district_selection_candidates(district_layer)
+    for candidate in candidates:
+        if _select_layer(candidate, "NEW_SELECTION", where, messages, "district targets", warn=False):
+            return
+    label = candidates[-1] if candidates else district_layer
+    _select_layer(label, "NEW_SELECTION", where, messages, "district targets")
+
+
+def _district_selection_candidates(district_layer):
+    """Return district layers to try for map selection, preferring visible ring slots."""
+
+    candidates = []
+    try:
+        active_map = _active_map()
+        layers = active_map.listLayers() if active_map is not None else []
+    except Exception:
+        layers = []
+    for layer in layers:
+        name = getattr(layer, "name", "")
+        if not _is_predrawn_district_layer_name(name):
+            continue
+        if not bool(getattr(layer, "visible", True)):
+            continue
+        if name not in candidates:
+            candidates.append(name)
+    if district_layer and district_layer != DISTRICTS:
+        candidates.insert(0, district_layer)
+    elif district_layer and district_layer not in candidates:
+        candidates.append(district_layer)
+    if DISTRICTS not in candidates:
+        candidates.append(DISTRICTS)
+    return candidates
 
 
 def _select_support_context(paths, item, messages):
@@ -801,11 +831,55 @@ def output_layers_present():
         return True
 
 
+def ensure_active_map(messages, map_name="Permit Office"):
+    """Ensure the project has an open map for Permit Office layer operations."""
+
+    try:
+        aprx = arcpy.mp.ArcGISProject("CURRENT")
+    except Exception as exc:
+        _warn(messages, "MAP", f"ArcGISProject('CURRENT') unavailable; cannot ensure map: {exc}")
+        return None
+    active_map = getattr(aprx, "activeMap", None)
+    if active_map is not None:
+        return active_map
+    try:
+        maps = list(aprx.listMaps()) if hasattr(aprx, "listMaps") else []
+    except Exception as exc:
+        _warn(messages, "MAP", f"could not list project maps: {exc}")
+        maps = []
+    if maps:
+        target = maps[0]
+        _open_map_view(target, messages)
+        _log(messages, "MAP", f"opened existing map: {getattr(target, 'name', 'Map')}")
+        return target
+    create_map = getattr(aprx, "createMap", None)
+    if create_map is None:
+        _warn(messages, "MAP", "project has no active map and ArcGISProject.createMap is unavailable")
+        return None
+    try:
+        target = create_map(map_name)
+        _open_map_view(target, messages)
+        _log(messages, "MAP", f"created and opened map: {getattr(target, 'name', map_name)}")
+        return target
+    except Exception as exc:
+        _warn(messages, "MAP", f"could not create map: {exc}")
+        return None
+
+
+def _open_map_view(map_obj, messages):
+    opener = getattr(map_obj, "openView", None)
+    if opener is None:
+        return
+    try:
+        opener()
+    except Exception as exc:
+        _warn(messages, "MAP", f"could not open map view: {exc}")
+
+
 def add_outputs_to_map(paths, messages, layer_names=None):
     """Add active game outputs to the map; layer_names limits to a subset when given."""
     try:
-        aprx = arcpy.mp.ArcGISProject("CURRENT")
-        active_map = aprx.activeMap
+        active_map = ensure_active_map(messages)
         if active_map is None:
             return
         existing = {lyr.name: lyr for lyr in active_map.listLayers()}
@@ -852,7 +926,9 @@ def remove_outputs_from_map(messages, layer_names=None):
                 output_names |= overlay_outputs
         removed = 0
         for layer in list(active_map.listLayers()):
-            if getattr(layer, "name", None) in output_names:
+            layer_name = getattr(layer, "name", None)
+            remove_predrawn = (layer_names is None or DISTRICTS in set(layer_names or ())) and _is_predrawn_district_layer_name(layer_name or "")
+            if layer_name in output_names or remove_predrawn:
                 active_map.removeLayer(layer)
                 removed += 1
         if removed:
@@ -874,12 +950,6 @@ def _layers_by_name(active_map):
     if active_map is None:
         return {}
     return {getattr(layer, "name", ""): layer for layer in active_map.listLayers()}
-
-
-def _experiment_layer_names(layer_names):
-    """Return layer names targeted by an experiment."""
-
-    return set(layer_names or (DISTRICTS, POINTS, LINES, ZONES))
 
 
 def _log_experiment(messages, name, path, status, started, detail=""):
@@ -923,7 +993,7 @@ def _set_definition_query(layer, definition_query):
 
 def _district_display_style_hash(definition_query):
     query = definition_query or ""
-    return f"district_display|labels=districts|query={query}|transparency=35"
+    return f"districts|labels=districts|query={query}|transparency=10"
 
 
 def _prepare_district_display_layer(layer, messages, definition_query=None, skip_if_style_matches=False):
@@ -931,9 +1001,9 @@ def _prepare_district_display_layer(layer, messages, definition_query=None, skip
     style_hash = _district_display_style_hash(definition_query)
     if skip_if_style_matches and getattr(layer, "_permit_office_style_hash", "") == style_hash:
         return True
-    _tune_layer_visibility(layer, "district_display")
+    _tune_layer_visibility(layer, "districts")
     _configure_labels(layer, "districts")
-    apply_simple_symbology(layer, "district_display", messages)
+    apply_simple_symbology(layer, "districts", messages)
     try:
         layer._permit_office_style_hash = style_hash
     except Exception:
@@ -948,29 +1018,13 @@ def _prepare_feature_display_layer(layer, messages, layer_key, definition_query=
     apply_simple_symbology(layer, layer_key, messages)
 
 
-def _experiment_volatile_overlay(paths, messages, name, layer_names):
-    started = time.perf_counter()
-    active_map = _active_map()
-    if active_map is None:
-        _log_experiment(messages, name, "volatile-overlay", "no-active-map", started)
-        return
-    layer, added = _get_or_add_layer(active_map, paths["districts"], VOLATILE_OVERLAY_LAYER)
-    if added:
-        _prepare_district_display_layer(layer, messages, VOLATILE_OVERLAY_QUERY)
-    else:
-        _set_definition_query(layer, VOLATILE_OVERLAY_QUERY)
-    arcpy.RefreshLayer(VOLATILE_OVERLAY_LAYER)
-    _log_experiment(messages, name, "volatile-overlay", "ok", started, f"target={VOLATILE_OVERLAY_LAYER!r} added={added}")
-
-
-def _seed_predrawn_layers(paths, messages, active_map):
-    layers = []
-    for layer_name, visible in ((PREDRAWN_ACTIVE_LAYER, True), (f"{PREDRAWN_LAYER_PREFIX} Idle", False)):
-        layer, _added = _get_or_add_layer(active_map, paths["districts"], layer_name)
-        layer.visible = visible
-        _prepare_district_display_layer(layer, messages, "1=1")
-        layers.append(layer)
-    return layers
+def _seed_visible_predrawn_layer(paths, messages, active_map):
+    global _PREDRAWN_REHYDRATE_LAST_TARGET
+    layer, _added = _get_or_add_layer(active_map, paths["districts"], PREDRAWN_ACTIVE_LAYER)
+    layer.visible = True
+    _prepare_district_display_layer(layer, messages, "1=1")
+    _PREDRAWN_REHYDRATE_LAST_TARGET = PREDRAWN_ACTIVE_LAYER
+    return layer
 
 
 def _predrawn_snapshots(active_map):
@@ -979,71 +1033,20 @@ def _predrawn_snapshots(active_map):
 
 def _is_district_snapshot(layer):
     name = getattr(layer, "name", "")
+    return (
+        name.startswith(PREDRAWN_LAYER_PREFIX)
+        and not name.startswith(PREDRAWN_POINTS_PREFIX)
+        and not _is_ring_slot_name(name)
+    )
+
+
+def _is_predrawn_district_layer_name(name):
     return name.startswith(PREDRAWN_LAYER_PREFIX) and not name.startswith(PREDRAWN_POINTS_PREFIX)
 
 
-def _seed_predrawn_point_layers(paths, messages, active_map):
-    layers = []
-    for layer_name, visible in ((PREDRAWN_POINTS_ACTIVE_LAYER, True), (f"{PREDRAWN_POINTS_PREFIX} Idle", False)):
-        layer, _added = _get_or_add_layer(active_map, paths["points"], layer_name)
-        layer.visible = visible
-        _prepare_feature_display_layer(layer, messages, "points", "1=1")
-        layers.append(layer)
-    return layers
-
-
-def _predrawn_point_snapshots(active_map):
-    return [layer for layer in _layers_by_name(active_map).values() if getattr(layer, "name", "").startswith(PREDRAWN_POINTS_PREFIX)]
-
-
-def _experiment_predrawn_swap(paths, messages, name, layer_names):
-    started = time.perf_counter()
-    active_map = _active_map()
-    if active_map is None:
-        _log_experiment(messages, name, "predrawn-swap", "no-active-map", started)
-        return
-    snapshots = _predrawn_snapshots(active_map)
-    if not snapshots:
-        snapshots = _seed_predrawn_layers(paths, messages, active_map)
-        arcpy.RefreshLayer(PREDRAWN_ACTIVE_LAYER)
-        _log_experiment(messages, name, "predrawn-swap", "seeded", started, f"target={PREDRAWN_ACTIVE_LAYER!r}")
-        return
-    target = snapshots[0]
-    for layer in snapshots:
-        layer.visible = layer is target
-    if name == "predrawn-swap-refresh":
-        _prepare_district_display_layer(target, messages, "1=1")
-        arcpy.RefreshLayer(getattr(target, "name", PREDRAWN_ACTIVE_LAYER))
-    _log_experiment(messages, name, "predrawn-swap", "ok", started, f"target={getattr(target, 'name', PREDRAWN_ACTIVE_LAYER)!r}")
-
-
-def _rehydrate_point_snapshot(paths, messages, active_map, phases=None):
-    snapshots = _predrawn_point_snapshots(active_map)
-    if len(snapshots) < 2:
-        _seed_predrawn_point_layers(paths, messages, active_map)
-        arcpy.RefreshLayer(PREDRAWN_POINTS_ACTIVE_LAYER)
-        return "seeded"
-    hidden = next((layer for layer in snapshots if not bool(getattr(layer, "visible", True))), snapshots[-1])
-    hidden_name = getattr(hidden, "name", f"{PREDRAWN_POINTS_PREFIX} Idle")
-    try:
-        active_map.removeLayer(hidden)
-    except Exception:
-        pass
-    _phase_mark(phases, "remove_point_hidden")
-    layer, _added = _get_or_add_layer(active_map, paths["points"], hidden_name)
-    _phase_mark(phases, "addPointDataFromPath")
-    _prepare_feature_display_layer(layer, messages, "points", "1=1")
-    _phase_mark(phases, "point_symbology")
-    for snapshot in _predrawn_point_snapshots(active_map):
-        snapshot.visible = snapshot is layer
-    arcpy.RefreshLayer(hidden_name)
-    _phase_mark(phases, "RefreshPointLayer")
-    return hidden_name
-
-
-def _phase_mark(phases, name):
-    if phases is not None:
-        phases.mark(name)
+def _is_ring_slot_name(name):
+    suffix = name.removeprefix(PREDRAWN_LAYER_PREFIX).strip()
+    return suffix.isdigit()
 
 
 def _feature_layer_scope(layer_names):
@@ -1064,12 +1067,27 @@ def _refresh_feature_scope(paths, messages, layer_names, remove_scope=None):
     refresh_all(paths, messages, layer_names=feature_scope)
 
 
+def _predrawn_prepare_layer_name(snapshots):
+    """Choose the snapshot slot to rebuild without trusting ArcGIS visibility alone."""
+
+    hidden = next((layer for layer in snapshots if not bool(getattr(layer, "visible", True))), None)
+    if hidden is not None:
+        return getattr(hidden, "name", PREDRAWN_IDLE_LAYER), hidden
+    names = {getattr(layer, "name", ""): layer for layer in snapshots}
+    if PREDRAWN_ACTIVE_LAYER in names and PREDRAWN_IDLE_LAYER in names:
+        if _PREDRAWN_REHYDRATE_LAST_TARGET == PREDRAWN_IDLE_LAYER:
+            return PREDRAWN_ACTIVE_LAYER, names[PREDRAWN_ACTIVE_LAYER]
+        return PREDRAWN_IDLE_LAYER, names[PREDRAWN_IDLE_LAYER]
+    if PREDRAWN_ACTIVE_LAYER in names:
+        return PREDRAWN_IDLE_LAYER, None
+    if PREDRAWN_IDLE_LAYER in names:
+        return PREDRAWN_ACTIVE_LAYER, None
+    return PREDRAWN_IDLE_LAYER, None
+
+
 def _experiment_predrawn_rehydrate(paths, messages, name, layer_names, remove_scope=None):
+    global _PREDRAWN_REHYDRATE_LAST_TARGET
     started = time.perf_counter()
-    use_style_cache = name == "predrawn-rehydrate-style-cache"
-    refresh_hidden_first = name == "predrawn-rehydrate-refresh-hidden-first"
-    if name == "predrawn-rehydrate-smart-features" and remove_scope is not None:
-        remove_scope = set(remove_scope) - {POINTS}
     phases = _PhaseTimer()
     active_map = _active_map()
     if active_map is None:
@@ -1077,120 +1095,57 @@ def _experiment_predrawn_rehydrate(paths, messages, name, layer_names, remove_sc
         return
     snapshots = _predrawn_snapshots(active_map)
     phases.mark("find_snapshots")
-    if len(snapshots) < 2:
-        _seed_predrawn_layers(paths, messages, active_map)
-        phases.mark("seed_snapshots")
+    if not snapshots:
+        _seed_visible_predrawn_layer(paths, messages, active_map)
+        phases.mark("seed_visible_snapshot")
         arcpy.RefreshLayer(PREDRAWN_ACTIVE_LAYER)
         phases.mark("RefreshLayer")
         _refresh_feature_scope(paths, messages, layer_names, remove_scope=remove_scope)
         phases.mark("feature_layers")
         _log_experiment(messages, name, "predrawn-rehydrate", "seeded", started, f"target={PREDRAWN_ACTIVE_LAYER!r} {phases.summary()}")
         return
-    hidden = next((layer for layer in snapshots if not bool(getattr(layer, "visible", True))), snapshots[-1])
-    hidden_name = getattr(hidden, "name", f"{PREDRAWN_LAYER_PREFIX} Idle")
-    try:
-        active_map.removeLayer(hidden)
-    except Exception:
-        pass
-    phases.mark("remove_hidden")
+    hidden_name, hidden = _predrawn_prepare_layer_name(snapshots)
+    if hidden is not None:
+        try:
+            active_map.removeLayer(hidden)
+        except Exception:
+            pass
+        phases.mark("remove_hidden")
     layer, _added = _get_or_add_layer(active_map, paths["districts"], hidden_name)
     phases.mark("addDataFromPath")
-    skipped_style = _prepare_district_display_layer(layer, messages, "1=1", skip_if_style_matches=use_style_cache)
-    phases.mark("style_cached" if skipped_style else "labels_symbology")
-    if refresh_hidden_first:
-        layer.visible = False
-        arcpy.RefreshLayer(hidden_name)
-        phases.mark("RefreshLayer_hidden")
+    _prepare_district_display_layer(layer, messages, "1=1")
+    phases.mark("labels_symbology")
     for snapshot in _predrawn_snapshots(active_map):
         snapshot.visible = snapshot is layer
     phases.mark("visibility_swap")
-    if not refresh_hidden_first:
-        arcpy.RefreshLayer(hidden_name)
-        phases.mark("RefreshLayer")
+    arcpy.RefreshLayer(hidden_name)
+    _PREDRAWN_REHYDRATE_LAST_TARGET = hidden_name
+    phases.mark("RefreshLayer")
     _refresh_feature_scope(paths, messages, layer_names, remove_scope=remove_scope)
     phases.mark("feature_layers")
     _log_experiment(messages, name, "predrawn-rehydrate", "ok", started, f"target={hidden_name!r} {phases.summary()}")
 
 
-def _experiment_hybrid_rehydrate_districts_swap_points(paths, messages, name, layer_names, remove_scope=None):
+def _experiment_district_ring(paths, messages, name, layer_names, remove_scope=None):
     started = time.perf_counter()
     phases = _PhaseTimer()
-    active_map = _active_map()
+    active_map = ensure_active_map(messages)
     if active_map is None:
-        _log_experiment(messages, name, "hybrid-rehydrate-districts-swap-points", "no-active-map", started)
+        _log_experiment(messages, name, "district-ring", "no-active-map", started)
         return
-    if layer_names is None or DISTRICTS in set(layer_names):
-        district_remove_scope = {DISTRICTS} if remove_scope is None or DISTRICTS in set(remove_scope) else set()
-        _experiment_predrawn_rehydrate(paths, messages, "predrawn-rehydrate-template-style", {DISTRICTS}, remove_scope=district_remove_scope)
-    phases.mark("districts")
-    feature_scope = _feature_layer_scope(layer_names)
-    if POINTS in feature_scope:
-        _rehydrate_point_snapshot(paths, messages, active_map, phases=phases)
-        feature_scope.remove(POINTS)
-    if feature_scope:
-        refresh_all(paths, messages, layer_names=feature_scope)
-    phases.mark("remaining_features")
-    _log_experiment(messages, name, "hybrid-rehydrate-districts-swap-points", "ok", started, phases.summary())
 
+    def _copy_style(layer):
+        _prepare_district_display_layer(layer, messages, "1=1")
 
-def _experiment_definition_query(layer):
-    original = getattr(layer, "definitionQuery", "")
-    layer.definitionQuery = "1=1" if not original else f"({original}) AND 1=1"
-    layer.definitionQuery = original
-
-
-def _experiment_visibility(layer):
-    original = getattr(layer, "visible", True)
-    layer.visible = not bool(original)
-    layer.visible = original
-
-
-def _experiment_cim(layer):
-    """Round-trip a layer CIM definition when supported."""
-
-    if not hasattr(layer, "getDefinition") or not hasattr(layer, "setDefinition"):
-        return
-    definition = layer.getDefinition("V3")
-    layer.setDefinition(definition)
-
-
-def _experiment_apply_symbology(layer):
-    """Apply a layer's current symbology back onto itself when supported."""
-
-    apply_symbology = getattr(arcpy.management, "ApplySymbologyFromLayer", None)
-    if apply_symbology is None:
-        return
-    apply_symbology(layer, layer)
-
-
-def _experiment_make_feature_layer(paths):
-    """Create a temporary feature-layer view as an alternative paint path."""
-
-    arcpy.management.MakeFeatureLayer(paths["districts"], ALT_REFRESH_VIEW_LAYER, "1=1")
-    arcpy.RefreshLayer(ALT_REFRESH_VIEW_LAYER)
-
-
-def _experiment_alt_refresh(paths, messages, name, layer_names, variant="all"):
-    """Try ArcGIS refresh paths that avoid remove/add."""
-
-    started = time.perf_counter()
-    active_map = _active_map()
-    targets = _experiment_layer_names(layer_names)
-    layers = [layer for layer in _layers_by_name(active_map).values() if getattr(layer, "name", "") in targets]
-    for layer in layers:
-        if variant in ("all", "definition-query"):
-            _experiment_definition_query(layer)
-        if variant in ("all", "visibility"):
-            _experiment_visibility(layer)
-        if variant in ("all", "cim"):
-            _experiment_cim(layer)
-        if variant in ("all", "symbology"):
-            _experiment_apply_symbology(layer)
-        arcpy.RefreshLayer(getattr(layer, "name", layer))
-    if variant in ("all", "make-feature-layer"):
-        _experiment_make_feature_layer(paths)
-    path = "alt-refresh" if variant == "all" else f"alt-{variant}"
-    _log_experiment(messages, name, path, "ok", started, f"layers={len(layers)}")
+    ring = DistrictLayerRing(active_map, arcpy_module=arcpy, style_copier=_copy_style, phase_marker=phases.mark)
+    phases.mark("ring_discovery")
+    prepared = ring.prepare_and_swap(paths["districts"])
+    phases.mark("prepare_visibility_swap")
+    _hide_non_ring_district_family(active_map)
+    phases.mark("hide_base_districts")
+    _refresh_feature_scope(paths, messages, layer_names, remove_scope=remove_scope)
+    phases.mark("feature_layers")
+    _log_experiment(messages, name, "district-ring", "ok", started, f"target={getattr(prepared, 'name', '')!r} {phases.summary()}")
 
 
 def run_redraw_experiment(paths, messages, experiment, layer_names=None, remove_scope=None, dirty_scope=None, mode=None):
@@ -1202,20 +1157,10 @@ def run_redraw_experiment(paths, messages, experiment, layer_names=None, remove_
 
     name = str(experiment or "").strip()
     try:
-        if name == "volatile-overlay":
-            _experiment_volatile_overlay(paths, messages, name, layer_names)
-        elif name in ("predrawn-swap", "predrawn-swap-refresh"):
-            _experiment_predrawn_swap(paths, messages, name, layer_names)
-        elif name == "hybrid-rehydrate-districts-swap-points":
-            _experiment_hybrid_rehydrate_districts_swap_points(paths, messages, name, layer_names, remove_scope=remove_scope)
+        if name == "district-ring":
+            _experiment_district_ring(paths, messages, name, layer_names, remove_scope=remove_scope)
         elif name == "predrawn-rehydrate":
             _experiment_predrawn_rehydrate(paths, messages, name, layer_names, remove_scope=remove_scope)
-        elif name.startswith("predrawn-rehydrate-"):
-            _experiment_predrawn_rehydrate(paths, messages, name, layer_names, remove_scope=remove_scope)
-        elif name == "alt-refresh":
-            _experiment_alt_refresh(paths, messages, name, layer_names)
-        elif name.startswith("alt-"):
-            _experiment_alt_refresh(paths, messages, name, layer_names, variant=name.removeprefix("alt-"))
         else:
             started = time.perf_counter()
             refresh_all(paths, messages, layer_names=layer_names)
@@ -1224,6 +1169,20 @@ def run_redraw_experiment(paths, messages, experiment, layer_names=None, remove_
     except Exception as exc:
         _warn(messages, "EXPERIMENT", f"name={name} failed: {exc}")
         return False
+
+
+def _hide_non_ring_district_family(active_map):
+    """Hide district layers superseded by the active predrawn ring slot."""
+
+    names = {DISTRICTS, DISTRICT_PROSPERITY, DISTRICT_IDENTITY}
+    for layer in active_map.listLayers():
+        layer_name = getattr(layer, "name", "")
+        legacy_predrawn = _is_predrawn_district_layer_name(layer_name) and not _is_ring_slot_name(layer_name)
+        if layer_name in names or legacy_predrawn:
+            try:
+                layer.visible = False
+            except Exception:
+                pass
 
 
 def apply_simple_symbology(layer, key, messages):

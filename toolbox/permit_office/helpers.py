@@ -370,7 +370,12 @@ def _unique_known(values: Iterable[str], districts: dict[str, DistrictProfile]) 
     seen = set()
     out = []
     for value in values:
-        if value in districts and value not in seen:
+        try:
+            known = value in districts
+            already_seen = value in seen
+        except TypeError:
+            continue
+        if known and not already_seen:
             seen.add(value)
             out.append(value)
     return out

@@ -10,6 +10,11 @@ from dataclasses import dataclass
 
 import arcpy
 
+try:
+    from toolbox.permit_office import cache_keys, futures
+except ModuleNotFoundError:
+    from permit_office import cache_keys, futures
+
 from ._perf import perf_active, perf_block, perf_session
 from .geometry import (
     add_outputs_to_map,
@@ -51,6 +56,7 @@ from .store import (
 )
 from . import desk_model
 from .desk_view import DeskCallbacks, Palette, PermitDeskView, ReceiptModel, ReportTab, build_desk_model, receipt_metrics
+from .redraw_plan import hydrate_decision_redraw_plan, layer_names_for_plan
 
 
 WEEK_DEADLINE_SECONDS = 150
@@ -68,16 +74,11 @@ WORK_WEEK_DAYS = (
 WORK_DAY_SECONDS = WEEK_DEADLINE_SECONDS // len(WORK_WEEK_DAYS)
 MIDWEEK_MAP_REDRAW_DAYS = frozenset((2, 4))
 REDRAW_EXPERIMENT_ENV = "PERMIT_OFFICE_REDRAW_EXPERIMENT"
-DEFAULT_REDRAW_EXPERIMENT = "predrawn-rehydrate"
+DEFAULT_REDRAW_EXPERIMENT = "district-ring"
 REDRAW_BENCHMARK_VARIANTS = (
     ("default", ""),
-    ("predrawn-swap", "predrawn-swap"),
-    ("predrawn-swap-refresh", "predrawn-swap-refresh"),
+    ("district-ring", "district-ring"),
     ("predrawn-rehydrate", "predrawn-rehydrate"),
-    ("predrawn-rehydrate-smart-features", "predrawn-rehydrate-smart-features"),
-    ("predrawn-rehydrate-template-style", "predrawn-rehydrate-template-style"),
-    ("predrawn-rehydrate-refresh-hidden-first", "predrawn-rehydrate-refresh-hidden-first"),
-    ("hybrid-rehydrate-districts-swap-points", "hybrid-rehydrate-districts-swap-points"),
 )
 
 
@@ -228,6 +229,8 @@ class DashboardController:
         # selection-only reloads reuse the last computed grade.
         self._audit_grade = None
         self._grade_dirty = True
+        self._command_index = 0
+        self._future_cache = None
 
     def open(self):
         try:
@@ -863,6 +866,24 @@ class DashboardController:
                     districts = read_districts(self.paths)
                     active_features = read_active_features(self.paths)
                     projects = read_projects(self.paths)
+                future_hint = None
+                with perf_block("cache_lookup"):
+                    try:
+                        generation = cache_keys.GenerationToken(str(self.paths.get("workspace", "")), state.turn, self._command_index, state.turn)
+                        self._future_cache = futures.DecisionFutureCache(generation, game_id=generation.game_id, seed=self.seed)
+                        self._future_cache.build_one_ply(
+                            state,
+                            districts,
+                            [item],
+                            active_features,
+                            projects,
+                            spillover_provider=lambda _item: spillover,
+                        )
+                        future_hint = self._future_cache.lookup(self._future_cache.current_state_hash, item.item_id, action)
+                    except Exception as exc:
+                        future_hint = None
+                        self._future_cache = None
+                        _warn(self.messages, "CACHE", f"future cache lookup skipped: {exc}")
                 with perf_block("resolve"):
                     result = rules.resolve_decision(
                         state,
@@ -887,7 +908,14 @@ class DashboardController:
                     activated = activate_proposal(self.paths, item, result.report)
                 if not activated:
                     _warn(self.messages, "DASH", f"approved {item.item_id} but no proposed map feature was activated")
-                self._finish_decision(command_id, item, state, districts, projects, result, _decision_layer_names(item))
+                with perf_block("redraw_plan_hydration"):
+                    hydrated_plan = hydrate_decision_redraw_plan(result, future_hint)
+                self._finish_decision(command_id, item, state, districts, projects, result, _decision_layer_names(item), hydrated_plan)
+                with perf_block("future_invalidation"):
+                    if future_hint is not None:
+                        self._future_cache.promote_chosen(future_hint)
+                    self._command_index += 1
+                    self._future_cache = None
                 # state and districts are fully persisted here; active_features is
                 # re-read because activate_proposal mutated support rows in the GDB
                 # directly, and items is re-read because triage just reselected.
@@ -932,7 +960,9 @@ class DashboardController:
                 proposal_status = item.status if item.status in ("denied", "deferred") else "denied"
                 with perf_block("mark"):
                     mark_proposals(self.paths, item.item_id, proposal_status, result.report)
-                self._finish_decision(command_id, item, state, districts, projects, result, _decision_layer_names(item))
+                with perf_block("redraw_plan_hydration"):
+                    hydrated_plan = hydrate_decision_redraw_plan(result, feature_layer_key=_feature_layer_key_for_item(item))
+                self._finish_decision(command_id, item, state, districts, projects, result, _decision_layer_names(item), hydrated_plan)
                 # state and districts are fully persisted; active_features is re-read
                 # because mark_proposals mutated support rows in the GDB directly.
                 reload_kwargs = {"state": state, "districts": districts}
@@ -944,7 +974,7 @@ class DashboardController:
                 with perf_block("reload"):
                     self.reload(**reload_kwargs)
 
-    def _finish_decision(self, command_id, item, state, districts, projects, result, layer_names=None):
+    def _finish_decision(self, command_id, item, state, districts, projects, result, layer_names=None, hydrated_plan=None):
         """Persist a successful decision result and show its filed report."""
 
         filed_report = _filed_report_text(result, districts)
@@ -956,7 +986,17 @@ class DashboardController:
             write_docket_item(self.paths, item)
             action_log(self.paths, state, result)
             command_finish(self.paths, command_id, result.command_status, filed_report)
-        rebuild_output_layers(self.paths, self.messages, layer_names=layer_names, dirty_scope=DIRTY_DISTRICTS)
+        if hydrated_plan is not None:
+            rebuild_output_layers(
+                self.paths,
+                self.messages,
+                layer_names=layer_names_for_plan(hydrated_plan) or layer_names,
+                dirty_scope=DIRTY_DISTRICTS,
+                remove_scope_override=set(hydrated_plan.remove_readd_names),
+                redraw_experiment="district-ring" if hydrated_plan.requires_district_rehydrate else None,
+            )
+        else:
+            rebuild_output_layers(self.paths, self.messages, layer_names=layer_names, dirty_scope=DIRTY_DISTRICTS)
         self.district_layer = DISTRICTS
         self.status_var.set(filed_report)
         self._record_receipt(item.title, filed_report, result.affected_cell_ids, state)
@@ -1004,7 +1044,7 @@ class DashboardController:
                     grade, final_report = self._record_final_audit_receipt(state, districts, active_features, items)
                     report = f"Final audit already filed. Scorecard: {grade}."
                     command_finish(self.paths, command_id, "applied", report)
-                    rebuild_output_layers(self.paths, self.messages)
+                    rebuild_output_layers(self.paths, self.messages, remove_scope_override={DISTRICTS}, redraw_experiment="district-ring")
                     self.district_layer = DISTRICTS
                     self.status_var.set(report)
                     self._deadline_running = False
@@ -1015,6 +1055,7 @@ class DashboardController:
                     turn_result = rules.advance_turn_result(state, items, districts, active_features, projects)
                 report = turn_result.report
                 self._grade_dirty = True
+                generated_items = None
                 with perf_block("writes"):
                     write_state(self.paths, state)
                     write_projects(self.paths, projects)
@@ -1023,9 +1064,16 @@ class DashboardController:
                     for item in items:
                         write_docket_item(self.paths, item)
                     if state.status != "complete":
-                        generate_docket_rows(self.paths, self.seed, self.messages)
+                        generated_items = generate_docket_rows(self.paths, self.seed, self.messages)
                     command_finish(self.paths, command_id, "applied", report)
-                rebuild_output_layers(self.paths, self.messages)
+                redraw_layers = _week_close_redraw_layers(generated_items)
+                rebuild_output_layers(
+                    self.paths,
+                    self.messages,
+                    layer_names=redraw_layers,
+                    remove_scope_override=redraw_layers,
+                    redraw_experiment="district-ring",
+                )
                 self.district_layer = DISTRICTS
                 prefix = "Auto-deadline: " if auto else ""
                 if state.status == "complete":
@@ -1081,6 +1129,26 @@ DIRTY_DESK_ONLY = "desk"
 DIRTY_SELECTION_ONLY = "selection"
 DIRTY_DISTRICTS = "districts"
 FEATURE_READD_LAYERS = frozenset((POINTS,))
+WEEK_CLOSE_READD_LAYERS = frozenset((DISTRICTS, POINTS, LINES, ZONES))
+GEOMETRY_LAYER_BY_TYPE = {
+    "POINT": POINTS,
+    "LINE": LINES,
+    "POLYGON": ZONES,
+    "ZONE": ZONES,
+}
+
+
+def _week_close_redraw_layers(generated_items):
+    """Return precise week-close redraw layers, falling back broad if unknown."""
+
+    if generated_items is None:
+        return WEEK_CLOSE_READD_LAYERS
+    layers = {DISTRICTS}
+    for item in generated_items:
+        layer = GEOMETRY_LAYER_BY_TYPE.get(str(getattr(item, "geometry_type", "")).upper())
+        if layer:
+            layers.add(layer)
+    return frozenset(layers)
 REDRAW_BENCHMARK_SCOPES = (
     ("districts", frozenset((DISTRICTS,)), DIRTY_DISTRICTS),
     ("districts+points", frozenset((DISTRICTS, POINTS)), DIRTY_DISTRICTS),
@@ -1120,6 +1188,14 @@ def _decision_layer_names(item):
     if feature_layer is None:
         return None
     return {DISTRICTS, feature_layer}
+
+
+def _feature_layer_key_for_item(item):
+    return {
+        "POINT": "points",
+        "LINE": "lines",
+        "POLYGON": "zones",
+    }.get(getattr(item, "geometry_type", None), "")
 
 
 def _normalize_layer_names(layer_names):
@@ -1163,7 +1239,7 @@ def _redraw_plan(layer_names=None, force_readd=False, dirty_scope=None):
     return RedrawPlan("refresh-only", effective_names or frozenset())
 
 
-def rebuild_output_layers(paths, messages, layer_names=None, force_readd=False, dirty_scope=None):
+def rebuild_output_layers(paths, messages, layer_names=None, force_readd=False, dirty_scope=None, remove_scope_override=None, redraw_experiment=None):
     """Refresh (or, when forced, recreate) map layers after GDB edits.
 
     layer_names: optional iterable restricting the work to those names. None
@@ -1172,11 +1248,12 @@ def rebuild_output_layers(paths, messages, layer_names=None, force_readd=False, 
     force_readd: remove and re-add *every* in-scope layer from scratch. Needed
     when the layer set or symbology changes (e.g. a new game).
 
-    The default district path is predrawn-rehydrate: a hidden district snapshot is
-    re-added from the GDB, symbolized, then made visible. This preserves the
-    district re-add correctness requirement while avoiding the full district
-    family remove/add cycle on every decision. ``force_readd=True`` still uses the
-    full legacy path when the layer set or symbology changes.
+    The default district path is district-ring: one numeric predrawn district
+    slot is re-added from the GDB, symbolized, made visible, then refreshed.
+    This preserves the district re-add correctness requirement while avoiding
+    the full district family remove/add cycle on every decision.
+    ``force_readd=True`` still uses the full legacy path when the layer set or
+    symbology changes.
     """
 
     plan = _redraw_plan(layer_names=layer_names, force_readd=force_readd, dirty_scope=dirty_scope)
@@ -1192,9 +1269,9 @@ def rebuild_output_layers(paths, messages, layer_names=None, force_readd=False, 
         scope = "all" if effective_layer_names is None else f"targeted={sorted(effective_layer_names)}"
         dirty = dirty_scope or "layers"
         _log(messages, "REBUILD", f"{scope} mode={mode} dirty={dirty}")
-        experiment = _configured_redraw_experiment() or _default_redraw_experiment(plan, force_readd=force_readd)
+        experiment = _configured_redraw_experiment() or redraw_experiment or _default_redraw_experiment(plan, force_readd=force_readd)
         if experiment:
-            remove_scope = None if plan.remove_scope is None else set(plan.remove_scope)
+            remove_scope = set(remove_scope_override) if remove_scope_override is not None else None if plan.remove_scope is None else set(plan.remove_scope)
             with perf_block(f"experiment_{experiment}"):
                 handled = run_redraw_experiment(
                     paths,
@@ -1208,10 +1285,10 @@ def rebuild_output_layers(paths, messages, layer_names=None, force_readd=False, 
             if handled:
                 return plan
             _warn(messages, "REBUILD", f"{experiment} failed; falling back to {mode}")
-        if plan.remove_scope is not None or plan.mode == "force-readd":
-            remove_scope = None if plan.remove_scope is None else set(plan.remove_scope)
+        fallback_remove_scope = set(remove_scope_override) if remove_scope_override is not None else None if plan.remove_scope is None else set(plan.remove_scope)
+        if fallback_remove_scope is not None or plan.mode == "force-readd":
             with perf_block("remove"):
-                remove_outputs_from_map(messages, layer_names=remove_scope)
+                remove_outputs_from_map(messages, layer_names=fallback_remove_scope)
         with perf_block("add"):
             add_outputs_to_map(paths, messages, layer_names=effective_layer_names)
         with perf_block("refresh"):

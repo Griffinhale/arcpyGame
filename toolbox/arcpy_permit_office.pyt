@@ -18,25 +18,45 @@ _HERE = os.path.dirname(__file__)
 if _HERE not in sys.path:
     sys.path.insert(0, _HERE)
 
+
+def _module_is_from_this_toolbox(module):
+    """Return True when an already-imported helper module belongs to this .pyt."""
+
+    module_file = os.path.abspath(getattr(module, "__file__", "") or "")
+    toolbox_root = os.path.abspath(_HERE)
+    return module_file.startswith(toolbox_root + os.sep)
+
+
 for _module_name in (
+    "permit_office",
+    "permit_office.cache_keys",
+    "permit_office.dirty",
+    "permit_office.futures",
+    "permit_office.materialized",
+    "permit_office_arcgis",
     "permit_office_arcgis.rules_loader",
     "permit_office_arcgis.schema",
     "permit_office_arcgis.messages",
     "permit_office_arcgis._perf",
     "permit_office_arcgis.store",
     "permit_office_arcgis.symbology_config",
+    "permit_office_arcgis.layer_ring",
     "permit_office_arcgis.geometry",
+    "permit_office_arcgis.redraw_plan",
     "permit_office_arcgis.desk_model",
     "permit_office_arcgis.desk_view",
     "permit_office_arcgis.dashboard",
 ):
     _module = sys.modules.get(_module_name)
     if _module is not None:
-        importlib.reload(_module)
+        if _module_is_from_this_toolbox(_module):
+            importlib.reload(_module)
+        else:
+            sys.modules.pop(_module_name, None)
 
 from permit_office_arcgis import _perf
 from permit_office_arcgis.dashboard import DashboardController, REDRAW_EXPERIMENT_ENV, has_saved_game, prepare_dashboard_session, run_redraw_benchmark
-from permit_office_arcgis.geometry import output_layers_present
+from permit_office_arcgis.geometry import ensure_active_map, output_layers_present
 from permit_office_arcgis.schema import (
     P_OUTPUT,
     P_PERF,
@@ -107,22 +127,8 @@ class PermitOfficePrototype(object):
         p_redraw.filter.type = "ValueList"
         p_redraw.filter.list = [
             "None",
-            "volatile-overlay",
-            "predrawn-swap",
-            "predrawn-swap-refresh",
+            "district-ring",
             "predrawn-rehydrate",
-            "predrawn-rehydrate-smart-features",
-            "predrawn-rehydrate-style-cache",
-            "predrawn-rehydrate-template-style",
-            "predrawn-rehydrate-refresh-hidden-first",
-            "predrawn-rehydrate-refresh-visible-first",
-            "hybrid-rehydrate-districts-swap-points",
-            "alt-refresh",
-            "alt-definition-query",
-            "alt-visibility",
-            "alt-cim",
-            "alt-symbology",
-            "alt-make-feature-layer",
         ]
         p_redraw.value = "None"
         p_benchmark = arcpy.Parameter(
@@ -148,6 +154,7 @@ class PermitOfficePrototype(object):
             os.environ.pop(REDRAW_EXPERIMENT_ENV, None)
         gdb_path = resolve_workspace(parameters[P_WORKSPACE].value, messages)
         paths = ensure_schema(gdb_path, messages)
+        ensure_active_map(messages)
         # Detect an empty map BEFORE adding any layers: a save in this workspace
         # with no Permit Office layers on the map opens to a fresh-start prompt
         # instead of silently resuming the old board.
