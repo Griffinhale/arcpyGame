@@ -63,3 +63,32 @@ def test_hydrated_redraw_plan_routes_line_and_zone_feature_layers():
     assert zone.refresh_names == frozenset({"PermitZones"})
     assert line.remove_readd_names == frozenset({"PermitDistricts", "PermitLines"})
     assert zone.remove_readd_names == frozenset({"PermitDistricts", "PermitZones"})
+
+
+def test_hydrated_redraw_plan_keeps_clean_feature_layer_out_of_readd_scope():
+    """Verify actual command effects can override speculative feature hints."""
+
+    hint = futures.DecisionFutureNode(
+        "parent",
+        "approve",
+        "CASE-1",
+        "result",
+        cache_keys.GenerationToken("game-1", 1, 0, 1),
+        dirty_layer_bits=dirty.DISTRICTS | dirty.POINTS,
+        redraw_plan={"feature_layer_key": "points"},
+    )
+    actual = rules.DecisionResult(
+        True,
+        "approve",
+        "CASE-1",
+        "approved",
+        affected_cell_ids=["D0001"],
+        district_deltas={"D0001": {"trust": 1}},
+    )
+
+    plan = redraw_plan.hydrate_decision_redraw_plan(actual, hint, feature_layer_dirty=False)
+
+    assert plan.dirty_layer_bits & dirty.DISTRICTS
+    assert not plan.dirty_layer_bits & dirty.POINTS
+    assert plan.refresh_names == frozenset()
+    assert plan.remove_readd_names == frozenset({"PermitDistricts"})

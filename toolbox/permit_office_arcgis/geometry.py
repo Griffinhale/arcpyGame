@@ -1096,7 +1096,8 @@ def _feature_layer_scope(layer_names):
     return set(layer_names) & feature_layers
 
 
-def _refresh_feature_scope(paths, messages, layer_names, remove_scope=None):
+def _refresh_feature_scope(paths, messages, layer_names, remove_scope=None, phase_marker=None):
+    phase_marker = phase_marker or (lambda _name: None)
     feature_scope = _feature_layer_scope(layer_names)
     if not feature_scope:
         return
@@ -1105,12 +1106,16 @@ def _refresh_feature_scope(paths, messages, layer_names, remove_scope=None):
     for layer_name in sorted(readd_scope):
         if not _rehydrate_feature_display_ring(paths, messages, layer_name):
             fallback_readd.add(layer_name)
+        phase_marker(f"feature_{layer_name}_ring")
     if fallback_readd:
         remove_outputs_from_map(messages, layer_names=fallback_readd)
         add_outputs_to_map(paths, messages, layer_names=fallback_readd)
+        phase_marker("feature_fallback_readd")
     refresh_scope = (feature_scope - readd_scope) | fallback_readd
     if refresh_scope:
         refresh_all(paths, messages, layer_names=refresh_scope)
+        for layer_name in sorted(refresh_scope):
+            phase_marker(f"feature_{layer_name}_refresh")
 
 
 def _rehydrate_feature_display_ring(paths, messages, layer_name):
@@ -1202,7 +1207,7 @@ def _experiment_predrawn_rehydrate(paths, messages, name, layer_names, remove_sc
         phases.mark("seed_visible_snapshot")
         arcpy.RefreshLayer(PREDRAWN_ACTIVE_LAYER)
         phases.mark("RefreshLayer")
-        _refresh_feature_scope(paths, messages, layer_names, remove_scope=remove_scope)
+        _refresh_feature_scope(paths, messages, layer_names, remove_scope=remove_scope, phase_marker=phases.mark)
         phases.mark("feature_layers")
         _log_experiment(messages, name, "predrawn-rehydrate", "seeded", started, f"target={PREDRAWN_ACTIVE_LAYER!r} {phases.summary()}")
         return
@@ -1223,7 +1228,7 @@ def _experiment_predrawn_rehydrate(paths, messages, name, layer_names, remove_sc
     arcpy.RefreshLayer(hidden_name)
     _PREDRAWN_REHYDRATE_LAST_TARGET = hidden_name
     phases.mark("RefreshLayer")
-    _refresh_feature_scope(paths, messages, layer_names, remove_scope=remove_scope)
+    _refresh_feature_scope(paths, messages, layer_names, remove_scope=remove_scope, phase_marker=phases.mark)
     phases.mark("feature_layers")
     _log_experiment(messages, name, "predrawn-rehydrate", "ok", started, f"target={hidden_name!r} {phases.summary()}")
 
@@ -1245,7 +1250,7 @@ def _experiment_district_ring(paths, messages, name, layer_names, remove_scope=N
     phases.mark("prepare_visibility_swap")
     _hide_non_ring_district_family(active_map)
     phases.mark("hide_base_districts")
-    _refresh_feature_scope(paths, messages, layer_names, remove_scope=remove_scope)
+    _refresh_feature_scope(paths, messages, layer_names, remove_scope=remove_scope, phase_marker=phases.mark)
     phases.mark("feature_layers")
     _log_experiment(messages, name, "district-ring", "ok", started, f"target={getattr(prepared, 'name', '')!r} {phases.summary()}")
 

@@ -36,15 +36,23 @@ class HydratedRedrawPlan:
     ring_policy: str = "known-good-spare"
 
 
-def hydrate_decision_redraw_plan(result, future_hint=None, *, feature_layer_key: str = "") -> HydratedRedrawPlan:
+def hydrate_decision_redraw_plan(
+    result,
+    future_hint=None,
+    *,
+    feature_layer_key: str = "",
+    feature_layer_dirty: bool = True,
+) -> HydratedRedrawPlan:
     """Return redraw intent, trusting actual result fields over cache hints."""
 
     hint_bits = int(getattr(future_hint, "dirty_layer_bits", 0) or 0)
     hinted_layer = feature_layer_key or _hint_feature_layer(future_hint)
-    feature_layer = _feature_layer_name(hinted_layer)
+    feature_layer = _feature_layer_name(hinted_layer) if feature_layer_dirty else ""
     affected = tuple(getattr(result, "affected_cell_ids", ()) or ())
     feature_ids = tuple(sorted((getattr(result, "feature_updates", {}) or {}).keys()))
     dirty_bits = hint_bits | dirty.DISTRICTS
+    if not feature_layer_dirty:
+        dirty_bits &= ~(dirty.POINTS | dirty.LINES | dirty.ZONES)
     if feature_layer:
         dirty_bits |= _feature_dirty_bit(hinted_layer)
     refresh = frozenset({feature_layer} if feature_layer else ())

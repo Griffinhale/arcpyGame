@@ -615,6 +615,24 @@ def test_refresh_feature_scope_uses_feature_ring_for_features_in_remove_scope(mo
     ]
 
 
+def test_refresh_feature_scope_marks_each_feature_layer_phase(monkeypatch):
+    """Verify live logs can split feature ring cost by support layer."""
+
+    marks = []
+    monkeypatch.setattr(geometry, "_rehydrate_feature_display_ring", lambda paths, messages, layer_name: True)
+    monkeypatch.setattr(geometry, "refresh_all", lambda *args, **kwargs: None)
+
+    geometry._refresh_feature_scope(
+        _paths(),
+        CapturingMessages(),
+        layer_names={geometry.POINTS, geometry.LINES},
+        remove_scope={geometry.POINTS},
+        phase_marker=marks.append,
+    )
+
+    assert marks == ["feature_PermitPoints_ring", "feature_PermitLines_refresh"]
+
+
 def test_refresh_feature_scope_falls_back_to_readd_when_feature_ring_fails(monkeypatch):
     """Verify feature ring failures keep the old safe remove/add path."""
 

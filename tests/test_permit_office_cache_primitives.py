@@ -74,6 +74,20 @@ def test_generation_tokens_match_by_lifetime():
     assert not generation.matches(cache_keys.GenerationToken("game-2", 3, 7, 2), cache_keys.CacheLifetime.GAME)
 
 
+def test_state_fingerprint_sanitizes_live_object_mapping_pairs():
+    """Verify cache hashing tolerates malformed live-state mapping data."""
+
+    feature = rules.FeatureInstance("F-1", "street_vendor_compact", target_cell_ids=["D0000"], status="active")
+    state = rules.CityState(turn=2)
+    state.pending_followups = [(feature, {"pressure": 1})]
+    districts = {"D0000": _district("D0000")}
+
+    first = cache_keys.state_fingerprint(state, districts, [], [feature], game_id="game-1")
+    second = cache_keys.state_fingerprint(state, districts, [], [feature], game_id="game-1")
+
+    assert first.rules_hash == second.rules_hash
+
+
 def test_dirty_bitsets_round_trip_cell_ids_and_layer_names():
     index = dirty.DistrictBitIndex.from_cell_ids(["D0002", "D0000", "D0001"])
     bits = index.to_bits(["D0001", "D0000", "missing", "D0000"])

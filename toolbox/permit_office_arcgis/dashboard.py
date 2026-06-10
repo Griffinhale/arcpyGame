@@ -909,7 +909,12 @@ class DashboardController:
                 if not activated:
                     _warn(self.messages, "DASH", f"approved {item.item_id} but no proposed map feature was activated")
                 with perf_block("redraw_plan_hydration"):
-                    hydrated_plan = hydrate_decision_redraw_plan(result, future_hint)
+                    hydrated_plan = hydrate_decision_redraw_plan(
+                        result,
+                        future_hint,
+                        feature_layer_key=_feature_layer_key_for_item(item),
+                        feature_layer_dirty=bool(activated or result.feature_updates),
+                    )
                 self._finish_decision(command_id, item, state, districts, projects, result, _decision_layer_names(item), hydrated_plan)
                 with perf_block("future_invalidation"):
                     if future_hint is not None:
@@ -961,7 +966,11 @@ class DashboardController:
                 with perf_block("mark"):
                     mark_proposals(self.paths, item.item_id, proposal_status, result.report)
                 with perf_block("redraw_plan_hydration"):
-                    hydrated_plan = hydrate_decision_redraw_plan(result, feature_layer_key=_feature_layer_key_for_item(item))
+                    hydrated_plan = hydrate_decision_redraw_plan(
+                        result,
+                        feature_layer_key=_feature_layer_key_for_item(item),
+                        feature_layer_dirty=True,
+                    )
                 self._finish_decision(command_id, item, state, districts, projects, result, _decision_layer_names(item), hydrated_plan)
                 # state and districts are fully persisted; active_features is re-read
                 # because mark_proposals mutated support rows in the GDB directly.
